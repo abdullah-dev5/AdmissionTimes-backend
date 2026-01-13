@@ -5,6 +5,13 @@
     "lib": ["ES2020"],
     "outDir": "./dist",
     "rootDir": "./src",
+    "baseUrl": "src",
+    "paths": {
+      "@domain/*": ["domain/*"],
+      "@shared/*": ["shared/*"],
+      "@config/*": ["config/*"],
+      "@db/*": ["database/*"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

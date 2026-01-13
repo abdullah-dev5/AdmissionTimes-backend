@@ -60,7 +60,7 @@ export const sendError = (
  * 
  * @param res - Express response object
  * @param data - Array of data items
- * @param pagination - Pagination metadata
+ * @param pagination - Pagination metadata (includes hasNext and hasPrev)
  * @param message - Success message
  * @param statusCode - HTTP status code (default: 200)
  */
@@ -72,6 +72,8 @@ export const sendPaginated = (
     limit: number;
     total: number;
     totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
   },
   message: string = 'Success',
   statusCode: number = 200
