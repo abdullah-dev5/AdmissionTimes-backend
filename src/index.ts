@@ -9,6 +9,7 @@ import express, { Application, Request, Response } from 'express';
 import { config } from './config/config';
 import { errorHandler } from './middleware/errorHandler';
 import { sendSuccess } from './utils/response';
+import { initializePool, testConnection, closePool } from './database/connection';
 
 // Initialize Express application
 const app: Application = express();
@@ -41,13 +42,39 @@ app.use((_req: Request, res: Response) => {
 // Global error handler (must be last)
 app.use(errorHandler);
 
+// Initialize database connection
+initializePool();
+
 // Start server
 const PORT = config.port || 3000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`📍 Environment: ${config.env}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  
+  // Test database connection on startup
+  const dbConnected = await testConnection();
+  if (!dbConnected) {
+    console.error('⚠️  Warning: Database connection test failed. Some features may not work.');
+  }
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  server.close(async () => {
+    await closePool();
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT received, shutting down gracefully...');
+  server.close(async () => {
+    await closePool();
+    process.exit(0);
+  });
 });
 
 export default app;

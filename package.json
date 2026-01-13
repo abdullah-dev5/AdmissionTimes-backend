@@ -22,12 +22,15 @@
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
     "dotenv": "^17.2.3",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.3",
+    "@types/pg": "^8.16.0",
     "nodemon": "^3.1.11",
+    "supabase": "^2.71.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

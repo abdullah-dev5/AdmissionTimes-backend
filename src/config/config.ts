@@ -24,14 +24,15 @@ export const config = {
   // CORS configuration
   corsOrigin: process.env.CORS_ORIGIN || '*',
   
-  // Database configuration (to be added when database is chosen)
-  // database: {
-  //   host: process.env.DB_HOST || 'localhost',
-  //   port: parseInt(process.env.DB_PORT || '5432', 10),
-  //   name: process.env.DB_NAME || 'admission_times',
-  //   user: process.env.DB_USER || 'postgres',
-  //   password: process.env.DB_PASSWORD || '',
-  // },
+  // Database configuration (Supabase Local)
+  database: {
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT || '54322', 10),
+    name: process.env.DB_NAME || 'postgres',
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'postgres',
+    poolMax: parseInt(process.env.DB_POOL_MAX || '20', 10),
+  },
   
   // JWT configuration (to be added when authentication is implemented)
   // jwt: {
