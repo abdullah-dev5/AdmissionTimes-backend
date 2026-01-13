@@ -6,10 +6,12 @@
  */
 
 import express, { Application, Request, Response } from 'express';
-import { config } from './config/config';
-import { errorHandler } from './middleware/errorHandler';
-import { sendSuccess } from './utils/response';
-import { initializePool, testConnection, closePool } from './database/connection';
+import { config } from '@config/config';
+import { errorHandler } from '@shared/middleware/errorHandler';
+import { sendSuccess } from '@shared/utils/response';
+import { initializePool, testConnection, closePool } from '@db/connection';
+import { mockAuth } from '@shared/middleware/auth';
+import { registerDomains } from '@domain/index';
 
 // Initialize Express application
 const app: Application = express();
@@ -17,6 +19,11 @@ const app: Application = express();
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// ⚠️ AUTH DISABLED — placeholder only
+// This middleware attaches user context but does not validate or block requests
+// Will be replaced with real Supabase Auth in future phase
+app.use(mockAuth);
 
 // Health check endpoint
 app.get('/health', (_req: Request, res: Response) => {
@@ -26,8 +33,8 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-// API routes will be added here
-// app.use('/api/v1', routes);
+// Register all domain routes
+registerDomains(app);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
