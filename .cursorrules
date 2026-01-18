@@ -69,6 +69,21 @@
 - Close database connections properly
 - Use prepared statements/parameterized queries
 
+## Database Seeding Best Practices
+- Create idempotent seed scripts (safe to run multiple times)
+- Use transactions to ensure atomic operations (rollback on error)
+- Track seeded data to prevent duplicates (use seed_tracking table or ON CONFLICT)
+- Maintain referential integrity (seed parent tables before child tables)
+- Use realistic but fake data for development
+- Support environment-specific seeding (dev/staging/prod)
+- Organize seeds by domain/table (separate files for maintainability)
+- Provide reset/clear functionality for development
+- Use batch inserts for performance when seeding large datasets
+- Document seed data structure and relationships
+- Never seed production databases with test data
+- Keep seed data in version control (supabase/seeds/)
+- Use TypeScript for complex seeds with relationships, SQL for simple static data
+
 ## Validation & Data Handling
 - Validate all input data at the API boundary (routes/middleware)
 - Use validation libraries (Joi, express-validator, zod) for schema validation

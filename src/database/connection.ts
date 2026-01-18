@@ -13,7 +13,11 @@
  */
 
 import { Pool, PoolClient, QueryResult } from 'pg';
+import dns from 'dns';
 import { config } from '../config/config';
+
+// Configure DNS to prefer IPv4 (helps with Windows DNS resolution issues)
+dns.setDefaultResultOrder('ipv4first');
 
 /**
  * PostgreSQL connection pool instance
@@ -41,6 +45,21 @@ export const initializePool = (): void => {
     throw new Error('Database configuration is missing. Please check your environment variables.');
   }
 
+  // Debug: Log connection details (development only)
+  if (config.env === 'development') {
+    console.log('🔍 Database connection config:');
+    console.log(`   Host: ${config.database.host}`);
+    console.log(`   Port: ${config.database.port}`);
+    console.log(`   User: ${config.database.user}`);
+    console.log(`   Database: ${config.database.name}`);
+  }
+
+  // Determine if SSL is required (Supabase Cloud requires SSL)
+  // For Supabase Local (localhost), SSL is not required
+  // For Supabase Cloud (contains 'supabase.co'), SSL is required
+  const requiresSSL = config.database.host.includes('supabase.co') || 
+                      config.database.host.includes('pooler.supabase.com');
+
   pool = new Pool({
     host: config.database.host,
     port: config.database.port,
@@ -49,7 +68,11 @@ export const initializePool = (): void => {
     password: config.database.password,
     max: config.database.poolMax || 20, // Maximum number of clients in the pool
     idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-    connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection cannot be established
+    connectionTimeoutMillis: 10000, // Return an error after 10 seconds if connection cannot be established
+    // SSL configuration for Supabase Cloud
+    ssl: requiresSSL ? {
+      rejectUnauthorized: false // Supabase uses self-signed certificates
+    } : false,
   });
 
   // Handle pool errors

@@ -239,8 +239,9 @@ CREATE INDEX idx_changelogs_admission_created ON changelogs(admission_id, create
 CREATE INDEX idx_deadlines_admission_id ON deadlines(admission_id);
 CREATE INDEX idx_deadlines_deadline_date ON deadlines(deadline_date);
 CREATE INDEX idx_deadlines_type_date ON deadlines(deadline_type, deadline_date);
--- Composite index for upcoming deadlines
-CREATE INDEX idx_deadlines_upcoming ON deadlines(deadline_date, reminder_sent) WHERE deadline_date > NOW() AND reminder_sent = false;
+-- Composite index for upcoming deadlines (removed NOW() predicate as it's not immutable)
+-- Note: Filter by deadline_date > CURRENT_TIMESTAMP in queries instead
+CREATE INDEX idx_deadlines_upcoming ON deadlines(deadline_date, reminder_sent) WHERE reminder_sent = false;
 
 -- Notifications indexes (5 indexes)
 CREATE INDEX idx_notifications_user_id ON notifications(user_id) WHERE user_id IS NOT NULL;
