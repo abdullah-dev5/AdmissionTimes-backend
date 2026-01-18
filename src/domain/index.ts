@@ -12,6 +12,12 @@
 
 import { Application } from 'express';
 import admissionsRoutes from './admissions/routes/admissions.routes';
+import notificationsRoutes from './notifications/routes/notifications.routes';
+import deadlinesRoutes from './deadlines/routes/deadlines.routes';
+import userActivityRoutes from './user-activity/routes/user-activity.routes';
+import usersRoutes from './users/routes/users.routes';
+import analyticsRoutes from './analytics/routes/analytics.routes';
+import changelogsRoutes from './changelogs/routes/changelogs.routes';
 
 /**
  * Registers all domain routes with the Express application
@@ -19,11 +25,16 @@ import admissionsRoutes from './admissions/routes/admissions.routes';
  * @param app - Express application instance
  */
 export function registerDomains(app: Application): void {
-  // Admissions Domain
+  // Admissions Domain (Core)
   app.use('/api/v1/admissions', admissionsRoutes);
   
-  // Future domains can be added here:
-  // app.use('/api/v1/users', usersRoutes);
-  // app.use('/api/v1/analytics', analyticsRoutes);
-  // app.use('/api/v1/notifications', notificationsRoutes);
+  // Supporting Domains (Phase 4A)
+  app.use('/api/v1/notifications', notificationsRoutes);
+  app.use('/api/v1/deadlines', deadlinesRoutes);
+  app.use('/api/v1/activity', userActivityRoutes);
+  
+  // Core Domains (Phase 4B)
+  app.use('/api/v1/users', usersRoutes);
+  app.use('/api/v1/analytics', analyticsRoutes);
+  app.use('/api/v1/changelogs', changelogsRoutes);
 }
