@@ -242,14 +242,22 @@ The project uses **PostgreSQL** via Supabase Cloud with:
 
 ## 📖 Documentation
 
-Comprehensive project documentation is available in the `project-docs/` directory:
+Comprehensive project documentation is available in:
 
+**Project Documentation (`project-docs/`):**
 - **index.md** - Documentation index
 - **overview.md** - Project overview and objectives
 - **requirements.md** - System requirements and features
 - **tech-specs.md** - Technical specifications
 - **user-structure.md** - User flow and project structure
 - **timeline.md** - Project timeline and progress
+- **backend-architecture.md** - Complete backend architecture blueprint
+- **achievements-summary.md** - Summary of completed work
+
+**Phase Documentation (`phases/`):**
+- Phase reports and implementation summaries
+- Roadmaps and planning documents
+- See `phases/README.md` for complete list
 
 
 ## 🏗️ Architecture
