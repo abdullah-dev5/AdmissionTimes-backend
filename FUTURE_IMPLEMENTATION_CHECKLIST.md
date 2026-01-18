@@ -1085,21 +1085,74 @@
 
 ---
 
-### 35. Search Enhancements ⏸️ **LOW PRIORITY**
+### 35. Advanced Search (Full-Text Search) ⏸️ **MEDIUM PRIORITY**
 
-**Status:** Basic search exists  
-**Priority:** Low  
-**Estimated Effort:** 1-2 weeks
+**Status:** Basic ILIKE search exists  
+**Priority:** Medium  
+**Estimated Effort:** 3-4 days  
+**Deferred from:** Phase 5
+
+#### Why Advanced Search
+
+Current search uses simple `ILIKE` queries. Advanced Search adds:
+- **PostgreSQL Full-Text Search** for better relevance
+- **Search ranking** by relevance
+- **Multi-field search** with weighted fields
+- **Search suggestions** (future)
+- **Fuzzy matching** (future)
 
 #### Implementation Checklist
 
-- [ ] **Advanced Search**
-  - [ ] Full-text search (PostgreSQL)
-  - [ ] Search ranking
-  - [ ] Search suggestions
-  - [ ] Search history
+- [ ] **Database Migration**
+  - [ ] Add `tsvector` column to admissions table
+  - [ ] Create function to update search_vector
+  - [ ] Create trigger to auto-update search_vector
+  - [ ] Create GIN index for fast full-text search
+  - [ ] Update existing records
 
-**Note:** May require Elasticsearch for advanced features (future).
+- [ ] **Admissions Model Updates**
+  - [ ] Add `useFullTextSearch` parameter to `buildFindManyQuery`
+  - [ ] Implement full-text search query when `search` parameter provided
+  - [ ] Add `ts_rank()` for relevance ranking
+  - [ ] Fallback to ILIKE if full-text search fails (backward compatibility)
+  - [ ] Order by relevance when using full-text search
+
+- [ ] **Admissions Service Updates**
+  - [ ] Add `useFullTextSearch` option to `getAdmissions` method
+  - [ ] Default to full-text search when search term provided
+  - [ ] Fallback to ILIKE if full-text search returns no results
+
+- [ ] **Types & Validators Updates**
+  - [ ] Add `use_fulltext_search?: boolean` to `AdmissionQueryParams`
+  - [ ] Add `rank?: number` to `Admission` interface (optional, for search results)
+  - [ ] Add `use_fulltext_search` boolean field to `admissionQuerySchema`
+
+- [ ] **Constants Updates**
+  - [ ] Add `FULLTEXT_SEARCH_ENABLED` constant
+  - [ ] Add search configuration constants
+
+- [ ] **Swagger Documentation**
+  - [ ] Update existing GET /api/v1/admissions documentation
+  - [ ] Add `use_fulltext_search` parameter
+  - [ ] Add search ranking information
+  - [ ] Update `Admission` schema (add optional `rank` field)
+
+**Field Weights:**
+- `title`: Weight A (highest)
+- `field_of_study`: Weight B
+- `description`: Weight C
+- `location`, `campus`: Weight D (lowest)
+
+**Success Criteria:**
+- ✅ Full-text search migration applied
+- ✅ Search vector automatically updated on admission create/update
+- ✅ Full-text search working with relevance ranking
+- ✅ Backward compatibility maintained (ILIKE fallback)
+- ✅ Search results ordered by relevance
+- ✅ Swagger documentation updated
+- ✅ Performance acceptable (indexed search)
+
+**Note:** Deferred from Phase 5 to focus on Watchlists and User Preferences domains first.
 
 ---
 

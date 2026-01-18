@@ -548,6 +548,148 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        Watchlist: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+              example: '123e4567-e89b-12d3-a456-426614174000',
+            },
+            user_id: {
+              type: 'string',
+              format: 'uuid',
+              example: '123e4567-e89b-12d3-a456-426614174000',
+              description: 'User who added to watchlist',
+            },
+            admission_id: {
+              type: 'string',
+              format: 'uuid',
+              example: '123e4567-e89b-12d3-a456-426614174000',
+              description: 'Admission being watched',
+            },
+            notes: {
+              type: 'string',
+              nullable: true,
+              maxLength: 5000,
+              example: 'Interested in this program',
+              description: 'Optional user notes about this admission',
+            },
+            created_at: {
+              type: 'string',
+              format: 'date-time',
+              example: '2025-01-15T10:30:00Z',
+            },
+            updated_at: {
+              type: 'string',
+              format: 'date-time',
+              example: '2025-01-15T10:30:00Z',
+            },
+          },
+        },
+        UserPreferences: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+              example: '123e4567-e89b-12d3-a456-426614174000',
+            },
+            user_id: {
+              type: 'string',
+              format: 'uuid',
+              example: '123e4567-e89b-12d3-a456-426614174000',
+            },
+            email_notifications_enabled: {
+              type: 'boolean',
+              example: true,
+              description: 'Enable/disable email notifications',
+            },
+            email_frequency: {
+              type: 'string',
+              enum: ['immediate', 'daily', 'weekly', 'never'],
+              example: 'daily',
+              description: 'How often to send email notifications',
+            },
+            push_notifications_enabled: {
+              type: 'boolean',
+              example: true,
+              description: 'Enable/disable push notifications',
+            },
+            notification_categories: {
+              type: 'object',
+              properties: {
+                verification: {
+                  type: 'boolean',
+                  example: true,
+                },
+                deadline: {
+                  type: 'boolean',
+                  example: true,
+                },
+                system: {
+                  type: 'boolean',
+                  example: false,
+                },
+                update: {
+                  type: 'boolean',
+                  example: true,
+                },
+              },
+              description: 'Category-specific notification preferences',
+            },
+            language: {
+              type: 'string',
+              enum: ['en', 'ar', 'fr', 'es'],
+              example: 'en',
+              description: 'Preferred language',
+            },
+            timezone: {
+              type: 'string',
+              maxLength: 50,
+              example: 'America/New_York',
+              description: 'User timezone',
+            },
+            theme: {
+              type: 'string',
+              enum: ['light', 'dark', 'auto'],
+              example: 'light',
+              description: 'UI theme preference',
+            },
+            created_at: {
+              type: 'string',
+              format: 'date-time',
+              example: '2025-01-15T10:30:00Z',
+            },
+            updated_at: {
+              type: 'string',
+              format: 'date-time',
+              example: '2025-01-15T10:30:00Z',
+            },
+          },
+        },
+        NotificationCategories: {
+          type: 'object',
+          properties: {
+            verification: {
+              type: 'boolean',
+              example: true,
+            },
+            deadline: {
+              type: 'boolean',
+              example: true,
+            },
+            system: {
+              type: 'boolean',
+              example: false,
+            },
+            update: {
+              type: 'boolean',
+              example: true,
+            },
+          },
+          description: 'Category-specific notification preferences',
+        },
       },
     },
     tags: [
@@ -578,6 +720,14 @@ const options: swaggerJsdoc.Options = {
       {
         name: 'Changelogs',
         description: 'Changelogs endpoints - Immutable audit trail access with advanced filtering',
+      },
+      {
+        name: 'Watchlists',
+        description: 'Watchlists endpoints - User watchlists for tracking admissions of interest',
+      },
+      {
+        name: 'User Preferences',
+        description: 'User preferences endpoints - Customize user experience and notification settings',
       },
       {
         name: 'Health',
