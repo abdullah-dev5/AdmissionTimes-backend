@@ -160,6 +160,17 @@
 - Include code examples in documentation
 - Document database schema and relationships
 - Keep README.md updated with setup and usage instructions
+- **API Documentation (Swagger/OpenAPI):**
+  - All API endpoints must be documented with Swagger/OpenAPI JSDoc comments
+  - Use `@swagger` annotations in route files to document endpoints
+  - Include request/response schemas, parameters, and examples
+  - Document authentication requirements using `security` tags
+  - Add tags to group related endpoints
+  - Swagger UI is available at `/api-docs` endpoint
+  - Keep Swagger documentation in sync with code changes
+  - Use reusable schemas defined in `src/config/swagger.ts` for common response types
+  - Document all query parameters, path parameters, and request bodies
+  - Include example values for better developer experience
 
 ## Git & Version Control
 - Write clear, descriptive commit messages

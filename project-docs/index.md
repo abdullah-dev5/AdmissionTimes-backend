@@ -15,6 +15,12 @@ This document serves as the index for all project documentation. All documents i
 - **backend-architecture.md** - Complete backend architecture blueprint: Database design, API contracts, verification flow, audit trail, notifications, and implementation plan
 - **achievements-summary.md** - Summary of completed work and remaining tasks
 
+### 2025-01-13
+- **FUTURE_IMPLEMENTATION_CHECKLIST.md** - Comprehensive checklist of 26+ deferred features, enhancements, and improvements with priorities, effort estimates, dependencies, and implementation order (located in project root)
+- **PHASE4B_PLANNING.md** - Detailed planning document for Phase 4B (Core Domains: Users, Analytics, Changelogs) with implementation order, acceptance criteria, and timeline (located in project root)
+- **PHASE4_COMPLETE_FINAL_REPORT.md** - Comprehensive final report for Phase 4A & 4B completion with all domains, endpoints, statistics, and compliance status (located in project root)
+- **Updated all project-docs files** - Overview, requirements, tech-specs, user-structure, timeline, and achievements-summary updated with Phase 4A & 4B completion status
+
 ## Document Maintenance
 - All new documentation files must be added to this index
 - Include the date when the document was created or last updated

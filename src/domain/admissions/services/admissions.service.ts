@@ -56,12 +56,20 @@ export const getById = async (
   // University can see their own admissions regardless of status
   if (userContext?.role === 'university' && userContext.university_id) {
     if (admission.created_by === userContext.id || admission.university_id === userContext.university_id) {
+      // Track activity: user viewed admission
+      trackAdmissionView(id, userContext).catch(() => {
+        // Silently fail - activity tracking should not break the request
+      });
       return admission;
     }
   }
 
   // Admin can see all admissions
   if (userContext?.role === 'admin') {
+    // Track activity: admin viewed admission
+    trackAdmissionView(id, userContext).catch(() => {
+      // Silently fail - activity tracking should not break the request
+    });
     return admission;
   }
 
@@ -69,6 +77,11 @@ export const getById = async (
   if (admission.verification_status !== VERIFICATION_STATUS.VERIFIED) {
     throw new AppError('Admission not found', 404);
   }
+
+  // Track activity: public/student viewed admission
+  trackAdmissionView(id, userContext).catch(() => {
+    // Silently fail - activity tracking should not break the request
+  });
 
   return admission;
 };
@@ -264,17 +277,12 @@ export const verify = async (
     diff_summary: 'Admission verified by admin',
   });
 
-  // TODO: Phase 4 - Notification Integration
-  // When admission is verified, create notification for university
-  // await notificationsService.create({
-  //   user_id: admission.created_by,
-  //   category: 'verification',
-  //   priority: 'high',
-  //   title: 'Admission Verified',
-  //   message: `Your admission "${admission.title}" has been verified.`,
-  //   related_entity_type: 'admission',
-  //   related_entity_id: admission.id
-  // });
+  // Create notification for university (if created_by exists)
+  if (updated.created_by) {
+    createNotificationForVerification(updated).catch(() => {
+      // Silently fail - notification should not break the request
+    });
+  }
 
   return updated;
 };
@@ -334,17 +342,12 @@ export const reject = async (
     },
   });
 
-  // TODO: Phase 4 - Notification Integration
-  // When admission is rejected, create notification for university
-  // await notificationsService.create({
-  //   user_id: admission.created_by,
-  //   category: 'verification',
-  //   priority: 'high',
-  //   title: 'Admission Rejected',
-  //   message: `Your admission "${admission.title}" has been rejected. Reason: ${data.rejection_reason}`,
-  //   related_entity_type: 'admission',
-  //   related_entity_id: admission.id
-  // });
+  // Create notification for university (if created_by exists)
+  if (updated.created_by) {
+    createNotificationForRejection(updated, data.rejection_reason).catch(() => {
+      // Silently fail - notification should not break the request
+    });
+  }
 
   return updated;
 };
@@ -397,18 +400,6 @@ export const submit = async (
     new_value: VERIFICATION_STATUS.PENDING,
     diff_summary: 'Admission submitted for verification',
   });
-
-  // TODO: Phase 4 - Notification Integration
-  // When admission is submitted, notify admin
-  // await notificationsService.create({
-  //   user_id: admin_user_id,
-  //   category: 'verification',
-  //   priority: 'medium',
-  //   title: 'New Admission Pending Review',
-  //   message: `A new admission "${admission.title}" is pending verification.`,
-  //   related_entity_type: 'admission',
-  //   related_entity_id: admission.id
-  // });
 
   return updated;
 };
@@ -467,17 +458,10 @@ export const dispute = async (
     },
   });
 
-  // TODO: Phase 4 - Notification Integration
-  // When admission is disputed, notify admin
-  // await notificationsService.create({
-  //   user_id: admin_user_id,
-  //   category: 'verification',
-  //   priority: 'high',
-  //   title: 'Admission Disputed',
-  //   message: `Admission "${admission.title}" has been disputed. Reason: ${data.dispute_reason}`,
-  //   related_entity_type: 'admission',
-  //   related_entity_id: admission.id
-  // });
+  // Create notification for admin (when admission is disputed)
+  createNotificationForDispute(updated, data.dispute_reason).catch(() => {
+    // Silently fail - notification should not break the request
+  });
 
   return updated;
 };
@@ -678,5 +662,129 @@ async function createChangelogForUpdate(
       new_value: change.newValue,
       diff_summary: diffSummary,
     });
+  }
+}
+
+/**
+ * Helper function to track admission view activity
+ * 
+ * @param admissionId - Admission UUID
+ * @param userContext - User context
+ */
+async function trackAdmissionView(
+  admissionId: string,
+  userContext?: UserContext
+): Promise<void> {
+  try {
+    const { create } = await import('@domain/user-activity/services/user-activity.service');
+    const { ACTIVITY_TYPE, USER_TYPE } = await import('@config/constants');
+    const { ENTITY_TYPES } = await import('@domain/user-activity/constants/user-activity.constants');
+
+    // Map guest role to student for activity tracking
+    const userType = userContext?.role === 'guest' 
+      ? USER_TYPE.STUDENT 
+      : (userContext?.role as any) || USER_TYPE.STUDENT;
+
+    await create({
+      user_id: userContext?.id || null,
+      user_type: userType,
+      activity_type: ACTIVITY_TYPE.VIEWED,
+      entity_type: ENTITY_TYPES.ADMISSION,
+      entity_id: admissionId,
+      metadata: null,
+    });
+  } catch (error) {
+    // Silently fail - activity tracking should not break the request
+    console.error('Failed to track admission view:', error);
+  }
+}
+
+/**
+ * Helper function to create notification when admission is verified
+ * 
+ * @param admission - Verified admission
+ */
+async function createNotificationForVerification(admission: Admission): Promise<void> {
+  try {
+    const { create } = await import('@domain/notifications/services/notifications.service');
+    const { NOTIFICATION_CATEGORY, NOTIFICATION_PRIORITY, USER_TYPE } = await import('@config/constants');
+
+    await create({
+      user_id: admission.created_by,
+      user_type: USER_TYPE.UNIVERSITY,
+      category: NOTIFICATION_CATEGORY.VERIFICATION,
+      priority: NOTIFICATION_PRIORITY.HIGH,
+      title: 'Admission Verified',
+      message: `Your admission "${admission.title}" has been verified and is now visible to students.`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admissions/${admission.id}`,
+    });
+  } catch (error) {
+    // Silently fail - notification should not break the request
+    console.error('Failed to create verification notification:', error);
+  }
+}
+
+/**
+ * Helper function to create notification when admission is rejected
+ * 
+ * @param admission - Rejected admission
+ * @param rejectionReason - Rejection reason
+ */
+async function createNotificationForRejection(
+  admission: Admission,
+  rejectionReason: string
+): Promise<void> {
+  try {
+    const { create } = await import('@domain/notifications/services/notifications.service');
+    const { NOTIFICATION_CATEGORY, NOTIFICATION_PRIORITY, USER_TYPE } = await import('@config/constants');
+
+    await create({
+      user_id: admission.created_by,
+      user_type: USER_TYPE.UNIVERSITY,
+      category: NOTIFICATION_CATEGORY.VERIFICATION,
+      priority: NOTIFICATION_PRIORITY.HIGH,
+      title: 'Admission Rejected',
+      message: `Your admission "${admission.title}" has been rejected. Reason: ${rejectionReason}`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admissions/${admission.id}`,
+    });
+  } catch (error) {
+    // Silently fail - notification should not break the request
+    console.error('Failed to create rejection notification:', error);
+  }
+}
+
+/**
+ * Helper function to create notification when admission is disputed
+ * 
+ * @param admission - Disputed admission
+ * @param disputeReason - Dispute reason
+ */
+async function createNotificationForDispute(
+  admission: Admission,
+  disputeReason: string
+): Promise<void> {
+  try {
+    const { create } = await import('@domain/notifications/services/notifications.service');
+    const { NOTIFICATION_CATEGORY, NOTIFICATION_PRIORITY, USER_TYPE } = await import('@config/constants');
+
+    // Notify admin about dispute (user_id is null for admin notifications)
+    await create({
+      user_id: null,
+      user_type: USER_TYPE.ADMIN,
+      category: NOTIFICATION_CATEGORY.VERIFICATION,
+      priority: NOTIFICATION_PRIORITY.HIGH,
+      title: 'Admission Disputed',
+      message: `Admission "${admission.title}" has been disputed by university. Reason: ${disputeReason}`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admissions/${admission.id}`,
+    });
+  } catch (error) {
+    // Silently fail - notification should not break the request
+    console.error('Failed to create dispute notification:', error);
   }
 }

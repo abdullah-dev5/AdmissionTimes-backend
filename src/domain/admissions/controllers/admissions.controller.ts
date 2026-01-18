@@ -273,3 +273,26 @@ export const getChangelogs = async (
     next(error);
   }
 };
+
+/**
+ * Get deadlines for an admission
+ * 
+ * GET /api/v1/admissions/:id/deadlines
+ */
+export const getAdmissionDeadlines = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    // Import deadlines service
+    const { getByAdmissionId } = await import('@domain/deadlines/services/deadlines.service');
+    const deadlines = await getByAdmissionId(id);
+
+    sendSuccess(res, deadlines, 'Deadlines retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
