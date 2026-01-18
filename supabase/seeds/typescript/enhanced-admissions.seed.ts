@@ -1,8 +1,10 @@
 /**
- * Admissions Seed
+ * Enhanced Admissions Seed
  * 
- * Seeds the admissions table with sample admission records.
- * Creates various verification statuses, program types, and degree levels.
+ * Comprehensive seed data based on frontend mock data.
+ * Includes detailed program information, eligibility, dates, and fee structures.
+ * 
+ * This seed file incorporates all the rich data from the frontend mock programs.
  */
 
 import { query } from '../../../src/database/connection';
@@ -10,10 +12,10 @@ import { executeInTransaction } from './utils';
 import { SeedResult } from './types';
 
 /**
- * Comprehensive admission data based on frontend mock programs
- * Includes detailed information: eligibility, dates, fees, documents
+ * Enhanced admission data based on mock programs
+ * Maps frontend mock data to database schema
  */
-const ADMISSIONS_DATA = [
+const ENHANCED_ADMISSIONS_DATA = [
   // BS Computer Science - Global Tech University
   {
     title: 'BS Computer Science',
@@ -22,9 +24,9 @@ const ADMISSIONS_DATA = [
     degree_level: 'bachelor',
     field_of_study: 'Computer Science',
     duration: '4 years',
-    tuition_fee: 1225000,
+    tuition_fee: 1225000, // Rs. 1,225,000 total program fee
     currency: 'PKR',
-    application_fee: 25000,
+    application_fee: 25000, // Rs. 25,000 admission fee
     deadline: new Date('2026-03-15'),
     start_date: '2026-09-01',
     location: 'Lahore, Punjab',
@@ -76,9 +78,9 @@ const ADMISSIONS_DATA = [
     degree_level: 'master',
     field_of_study: 'Business Administration',
     duration: '2 years',
-    tuition_fee: 3650000,
+    tuition_fee: 3650000, // Rs. 3,650,000 total program fee
     currency: 'PKR',
-    application_fee: 50000,
+    application_fee: 50000, // Rs. 50,000 admission fee
     deadline: new Date('2026-01-20'),
     start_date: '2026-08-15',
     location: 'Lahore, Punjab',
@@ -131,9 +133,9 @@ const ADMISSIONS_DATA = [
     degree_level: 'master',
     field_of_study: 'Medicine',
     duration: '4 years',
-    tuition_fee: 4900000,
+    tuition_fee: 4900000, // Rs. 4,900,000 total program fee
     currency: 'PKR',
-    application_fee: 100000,
+    application_fee: 100000, // Rs. 100,000 admission fee
     deadline: new Date('2026-04-01'),
     start_date: '2026-08-01',
     location: 'Karachi, Sindh',
@@ -186,9 +188,9 @@ const ADMISSIONS_DATA = [
     degree_level: 'bachelor',
     field_of_study: 'Business Administration',
     duration: '4 years',
-    tuition_fee: 1470000,
+    tuition_fee: 1470000, // Rs. 1,470,000 total program fee
     currency: 'PKR',
-    application_fee: 30000,
+    application_fee: 30000, // Rs. 30,000 admission fee
     deadline: new Date('2026-02-28'),
     start_date: '2026-09-01',
     location: 'Karachi, Sindh',
@@ -240,9 +242,9 @@ const ADMISSIONS_DATA = [
     degree_level: 'bachelor',
     field_of_study: 'Software Engineering',
     duration: '4 years',
-    tuition_fee: 1140000,
+    tuition_fee: 1140000, // Rs. 1,140,000 total program fee
     currency: 'PKR',
-    application_fee: 20000,
+    application_fee: 20000, // Rs. 20,000 admission fee
     deadline: new Date('2026-03-10'),
     start_date: '2026-09-01',
     location: 'Islamabad, Capital',
@@ -294,9 +296,9 @@ const ADMISSIONS_DATA = [
     degree_level: 'bachelor',
     field_of_study: 'Data Science',
     duration: '4 years',
-    tuition_fee: 1305000,
+    tuition_fee: 1305000, // Rs. 1,305,000 total program fee
     currency: 'PKR',
-    application_fee: 25000,
+    application_fee: 25000, // Rs. 25,000 admission fee
     deadline: new Date('2026-01-25'),
     start_date: '2026-09-01',
     location: 'Karachi, Sindh',
@@ -347,10 +349,10 @@ const ADMISSIONS_DATA = [
     degree_level: 'bachelor',
     field_of_study: 'Artificial Intelligence',
     duration: '4 years',
-    tuition_fee: 1390000,
+    tuition_fee: 1390000, // Rs. 1,390,000 total program fee
     currency: 'PKR',
-    application_fee: 30000,
-    deadline: new Date('2025-12-15'),
+    application_fee: 30000, // Rs. 30,000 admission fee
+    deadline: new Date('2025-12-15'), // Past deadline
     start_date: '2026-01-15',
     location: 'Lahore, Punjab',
     delivery_mode: 'on-campus',
@@ -390,338 +392,31 @@ const ADMISSIONS_DATA = [
     },
     verification_status: 'verified',
     verified_at: new Date('2025-10-28'),
-    is_active: false,
-  },
-  
-  // Additional programs from student admission mock data
-  {
-    title: 'BS Computer Science',
-    description: 'Comprehensive computer science program covering algorithms, data structures, software engineering, and more.',
-    program_type: 'undergraduate',
-    degree_level: 'bachelor',
-    field_of_study: 'Computer Science',
-    duration: '4 years',
-    tuition_fee: 75000,
-    currency: 'PKR',
-    application_fee: 5000,
-    deadline: new Date('2025-07-30'),
-    start_date: '2025-09-01',
-    location: 'Islamabad, Pakistan',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 3.0, entry_test: true },
-    verification_status: 'verified',
-    verified_at: new Date('2025-01-15'),
-    is_active: true,
-  },
-  {
-    title: 'MS Data Science',
-    description: 'A rigorous graduate program focusing on advanced data analytics, machine learning, and statistical methods. Ideal for students seeking research opportunities and industry collaboration.',
-    program_type: 'graduate',
-    degree_level: 'master',
-    field_of_study: 'Data Science',
-    duration: '2 years',
-    tuition_fee: 120000,
-    currency: 'PKR',
-    application_fee: 8000,
-    deadline: new Date('2025-01-20'),
-    start_date: '2025-08-15',
-    location: 'Islamabad, Pakistan',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 3.2, bachelor_degree: true },
-    verification_status: 'pending',
-    is_active: true,
-  },
-  {
-    title: 'PhD in Management',
-    description: 'An elite doctoral program designed for aspiring researchers and academics. Features world-class faculty, extensive research resources, and opportunities for international collaboration.',
-    program_type: 'graduate',
-    degree_level: 'phd',
-    field_of_study: 'Management',
-    duration: '4-5 years',
-    tuition_fee: 98000,
-    currency: 'PKR',
-    application_fee: 10000,
-    deadline: new Date('2025-06-20'),
-    start_date: '2025-09-01',
-    location: 'Lahore, Pakistan',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 3.5, master_degree: true, research_experience: true },
-    verification_status: 'verified',
-    verified_at: new Date('2025-01-10'),
-    is_active: true,
-  },
-  
-  // Pending Admissions
-  {
-    title: 'Bachelor of Arts in Psychology',
-    description: 'Comprehensive psychology program with focus on clinical and research applications.',
-    program_type: 'undergraduate',
-    degree_level: 'bachelor',
-    field_of_study: 'Psychology',
-    duration: '4 years',
-    tuition_fee: 45000,
-    currency: 'PKR',
-    application_fee: 5000,
-    deadline: new Date('2026-08-20'),
-    start_date: '2026-09-01',
-    location: 'Lahore, Pakistan',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 2.8 },
-    verification_status: 'pending',
-    is_active: true,
-  },
-  {
-    title: 'Master of Science in Data Analytics',
-    description: 'Advanced analytics program focusing on big data and business intelligence.',
-    program_type: 'graduate',
-    degree_level: 'master',
-    field_of_study: 'Data Analytics',
-    duration: '18 months',
-    tuition_fee: 60000,
-    currency: 'PKR',
-    application_fee: 7000,
-    deadline: new Date('2026-07-15'),
-    start_date: '2026-08-15',
-    location: 'Karachi, Pakistan',
-    delivery_mode: 'hybrid',
-    requirements: { gpa: 3.2, technical_background: true },
-    verification_status: 'pending',
-    is_active: true,
-  },
-  
-  // Rejected Admissions
-  {
-    title: 'Bachelor of Medicine',
-    description: 'Medical degree program with clinical rotations.',
-    program_type: 'undergraduate',
-    degree_level: 'bachelor',
-    field_of_study: 'Medicine',
-    duration: '6 years',
-    tuition_fee: 200000,
-    currency: 'PKR',
-    application_fee: 15000,
-    deadline: new Date('2026-06-01'),
-    start_date: '2026-08-01',
-    location: 'Karachi, Pakistan',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 3.8, mcat_score: 510 },
-    verification_status: 'rejected',
-    rejection_reason: 'Incomplete documentation and missing prerequisite courses.',
-    is_active: false,
-  },
-  
-  // Draft Admissions
-  {
-    title: 'Associate Degree in Nursing',
-    description: 'Two-year nursing program preparing students for RN licensure.',
-    program_type: 'undergraduate',
-    degree_level: 'associate',
-    field_of_study: 'Nursing',
-    duration: '2 years',
-    tuition_fee: 30000,
-    currency: 'PKR',
-    application_fee: 4000,
-    deadline: new Date('2026-09-01'),
-    start_date: '2026-10-01',
-    location: 'Lahore, Pakistan',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 2.5, health_clearance: true },
-    verification_status: 'draft',
-    is_active: true,
-  },
-  {
-    title: 'Online Master of Education',
-    description: 'Flexible online program for working educators.',
-    program_type: 'graduate',
-    degree_level: 'master',
-    field_of_study: 'Education',
-    duration: '2 years',
-    tuition_fee: 40000,
-    currency: 'PKR',
-    application_fee: 5000,
-    deadline: new Date('2026-08-01'),
-    start_date: '2026-09-15',
-    location: 'Online',
-    delivery_mode: 'online',
-    requirements: { teaching_experience: '1 year', bachelor_degree: true },
-    verification_status: 'draft',
-    is_active: true,
-  },
-  {
-    title: 'Master of Business Administration',
-    description: 'Advanced MBA program for business professionals seeking leadership roles.',
-    program_type: 'graduate',
-    degree_level: 'master',
-    field_of_study: 'Business Administration',
-    duration: '2 years',
-    tuition_fee: 75000,
-    currency: 'USD',
-    application_fee: 150,
-    deadline: new Date('2026-07-01'),
-    start_date: '2026-08-15',
-    location: 'Boston, USA',
-    delivery_mode: 'hybrid',
-    requirements: { gpa: 3.5, work_experience: '2 years', gmat_score: 650 },
-    verification_status: 'verified',
-    verified_at: new Date('2026-01-08'),
-    is_active: true,
-  },
-  {
-    title: 'PhD in Engineering',
-    description: 'Research-focused PhD program in various engineering disciplines.',
-    program_type: 'graduate',
-    degree_level: 'phd',
-    field_of_study: 'Engineering',
-    duration: '4-5 years',
-    tuition_fee: 0, // Often funded
-    currency: 'USD',
-    application_fee: 200,
-    deadline: new Date('2026-06-01'),
-    start_date: '2026-09-01',
-    location: 'California, USA',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 3.7, research_experience: true, recommendation_letters: 3 },
-    verification_status: 'verified',
-    verified_at: new Date('2026-01-05'),
-    is_active: true,
-  },
-  {
-    title: 'Certificate in Data Science',
-    description: 'Intensive certificate program covering data analysis, machine learning, and visualization.',
-    program_type: 'certificate',
-    degree_level: 'certificate',
-    field_of_study: 'Data Science',
-    duration: '6 months',
-    tuition_fee: 15000,
-    currency: 'USD',
-    application_fee: 50,
-    deadline: new Date('2026-05-15'),
-    start_date: '2026-06-01',
-    location: 'Online',
-    delivery_mode: 'online',
-    requirements: { basic_programming: true, math_background: true },
-    verification_status: 'verified',
-    verified_at: new Date('2026-01-12'),
-    is_active: true,
-  },
-  
-  // Pending Admissions
-  {
-    title: 'Bachelor of Arts in Psychology',
-    description: 'Comprehensive psychology program with focus on clinical and research applications.',
-    program_type: 'undergraduate',
-    degree_level: 'bachelor',
-    field_of_study: 'Psychology',
-    duration: '4 years',
-    tuition_fee: 45000,
-    currency: 'USD',
-    application_fee: 100,
-    deadline: new Date('2026-08-20'),
-    start_date: '2026-09-01',
-    location: 'Chicago, USA',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 2.8, sat_score: 1100 },
-    verification_status: 'pending',
-    is_active: true,
-  },
-  {
-    title: 'Master of Science in Data Analytics',
-    description: 'Advanced analytics program focusing on big data and business intelligence.',
-    program_type: 'graduate',
-    degree_level: 'master',
-    field_of_study: 'Data Analytics',
-    duration: '18 months',
-    tuition_fee: 60000,
-    currency: 'USD',
-    application_fee: 125,
-    deadline: new Date('2026-07-15'),
-    start_date: '2026-08-15',
-    location: 'Seattle, USA',
-    delivery_mode: 'hybrid',
-    requirements: { gpa: 3.2, technical_background: true },
-    verification_status: 'pending',
-    is_active: true,
-  },
-  
-  // Rejected Admissions
-  {
-    title: 'Bachelor of Medicine',
-    description: 'Medical degree program with clinical rotations.',
-    program_type: 'undergraduate',
-    degree_level: 'bachelor',
-    field_of_study: 'Medicine',
-    duration: '6 years',
-    tuition_fee: 120000,
-    currency: 'USD',
-    application_fee: 200,
-    deadline: new Date('2026-06-01'),
-    start_date: '2026-08-01',
-    location: 'Philadelphia, USA',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 3.8, mcat_score: 510 },
-    verification_status: 'rejected',
-    rejection_reason: 'Incomplete documentation and missing prerequisite courses.',
-    is_active: false,
-  },
-  
-  // Draft Admissions
-  {
-    title: 'Associate Degree in Nursing',
-    description: 'Two-year nursing program preparing students for RN licensure.',
-    program_type: 'undergraduate',
-    degree_level: 'associate',
-    field_of_study: 'Nursing',
-    duration: '2 years',
-    tuition_fee: 30000,
-    currency: 'USD',
-    application_fee: 75,
-    deadline: new Date('2026-09-01'),
-    start_date: '2026-10-01',
-    location: 'Miami, USA',
-    delivery_mode: 'on-campus',
-    requirements: { gpa: 2.5, health_clearance: true },
-    verification_status: 'draft',
-    is_active: true,
-  },
-  {
-    title: 'Online Master of Education',
-    description: 'Flexible online program for working educators.',
-    program_type: 'graduate',
-    degree_level: 'master',
-    field_of_study: 'Education',
-    duration: '2 years',
-    tuition_fee: 40000,
-    currency: 'USD',
-    application_fee: 100,
-    deadline: new Date('2026-08-01'),
-    start_date: '2026-09-15',
-    location: 'Online',
-    delivery_mode: 'online',
-    requirements: { teaching_experience: '1 year', bachelor_degree: true },
-    verification_status: 'draft',
-    is_active: true,
+    is_active: false, // Closed admission
   },
 ];
 
 /**
- * Seed admissions table
+ * Seed enhanced admissions table
+ * This creates comprehensive admission records with detailed information
  */
-export async function seedAdmissions(): Promise<SeedResult> {
+export async function seedEnhancedAdmissions(): Promise<SeedResult> {
   return executeInTransaction(async () => {
     let insertedCount = 0;
     
-    for (const admission of ADMISSIONS_DATA) {
+    for (const admission of ENHANCED_ADMISSIONS_DATA) {
       try {
         const result = await query(
           `INSERT INTO admissions (
             title, description, program_type, degree_level, field_of_study,
             duration, tuition_fee, currency, application_fee, deadline, start_date,
             location, delivery_mode, requirements, verification_status,
-            verified_at, rejection_reason, is_active
+            verified_at, is_active
           )
           VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
           )
+          ON CONFLICT DO NOTHING
           RETURNING id`,
           [
             admission.title,
@@ -740,7 +435,6 @@ export async function seedAdmissions(): Promise<SeedResult> {
             JSON.stringify(admission.requirements),
             admission.verification_status,
             admission.verified_at || null,
-            admission.rejection_reason || null,
             admission.is_active,
           ]
         );
@@ -757,7 +451,7 @@ export async function seedAdmissions(): Promise<SeedResult> {
     }
     
     return {
-      seedName: 'admissions',
+      seedName: 'enhanced-admissions',
       success: true,
       recordCount: insertedCount,
     };

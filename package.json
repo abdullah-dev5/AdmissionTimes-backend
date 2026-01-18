@@ -11,8 +11,12 @@
     "type-check": "tsc --noEmit",
     "migrate": "ts-node -r tsconfig-paths/register scripts/run-migrations.ts",
     "seed": "ts-node -r tsconfig-paths/register supabase/seeds/typescript/index.ts",
-    "seed:reset": "ts-node -r tsconfig-paths/register supabase/seeds/typescript/reset.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "seed:reset": "ts-node -r tsconfig-paths/register scripts/reset-seeds.ts",
+    "seed:force": "ts-node -r tsconfig-paths/register scripts/reset-seeds.ts --clear-data",
+    "seed:clear": "ts-node -r tsconfig-paths/register scripts/reset-seeds.ts --clear-data",
+    "get-user-ids": "ts-node -r tsconfig-paths/register scripts/get-user-ids.ts",
+    "test-api": "ts-node -r tsconfig-paths/register scripts/test-api.ts",
+    "convert-mock": "ts-node -r tsconfig-paths/register scripts/convert-mock-to-seed.ts"
   },
   "keywords": [
     "admission",
@@ -27,18 +31,27 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "joi": "^18.0.2",
+    "multer": "^2.0.2",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.16.3",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/multer": "^2.0.0",
     "@types/node": "^25.0.3",
     "@types/pg": "^8.16.0",
+    "@types/supertest": "^6.0.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
+    "jest": "^30.2.0",
+    "jest-mock-extended": "^4.0.0",
     "nodemon": "^3.1.11",
     "supabase": "^2.71.3",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3"

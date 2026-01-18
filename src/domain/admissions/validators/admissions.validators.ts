@@ -107,14 +107,6 @@ export const createAdmissionSchema = Joi.object({
       'string.max': `Location must not exceed ${FIELD_LIMITS.LOCATION_MAX} characters`,
     }),
 
-  campus: Joi.string()
-    .max(FIELD_LIMITS.CAMPUS_MAX)
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.max': `Campus must not exceed ${FIELD_LIMITS.CAMPUS_MAX} characters`,
-    }),
-
   delivery_mode: Joi.string()
     .valid(...DEFAULTS.DELIVERY_MODE_OPTIONS)
     .allow(null, '')

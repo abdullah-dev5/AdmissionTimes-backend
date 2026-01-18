@@ -8,7 +8,7 @@
  */
 
 import { initializePool, testConnection, getPool } from '../../../src/database/connection';
-import { isSeedExecuted, markSeedExecuted, getExecutedSeeds } from './utils';
+import { isSeedExecuted, markSeedExecuted, getExecutedSeeds, clearSeedTracking } from './utils';
 import { SeedFunction, SeedResult } from './types';
 
 // Import seed functions
@@ -49,12 +49,13 @@ const SEED_CONFIG: SeedConfigItem[] = [
 async function runSeed(
   seedName: string,
   seedFn: SeedFunction,
-  skipIfExists: boolean = true
+  skipIfExists: boolean = true,
+  force: boolean = false
 ): Promise<SeedResult> {
   const startTime = Date.now();
   
-  // Check if already executed
-  if (skipIfExists && (await isSeedExecuted(seedName))) {
+  // Check if already executed (unless forcing)
+  if (!force && skipIfExists && (await isSeedExecuted(seedName))) {
     console.log(`⏭️  Skipping (already run): ${seedName}`);
     return {
       seedName,
@@ -62,6 +63,12 @@ async function runSeed(
       recordCount: 0,
       executionTime: 0,
     };
+  }
+  
+  // If forcing, clear seed tracking first
+  if (force) {
+    await clearSeedTracking(seedName);
+    console.log(`🔄 Force mode: cleared tracking for ${seedName}`);
   }
   
   console.log(`\n📄 Running seed: ${seedName}`);
@@ -120,9 +127,13 @@ async function checkDependencies(seedName: string, dependencies: string[]): Prom
  */
 async function main() {
   const args = process.argv.slice(2);
-  const seedName = args[0]; // Optional: seed specific table
+  const seedName = args.find(arg => !arg.startsWith('--')); // Optional: seed specific table
+  const force = args.includes('--force') || args.includes('-f'); // Force reseed even if already executed
   
   console.log('🌱 Starting database seeding...\n');
+  if (force) {
+    console.log('🔄 Force mode: Will reseed even if already executed\n');
+  }
   
   try {
     // Initialize database connection
@@ -150,7 +161,7 @@ async function main() {
         process.exit(1);
       }
       
-      await runSeed(seedName, seedConfig.fn, false); // Don't skip if running specific seed
+      await runSeed(seedName, seedConfig.fn, false, force); // Don't skip if running specific seed
     } else {
       // Run all seeds in order
       const results: SeedResult[] = [];
@@ -166,7 +177,7 @@ async function main() {
           continue;
         }
         
-        const result = await runSeed(config.name, config.fn);
+        const result = await runSeed(config.name, config.fn, true, force);
         results.push(result);
         
         // Stop on error if critical

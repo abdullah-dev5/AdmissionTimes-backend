@@ -88,11 +88,11 @@ export const create = async (
     INSERT INTO admissions (
       university_id, title, description, program_type, degree_level,
       field_of_study, duration, tuition_fee, currency, application_fee,
-      deadline, start_date, location, campus, delivery_mode, requirements,
+      deadline, start_date, location, delivery_mode, requirements,
       created_by, verification_status, is_active
     )
     VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
     )
     RETURNING *
   `;
@@ -111,7 +111,6 @@ export const create = async (
     data.deadline,
     data.start_date,
     data.location,
-    data.campus,
     data.delivery_mode,
     data.requirements ? JSON.stringify(data.requirements) : null,
     createdBy,
@@ -154,7 +153,6 @@ export const update = async (
     deadline: data.deadline,
     start_date: data.start_date,
     location: data.location,
-    campus: data.campus,
     delivery_mode: data.delivery_mode,
     requirements: data.requirements ? JSON.stringify(data.requirements) : data.requirements,
     verification_status: data.verification_status,

@@ -201,6 +201,39 @@ Interactive API documentation is available at:
 
 All endpoints are fully documented with:
 - Request/response schemas
+- Query parameters
+- Request body examples
+- Response examples
+- Error responses
+
+## 🔗 Frontend Integration
+
+**For Frontend Developers:**
+
+- **[Frontend Integration Guide](FRONTEND_INTEGRATION_GUIDE.md)** - Complete guide for integrating with the backend API
+- **[API Contract](API_CONTRACT.md)** - Detailed API contract with all endpoints and data structures
+- **[Backend Achievement Summary](BACKEND_ACHIEVEMENT_SUMMARY.md)** - Summary of backend features and capabilities
+- **[Frontend-Backend Alignment Checklist](FRONTEND_BACKEND_ALIGNMENT_CHECKLIST.md)** - Checklist for ensuring proper integration
+
+**Quick Start:**
+1. Read the [Frontend Integration Guide](FRONTEND_INTEGRATION_GUIDE.md)
+2. Review the [API Contract](API_CONTRACT.md) for endpoint details
+3. Use Swagger UI (`/api-docs`) for interactive testing
+4. Follow the [Alignment Checklist](FRONTEND_BACKEND_ALIGNMENT_CHECKLIST.md) for integration
+
+## 🏗️ Architecture & Design Patterns
+
+**For Developers:**
+
+- **[Design Patterns & Best Practices](DESIGN_PATTERNS_AND_BEST_PRACTICES.md)** - Comprehensive reference for all design patterns, system design principles, SOLID principles, and best practices
+- **[System Concepts](SYSTEM_CONCEPTS.md)** - Foundational system concepts and principles
+- **[Project Context & Best Practices](PROJECT_CONTEXT_AND_BEST_PRACTICES.md)** - Detailed project context and development guidelines
+
+**Architecture:**
+- **Domain-Driven Design (DDD)** - Code organized around business domains
+- **Clean Architecture** - Separation of concerns into distinct layers
+- **SOLID Principles** - Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion
+- **Design Patterns** - Repository, Service Layer, DTO, Middleware, Factory, Strategy, Observer
 - Authentication requirements
 - Error responses
 - Example values
