@@ -1,0 +1,203 @@
+{
+  "info": {
+    "name": "AdmissionTimes Backend API",
+    "description": "API collection for testing AdmissionTimes backend endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "student_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "university_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_user_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Student Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{student_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "x-user-role",
+                "value": "student",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/student/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "student", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "University Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{university_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "x-user-role",
+                "value": "university",
+                "type": "text"
+              },
+              {
+                "key": "x-university-id",
+                "value": "{{university_user_id}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/university/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "university", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "Admin Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{admin_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "x-user-role",
+                "value": "admin",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "dashboard"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Recommendations",
+      "item": [
+        {
+          "name": "Get Student Recommendations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{student_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "x-user-role",
+                "value": "student",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/student/recommendations?limit=10&min_score=75",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "student", "recommendations"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "min_score",
+                  "value": "75"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "PDF Parsing",
+      "item": [
+        {
+          "name": "Parse PDF",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{university_user_id}}",
+                "type": "text"
+              },
+              {
+                "key": "x-user-role",
+                "value": "university",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "university_id",
+                  "value": "{{university_user_id}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admissions/parse-pdf",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admissions", "parse-pdf"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

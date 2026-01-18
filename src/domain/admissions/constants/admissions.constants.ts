@@ -59,5 +59,4 @@ export const SEARCH_FIELDS = [
   'description',
   'field_of_study',
   'location',
-  'campus',
 ] as const;

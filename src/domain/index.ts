@@ -19,6 +19,7 @@ import usersRoutes from './users/routes/users.routes';
 import analyticsRoutes from './analytics/routes/analytics.routes';
 import changelogsRoutes from './changelogs/routes/changelogs.routes';
 import watchlistsRoutes from './watchlists/routes/watchlists.routes';
+import dashboardRoutes from './dashboard/routes/dashboard.routes';
 
 /**
  * Registers all domain routes with the Express application
@@ -41,4 +42,7 @@ export function registerDomains(app: Application): void {
   
   // Advanced Features (Phase 5)
   app.use('/api/v1/watchlists', watchlistsRoutes);
+  
+  // Dashboard Domain (Phase 6 - Backend Implementation Plan)
+  app.use('/api/v1', dashboardRoutes);
 }

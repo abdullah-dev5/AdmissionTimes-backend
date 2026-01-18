@@ -26,7 +26,6 @@ export interface Admission {
   deadline: string | null; // ISO8601 timestamp
   start_date: string | null; // ISO8601 date
   location: string | null;
-  campus: string | null;
   delivery_mode: string | null;
   requirements: Record<string, any> | null; // JSONB
   verification_status: VerificationStatus;
@@ -57,7 +56,6 @@ export interface CreateAdmissionDTO {
   deadline?: string; // ISO8601
   start_date?: string; // ISO8601
   location?: string;
-  campus?: string;
   delivery_mode?: string;
   requirements?: Record<string, any>;
 }

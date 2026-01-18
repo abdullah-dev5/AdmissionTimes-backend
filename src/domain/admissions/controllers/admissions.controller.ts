@@ -14,8 +14,9 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { sendSuccess, sendPaginated } from '@shared/utils/response';
+import { sendSuccess, sendPaginated, sendError } from '@shared/utils/response';
 import * as admissionsService from '../services/admissions.service';
+import { parsePDFAndExtract } from '../services/pdf.service';
 import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import {
   CreateAdmissionDTO,
@@ -292,6 +293,33 @@ export const getAdmissionDeadlines = async (
     const deadlines = await getByAdmissionId(id);
 
     sendSuccess(res, deadlines, 'Deadlines retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Parse PDF and extract admission data
+ * 
+ * POST /api/v1/admissions/parse-pdf
+ */
+export const parsePDF = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const file = req.file;
+
+    if (!file) {
+      sendError(res, 'PDF file is required', 400, { file: 'PDF file is required' });
+      return;
+    }
+
+    // Parse PDF and extract data
+    const extractedData = await parsePDFAndExtract(file.buffer);
+
+    sendSuccess(res, extractedData, 'PDF parsed successfully');
   } catch (error) {
     next(error);
   }

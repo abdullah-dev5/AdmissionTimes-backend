@@ -7,6 +7,7 @@
 
 import { Router } from 'express';
 import * as admissionsController from '../controllers/admissions.controller';
+import { upload } from '../middleware/upload';
 import {
   createAdmissionSchema,
   updateAdmissionSchema,
@@ -755,6 +756,86 @@ router.get(
   '/:id/deadlines',
   validateParams(uuidParamSchema),
   admissionsController.getAdmissionDeadlines
+);
+
+/**
+ * @swagger
+ * /api/v1/admissions/parse-pdf:
+ *   post:
+ *     summary: Parse PDF and extract admission data
+ *     tags: [Admissions]
+ *     description: Upload a PDF file and extract structured admission data from it
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: PDF file to parse (max 10MB)
+ *               university_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: University ID (optional)
+ *     responses:
+ *       200:
+ *         description: PDF parsed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         title:
+ *                           type: string
+ *                         degree_level:
+ *                           type: string
+ *                         deadline:
+ *                           type: string
+ *                           format: date-time
+ *                         application_fee:
+ *                           type: number
+ *                         location:
+ *                           type: string
+ *                         description:
+ *                           type: string
+ *                         confidence:
+ *                           type: number
+ *                           minimum: 0
+ *                           maximum: 100
+ *                         extracted_fields:
+ *                           type: array
+ *                           items:
+ *                             type: string
+ *       400:
+ *         description: Validation error or invalid PDF
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// POST /api/v1/admissions/parse-pdf - Parse PDF and extract data
+router.post(
+  '/parse-pdf',
+  upload.single('file'),
+  admissionsController.parsePDF
 );
 
 export default router;

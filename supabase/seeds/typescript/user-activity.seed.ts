@@ -1,21 +1,41 @@
 /**
  * User Activity Seed
  * 
- * Seeds the user_activity table with sample activity logs.
+ * Seeds the user_activity table with comprehensive activity data
+ * based on frontend mock data (student activities).
  */
 
 import { query } from '../../../src/database/connection';
-import { executeInTransaction, randomElement } from './utils';
+import { executeInTransaction } from './utils';
 import { SeedResult } from './types';
 
-const ACTIVITY_TYPES: string[] = ['viewed', 'searched', 'compared', 'watchlisted'];
+/**
+ * Activity entries based on mock data patterns
+ */
+const ACTIVITY_DATA = [
+  { activity_type: 'viewed', entity_type: 'admission', metadata: { page: '/university/dashboard' } },
+  { activity_type: 'searched', entity_type: 'admission', metadata: { query: 'computer science', results: 15 } },
+  { activity_type: 'viewed', entity_type: 'admission', metadata: { admissionId: '1', admissionTitle: 'BSCS Fall 2025' } },
+  { activity_type: 'viewed', entity_type: 'admission', metadata: { page: '/admin/verification' } },
+  { activity_type: 'viewed', entity_type: 'admission', metadata: { admissionId: '7', admissionTitle: 'MBA Executive' } },
+  { activity_type: 'searched', entity_type: 'admission', metadata: { query: 'engineering', results: 23 } },
+  { activity_type: 'viewed', entity_type: 'admission', metadata: { page: '/admin/scraper-logs' } },
+  { activity_type: 'viewed', entity_type: 'admission', metadata: { admissionId: '3', admissionTitle: 'PhD in Management' } },
+  { activity_type: 'compared', entity_type: 'admission', metadata: { admissionIds: ['1', '5'] } },
+  { activity_type: 'watchlisted', entity_type: 'admission', metadata: { admissionId: '5' } },
+];
 
+/**
+ * Seed user_activity table
+ */
 export async function seedUserActivity(): Promise<SeedResult> {
   return executeInTransaction(async () => {
-    const usersResult = await query('SELECT id, role FROM users WHERE role = $1 LIMIT 5', ['student']);
+    // Get users
+    const usersResult = await query('SELECT id, role FROM users LIMIT 10');
     const users = usersResult.rows;
     
-    const admissionsResult = await query('SELECT id FROM admissions LIMIT 10');
+    // Get admissions
+    const admissionsResult = await query('SELECT id FROM admissions LIMIT 20');
     const admissions = admissionsResult.rows;
     
     if (users.length === 0 || admissions.length === 0) {
@@ -28,26 +48,35 @@ export async function seedUserActivity(): Promise<SeedResult> {
     
     let insertedCount = 0;
     
+    // Create activities for each user
     for (const user of users) {
-      // Create 3-5 activity entries per user
+      // Each user gets 3-5 activities
       const activityCount = Math.floor(Math.random() * 3) + 3;
       
       for (let i = 0; i < activityCount; i++) {
-        const activityType = randomElement(ACTIVITY_TYPES);
-        const admission = randomElement(admissions);
+        const activity = ACTIVITY_DATA[i % ACTIVITY_DATA.length];
+        const admission = admissions[i % admissions.length];
+        
+        // Determine entity_id based on activity type
+        let entityId = admission.id;
+        if (activity.activity_type === 'searched') {
+          // For searches, use first admission ID
+          entityId = admissions[0].id;
+        }
         
         try {
           await query(
             `INSERT INTO user_activity (
-              user_id, user_type, activity_type, entity_type, entity_id
+              user_id, user_type, activity_type, entity_type, entity_id, metadata
             )
-            VALUES ($1, $2, $3, $4, $5)`,
+            VALUES ($1, $2, $3, $4, $5, $6)`,
             [
               user.id,
               user.role,
-              activityType,
-              'admission',
-              admission.id,
+              activity.activity_type,
+              activity.entity_type,
+              entityId,
+              JSON.stringify(activity.metadata || {}),
             ]
           );
           insertedCount++;
