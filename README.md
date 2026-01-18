@@ -11,7 +11,9 @@ Backend service for managing university admission information, verification work
 - **Users Management** - Identity mapping, role intent, and ownership anchoring
 - **Analytics** - Event tracking and statistics aggregation
 - **Changelogs** - Immutable audit trail with advanced filtering
-- **API Documentation** - Complete Swagger documentation 
+- **Watchlists** - User interest tracking for admissions
+- **User Preferences** - Customize user experience and notification settings
+- **API Documentation** - Complete Swagger documentation (51 endpoints) 
 
 ## 🛠️ Tech Stack
 
@@ -89,7 +91,9 @@ admission-times-backend/
 │   │   ├── user-activity/   # ✅ Supporting Domain (2 endpoints)
 │   │   ├── users/           # ✅ Core Domain (5 endpoints)
 │   │   ├── analytics/       # ✅ Core Domain (5 endpoints)
-│   │   └── changelogs/      # ✅ Core Domain (3 endpoints)
+│   │   ├── changelogs/      # ✅ Core Domain (3 endpoints)
+│   │   ├── watchlists/      # ✅ Advanced Domain (5 endpoints)
+│   │   └── user-preferences/# ✅ Advanced Domain (3 endpoints)
 │   │
 │   ├── shared/              # Shared utilities
 │   │   ├── middleware/     # Custom middleware
@@ -165,7 +169,19 @@ admission-times-backend/
 - `GET /api/v1/changelogs/:id` - Get changelog by ID
 - `GET /api/v1/changelogs/admission/:admissionId` - Get admission changelogs
 
-**Total: 43 API Endpoints**
+### Watchlists Domain (5 endpoints)
+- `GET /api/v1/watchlists` - List user's watchlists
+- `POST /api/v1/watchlists` - Add admission to watchlist
+- `GET /api/v1/watchlists/:id` - Get watchlist item
+- `PATCH /api/v1/watchlists/:id` - Update watchlist notes
+- `DELETE /api/v1/watchlists/:id` - Remove from watchlist
+
+### User Preferences Domain (3 endpoints)
+- `GET /api/v1/users/me/preferences` - Get user preferences
+- `PUT /api/v1/users/me/preferences` - Update preferences (full update)
+- `PATCH /api/v1/users/me/preferences` - Partial update preferences
+
+**Total: 51 API Endpoints**
 
 ## 📚 API Documentation
 

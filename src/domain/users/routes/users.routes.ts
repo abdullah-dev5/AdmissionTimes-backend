@@ -14,6 +14,7 @@ import {
   uuidParamSchema,
 } from '../validators/users.validators';
 import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
+import userPreferencesRoutes from '../../user-preferences/routes/user-preferences.routes';
 
 const router: Router = Router();
 
@@ -111,6 +112,9 @@ router.put(
   validateBody(updateUserSchema),
   usersController.updateCurrentUser
 );
+
+// User Preferences routes (nested under /api/v1/users/me/preferences)
+router.use('/me/preferences', userPreferencesRoutes);
 
 /**
  * @swagger

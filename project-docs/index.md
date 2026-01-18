@@ -16,9 +16,14 @@ This document serves as the index for all project documentation. All documents i
 - **achievements-summary.md** - Summary of completed work and remaining tasks
 
 ### 2025-01-13
+- **PHASE5_FRONTEND_INTEGRATION_PLAN.md** - Implementation plan for Phase 5: Advanced User Experience Features including Watchlists domain and User Preferences domain (located in project root)
+
+### 2025-01-14
+- **PHASE5_FINAL_REPORT.md** - Comprehensive final report for Phase 5 completion with all domains, endpoints, statistics, and compliance status (located in project root)
+- **UPCOMING_PHASES_ROADMAP.md** - Strategic planning document for all upcoming phases (Phase 4C through Phase 13) with detailed objectives, deliverables, timelines, and priority matrix (located in project root)
 - **FUTURE_IMPLEMENTATION_CHECKLIST.md** - Comprehensive checklist of 26+ deferred features, enhancements, and improvements with priorities, effort estimates, dependencies, and implementation order (located in project root)
-- **PHASE4B_PLANNING.md** - Detailed planning document for Phase 4B (Core Domains: Users, Analytics, Changelogs) with implementation order, acceptance criteria, and timeline (located in project root)
 - **PHASE4_COMPLETE_FINAL_REPORT.md** - Comprehensive final report for Phase 4A & 4B completion with all domains, endpoints, statistics, and compliance status (located in project root)
+- **SYSTEM_CONCEPTS.md** - Foundational system concepts and principles including Event Classification Model, Role Intent Model, Data Retention Philosophy, and Frontend-Backend Contracts (located in project root)
 - **Updated all project-docs files** - Overview, requirements, tech-specs, user-structure, timeline, and achievements-summary updated with Phase 4A & 4B completion status
 
 ## Document Maintenance
