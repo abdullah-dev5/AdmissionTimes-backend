@@ -24,13 +24,16 @@ export const config = {
   // CORS configuration
   corsOrigin: process.env.CORS_ORIGIN || '*',
   
-  // Database configuration (Supabase Local)
+  // Database configuration
+  // Supports: Supabase Local, Supabase Cloud (direct), Supabase Cloud (pooling)
   database: {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '54322', 10),
     name: process.env.DB_NAME || 'postgres',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
+    // Pool size: Match your Supabase plan limit (Nano=15, Pro=60, Team=120)
+    // Setting higher than plan limit will cause connection errors
     poolMax: parseInt(process.env.DB_POOL_MAX || '20', 10),
   },
   

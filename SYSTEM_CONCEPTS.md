@@ -441,7 +441,187 @@ When implementing future features, ensure:
 
 ---
 
+## 10. Database Seeding Strategy
+
+Database seeding provides realistic test data for development, testing, and demos. This section defines the seeding approach and best practices.
+
+### 10.1 Seeding Philosophy
+
+**Purpose:**
+- Provide realistic test data for development
+- Enable consistent testing scenarios
+- Support demo environments
+- Facilitate frontend development
+
+**Principles:**
+- **Idempotency:** Seeds must be safe to run multiple times
+- **Transaction Safety:** All seeds wrapped in transactions (rollback on error)
+- **Referential Integrity:** Maintain all foreign key relationships
+- **Environment Awareness:** Different data for dev/staging/prod
+- **Realistic Data:** Use realistic but fake data (no real personal information)
+
+### 10.2 Seeding Structure
+
+**Location:** `supabase/seeds/`
+
+**Organization:**
+```
+supabase/seeds/
+  sql/
+    static_data.sql          # Static reference data (ENUMs, constants)
+  typescript/
+    admissions.seed.ts       # Admissions with relationships
+    users.seed.ts            # User accounts
+    deadlines.seed.ts        # Deadlines linked to admissions
+    changelogs.seed.ts       # Sample change history
+    notifications.seed.ts    # Sample notifications
+    user-activity.seed.ts    # User activity logs
+    analytics-events.seed.ts # Analytics events
+    watchlists.seed.ts      # Watchlists (if users exist)
+    user-preferences.seed.ts # User preferences (if users exist)
+    index.ts                # Main seed runner
+    utils.ts                # Helper functions
+    types.ts                # Type definitions
+```
+
+### 10.3 Seeding Best Practices
+
+**Idempotency:**
+- Use `ON CONFLICT DO NOTHING` or check before insert
+- Track seeded data in `seed_tracking` table
+- Safe to run `pnpm seed` multiple times
+
+**Transaction Safety:**
+- Wrap all seeds in transactions
+- Rollback on any error
+- Atomic operations per seed file
+
+**Data Quality:**
+- Maintain all foreign key relationships
+- Use valid enum values
+- Consistent data types
+- Realistic but fake data
+
+**Performance:**
+- Use batch inserts where possible
+- Efficient transaction usage
+- Index-friendly operations
+
+**Maintainability:**
+- Clear file structure
+- Well-documented code
+- Easy to extend
+- Version controlled
+
+### 10.4 Seed Data Priorities
+
+**Priority 1 - Core Data (Essential):**
+1. **Admissions** (15-20 records)
+   - Various verification statuses (verified, pending, rejected, draft)
+   - Different program types (undergraduate, graduate, certificate)
+   - Different degree levels (bachelor, master, PhD)
+   - Mix of active/inactive records
+
+2. **Deadlines** (20-30 records)
+   - Linked to admissions (2-3 deadlines per admission)
+   - Mix of deadline types (application, document_submission, payment)
+   - Some upcoming, some past dates
+
+3. **Users** (8-10 records)
+   - Students (5-6 records)
+   - Universities (2-3 records)
+   - Admins (1-2 records)
+
+**Priority 2 - Supporting Data:**
+4. **Changelogs** - Sample change history linked to admissions
+5. **Notifications** - Various categories and priorities
+6. **User Activity** - Recent activity feed
+7. **Analytics Events** - Sample analytics data
+
+**Priority 3 - Advanced Features:**
+8. **Watchlists** - Users watching admissions (if users exist)
+9. **User Preferences** - Notification and UI preferences (if users exist)
+
+### 10.5 Usage
+
+**Commands:**
+```bash
+# Seed all data
+pnpm seed
+
+# Seed specific table
+pnpm seed:admissions
+pnpm seed:users
+
+# Reset all seed data
+pnpm seed:reset
+
+# Reset specific table
+pnpm seed:reset:admissions
+```
+
+**Execution Order:**
+1. Users (if needed for relationships)
+2. Admissions (core data)
+3. Deadlines (depends on admissions)
+4. Changelogs (depends on admissions)
+5. Notifications (can depend on admissions/users)
+6. User Activity (depends on users/admissions)
+7. Analytics Events (depends on entities)
+8. Watchlists (depends on users/admissions)
+9. User Preferences (depends on users)
+
+### 10.6 Seed Tracking
+
+**Implementation:**
+- Create `seed_tracking` table to track executed seeds
+- Record seed name, execution timestamp
+- Check before seeding to prevent duplicates
+- Support selective re-seeding if needed
+
+**Table Structure:**
+```sql
+CREATE TABLE IF NOT EXISTS seed_tracking (
+  id SERIAL PRIMARY KEY,
+  seed_name VARCHAR(255) UNIQUE NOT NULL,
+  executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 10.7 Environment Considerations
+
+**Development:**
+- Full seed data (all tables)
+- Realistic test scenarios
+- Can reset/re-seed frequently
+
+**Staging:**
+- Similar to development
+- May use production-like data volumes
+- Test data acceptable
+
+**Production:**
+- **NEVER seed production with test data**
+- Only seed reference data if needed
+- Use real data migration scripts instead
+
+### 10.8 Future Requirements
+
+When adding new tables or domains:
+1. Create corresponding seed file in `supabase/seeds/typescript/`
+2. Follow existing seed patterns
+3. Maintain referential integrity
+4. Update seed runner to include new seed
+5. Document seed data structure
+
+**Status:** ✅ Implemented  
+**Applies From:** Phase 5 onward  
+**Last Updated:** January 18, 2026  
+**Reference:** See `SEEDING_PLAN.md` for detailed implementation plan
+
+---
+
 **Status:** Active  
 **Applies From:** Phase 3 onward  
-**Last Updated:** January 13, 2025  
+**Last Updated:** January 18, 2026  
 **Compliance:** ✅ 95% (Analytics domain deferred)

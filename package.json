@@ -9,6 +9,9 @@
     "start": "node -r tsconfig-paths/register dist/index.js",
     "start:dev": "pnpm dev",
     "type-check": "tsc --noEmit",
+    "migrate": "ts-node -r tsconfig-paths/register scripts/run-migrations.ts",
+    "seed": "ts-node -r tsconfig-paths/register supabase/seeds/typescript/index.ts",
+    "seed:reset": "ts-node -r tsconfig-paths/register supabase/seeds/typescript/reset.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

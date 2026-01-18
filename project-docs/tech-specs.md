@@ -1,6 +1,6 @@
 # Technical Specifications
 
-**Last Updated:** January 13, 2025 (Phase 4B Complete)
+**Last Updated:** January 18, 2026 (Supabase Cloud Setup & Seeding System Complete)
 
 ## Tech Stack
 
@@ -11,10 +11,13 @@
 - **Package Manager**: pnpm v10+
 
 ### Database
-- **PostgreSQL**: Primary database (via Supabase)
-- **Supabase**: Database hosting and RLS (Row Level Security) policies
+- **PostgreSQL**: Primary database (via Supabase Cloud)
+- **Supabase Cloud**: Database hosting with Session Pooler (IPv4 compatible)
 - **Database Client**: `pg` (PostgreSQL client for Node.js)
-- **Connection Pooling**: Built-in pg pool management
+- **Connection Pooling**: Built-in pg pool management (Session Pooler)
+- **Database Migrations**: Migration system with tracking (`pnpm migrate`)
+- **Database Seeding**: Comprehensive seeding system with 9 seed files (`pnpm seed`)
+- **RLS (Row Level Security)**: Policies configured for data access control
 
 ### Validation & Documentation
 - **Joi**: Schema validation for request bodies and query parameters

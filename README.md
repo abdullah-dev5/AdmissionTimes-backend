@@ -53,7 +53,10 @@ cp .env.example .env
 4. Set up database:
 ```bash
 # Run Supabase migrations
-# See supabase/migrations/ for migration files
+pnpm migrate
+
+# Seed database with test data
+pnpm seed
 ```
 
 ## 🚀 Development
@@ -71,6 +74,9 @@ The server will start on `http://localhost:3000` (or the port specified in your 
 - `pnpm build` - Build the TypeScript project
 - `pnpm start` - Start the production server (requires build first)
 - `pnpm type-check` - Type check without building
+- `pnpm migrate` - Run database migrations
+- `pnpm seed` - Seed database with test data
+- `pnpm seed <table>` - Seed specific table (e.g., `pnpm seed admissions`)
 
 ## 📁 Project Structure
 
@@ -106,7 +112,12 @@ admission-times-backend/
 │
 ├── project-docs/             # Project documentation
 ├── supabase/                 # Supabase configuration
-│   └── migrations/           # Database migrations
+│   ├── migrations/           # Database migrations
+│   └── seeds/                # Database seeds
+│       ├── typescript/       # TypeScript seed files
+│       └── sql/              # SQL seed files
+├── scripts/                  # Utility scripts
+│   └── run-migrations.ts     # Migration runner
 ├── dist/                     # Compiled JavaScript (generated)
 └── tests/                    # Test files (planned)
 ```
@@ -205,10 +216,11 @@ Currently using **mock authentication** for development. Real Supabase Auth inte
 
 ## 🗄️ Database
 
-The project uses **PostgreSQL** via Supabase with:
+The project uses **PostgreSQL** via Supabase Cloud with:
 - Row Level Security (RLS) policies
 - Database migrations
-- Connection pooling
+- Connection pooling (Session Pooler for IPv4 compatibility)
+- Database seeding system
 
 **Database Tables:**
 - `admissions` - Core admission records
@@ -218,6 +230,15 @@ The project uses **PostgreSQL** via Supabase with:
 - `user_activity` - Activity tracking
 - `analytics_events` - Analytics events
 - `users` - User identity mapping
+- `watchlists` - User watchlists
+- `user_preferences` - User preferences
+
+**Database Seeding:**
+- Comprehensive seeding system with 9 seed files
+- Idempotent (safe to run multiple times)
+- Transaction-safe execution
+- 120+ realistic test records
+- See `supabase/seeds/typescript/` for seed files
 
 ## 📖 Documentation
 
@@ -259,9 +280,10 @@ The project follows **Clean Architecture** and **Domain-Driven Design** principl
 
 ### Steps
 1. Build the project: `pnpm build`
-2. Set up environment variables
-3. Run database migrations
-4. Start the server: `pnpm start`
+2. Set up environment variables (see `.env.example`)
+3. Run database migrations: `pnpm migrate`
+4. Seed database (optional): `pnpm seed`
+5. Start the server: `pnpm start`
 
 ## 📝 Environment Variables
 
@@ -269,9 +291,12 @@ See `.env.example` for all available environment variables. Key variables:
 
 - `PORT` - Server port (default: 3000)
 - `NODE_ENV` - Environment (development/production)
-- `DATABASE_URL` - PostgreSQL connection string
-- `SUPABASE_URL` - Supabase project URL
-- `SUPABASE_ANON_KEY` - Supabase anonymous key
+- `DB_HOST` - Database host (Supabase Cloud pooler)
+- `DB_PORT` - Database port (5432)
+- `DB_NAME` - Database name (postgres)
+- `DB_USER` - Database user (postgres.[PROJECT_REF] for pooler)
+- `DB_PASSWORD` - Database password
+- `DB_POOL_MAX` - Connection pool size (15 for free tier)
 
 ## 🤝 Contributing
 
