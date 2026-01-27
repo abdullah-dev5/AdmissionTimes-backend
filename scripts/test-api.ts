@@ -572,6 +572,60 @@ async function main() {
   printResult(results[results.length - 1]);
 
   // ============================================
+  // Auth Domain (4 endpoints)
+  // ============================================
+  printSection('Auth Domain (4 endpoints)');
+  
+  const uniqueEmail = `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}@test.com`;
+  let createdUserId: string | null = null;
+  
+  results.push(await runTest('Sign Up (Student)', 'POST', '/api/v1/auth/signup', {}, {
+    email: uniqueEmail,
+    password: 'password123',
+    user_type: 'student',
+    display_name: 'Test Student',
+  }));
+  printResult(results[results.length - 1]);
+  
+  // Extract user ID from signup response if successful
+  if (results[results.length - 1].status === 201) {
+    try {
+      const signupResult = await makeRequest('POST', '/api/v1/auth/signup', {}, {
+        email: `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}@test.com`,
+        password: 'password123',
+        user_type: 'student',
+        display_name: 'Test Student',
+      });
+      if (signupResult.status === 201 && signupResult.data.data?.user?.id) {
+        createdUserId = signupResult.data.data.user.id;
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+  
+  results.push(await runTest('Sign In', 'POST', '/api/v1/auth/signin', {}, {
+    email: uniqueEmail,
+    password: 'password123',
+  }));
+  printResult(results[results.length - 1]);
+  
+  results.push(await runTest('Sign In (Invalid Credentials)', 'POST', '/api/v1/auth/signin', {}, {
+    email: 'nonexistent@test.com',
+    password: 'wrongpassword',
+  }));
+  printResult(results[results.length - 1]);
+  
+  results.push(await runTest('Sign Out', 'POST', '/api/v1/auth/signout', TEST_HEADERS.student));
+  printResult(results[results.length - 1]);
+  
+  results.push(await runTest('Get Current User', 'GET', '/api/v1/auth/me', TEST_HEADERS.student));
+  printResult(results[results.length - 1]);
+  
+  results.push(await runTest('Get Current User (No Header)', 'GET', '/api/v1/auth/me', {}));
+  printResult(results[results.length - 1]);
+
+  // ============================================
   // Dashboard Domain (4 endpoints)
   // ============================================
   printSection('Dashboard Domain (4 endpoints)');
