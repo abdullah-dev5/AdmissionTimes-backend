@@ -6,6 +6,7 @@
  */
 
 import express, { Application, Request, Response } from 'express';
+import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import { config } from '@config/config';
 import { errorHandler } from '@shared/middleware/errorHandler';
@@ -18,7 +19,20 @@ import { swaggerSpec } from '@config/swagger';
 // Initialize Express application
 const app: Application = express();
 
+// CORS configuration
+// Allow frontend to make requests from configured origin
+const corsOptions = {
+  origin: config.corsOrigin === '*' 
+    ? true // Allow all origins in development
+    : config.corsOrigin.split(',').map(origin => origin.trim()), // Support multiple origins
+  credentials: true, // Allow cookies/auth headers
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role', 'x-university-id'],
+  exposedHeaders: ['x-total-count', 'x-page', 'x-per-page'],
+};
+
 // Middleware
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
