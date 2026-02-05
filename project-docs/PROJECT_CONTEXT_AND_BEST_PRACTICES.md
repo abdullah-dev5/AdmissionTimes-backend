@@ -1,8 +1,8 @@
 # Project Context & Best Practices Guide
 
-**Last Updated:** January 2025  
+**Last Updated:** February 2026  
 **Project:** AdmissionTimes Backend  
-**Phase:** 3 (Admissions Domain Complete)
+**Phase:** 4C-1 (Real Authentication - In Progress)
 
 ---
 
@@ -41,7 +41,14 @@ Backend API for managing university admission times, scheduling, and verificatio
 - ✅ Phase 1: Project Setup & Database Schema
 - ✅ Phase 2: Database Migrations & RLS Policies
 - ✅ Phase 3: Admissions Domain (CRUD, Status Transitions, Changelog Integration)
-- 🔄 Phase 4: Users, Analytics, Notifications, Deadlines (Planned)
+- 🔄 Phase 4C-1: Real Authentication (JWT) - **In Progress**
+  - ✅ Dependencies installed (jsonwebtoken, jwks-rsa)
+  - ✅ Environment variables configured
+  - ✅ JWT middleware implemented
+  - ✅ Main app updated to use jwtAuth
+  - 🔄 Service layer updates in progress
+- 📋 Phase 4C-2: CORS Configuration - Planned
+- 📋 Phase 4C-3+: Rate Limiting, Security Headers, etc. - Planned
 
 ---
 
@@ -461,30 +468,34 @@ const result = await query(
 ## 🔒 Security Practices
 
 ### Current Implementation
-- ✅ Parameterized queries (SQL injection prevention)
-- ✅ Input validation (Joi schemas)
-- ✅ Environment variables for secrets
-- ✅ No sensitive data in error messages
-- ✅ CORS configuration (to be added)
-
-### Authentication (Current)
-- ⚠️ Mock authentication middleware (Phase 3)
-- 🔄 Real Supabase Auth planned for Phase 4
-- User context attached via `req.user`
+### Authentication (Phase 4C-1 - In Progress)
+- ✅ JWT technology implemented via `jsonwebtoken` package
+- ✅ JWT middleware created (`src/shared/middleware/jwtAuth.ts`)
+- ✅ Supabase JWT integration configured
+- ✅ Real token validation via HMAC-HS256
+- 🔄 Service layer updates to use real user IDs
+- 📋 Frontend integration with Supabase Auth (frontend task)
+- User context attached via `req.user` (validated from JWT claims)
+- Token validation includes:
+  - Signature verification using JWT secret
+  - Issuer validation
+  - Audience validation
+  - Expiry tolerance (5 minute clock skew)
 
 ### Authorization
 - Access control in service layer
 - Role-based checks (`admin`, `university`, `student`, `guest`)
 - University can only see their own admissions
+- Role-based endpoint access via `requireRole()` middleware (available for use)
 
-### Security Checklist (Future)
-- [ ] Implement real JWT authentication
-- [ ] Add rate limiting
-- [ ] Add CORS configuration
-- [ ] Add helmet.js for security headers
+### Security Checklist (Remaining)
+- [ ] Test JWT authentication end-to-end
+- [ ] Add rate limiting (Phase 4C-3)
+- [ ] Enhance CORS configuration (Phase 4C-2)
+- [ ] Add helmet.js for security headers (Phase 4C-4)
 - [ ] Implement CSRF protection
 - [ ] Add request timeout handling
-- [ ] Sanitize file uploads (if added)
+- [ ] Add input sanitization (Phase 4C-5)
 
 ---
 

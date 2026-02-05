@@ -233,3 +233,10 @@ coverage/
 *.backup
 *.swp
 *.swo
+# ============================================================================
+# Documentation - Cleanup & Temporary Reports
+# ============================================================================
+# Cleanup summary reports (not needed in version control)
+CLEANUP_AND_CONSOLIDATION_SUMMARY.md
+# Keep main documentation
+!COMPREHENSIVE_SYSTEM_DOCUMENTATION.md

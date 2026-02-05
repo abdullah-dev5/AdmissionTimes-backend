@@ -90,11 +90,13 @@ export const signOut = async (): Promise<{ message: string }> => {
 /**
  * Get current user
  * 
- * @param userId - User ID from header or token
+ * @param userId - User ID from JWT middleware (database ID, not auth_user_id)
  * @returns User data
  * @throws AppError if user not found
  */
 export const getCurrentUser = async (userId: string): Promise<AuthUser> => {
+  // JWT middleware now returns database ID, not auth_user_id
+  // Use findUserById instead of findUserByAuthUserId
   const user = await authModel.findUserById(userId);
 
   if (!user) {

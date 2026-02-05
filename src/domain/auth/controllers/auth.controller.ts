@@ -145,16 +145,16 @@ export const signOut = async (_req: Request, res: Response): Promise<void> => {
  */
 export const getCurrentUser = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Get user ID from header (development) or JWT token (production)
-    const userId = req.headers['x-user-id'] as string;
+    // Get user from JWT middleware
+    const authUserId = req.user?.id || null;
 
-    if (!userId) {
+    if (!authUserId) {
       sendError(res, 'Unauthorized', 401);
       return;
     }
 
     // Call service
-    const user = await authService.getCurrentUser(userId);
+    const user = await authService.getCurrentUser(authUserId);
 
     // Return success response
     sendSuccess(res, user, 'User retrieved successfully', 200);
