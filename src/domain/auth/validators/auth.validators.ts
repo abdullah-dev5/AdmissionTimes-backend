@@ -12,7 +12,7 @@ import { USER_TYPE } from '@config/constants';
  */
 export const signUpSchema = Joi.object({
   email: Joi.string()
-    .email()
+    .email({ tlds: { allow: false } }) // Allow any TLD including .test
     .required()
     .messages({
       'string.email': 'Invalid email format',
@@ -48,6 +48,13 @@ export const signUpSchema = Joi.object({
     .messages({
       'string.guid': 'University ID must be a valid UUID',
     }),
+
+  auth_user_id: Joi.string()
+    .uuid()
+    .optional()
+    .messages({
+      'string.guid': 'Auth user ID must be a valid UUID',
+    }),
 });
 
 /**
@@ -55,7 +62,7 @@ export const signUpSchema = Joi.object({
  */
 export const signInSchema = Joi.object({
   email: Joi.string()
-    .email()
+    .email({ tlds: { allow: false } }) // Allow any TLD including .test
     .required()
     .messages({
       'string.email': 'Invalid email format',

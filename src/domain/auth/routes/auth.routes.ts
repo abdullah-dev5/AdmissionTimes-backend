@@ -9,10 +9,11 @@
  *   description: Authentication endpoints (sign up, sign in, sign out)
  */
 
-import express from 'express';
+import express, { Router } from 'express';
 import * as authController from '../controllers/auth.controller';
+import { jwtAuth } from '@shared/middleware/jwtAuth';
 
-const router = express.Router();
+const router: Router = express.Router();
 
 /**
  * @swagger
@@ -117,6 +118,6 @@ router.post('/signout', authController.signOut);
  *       401:
  *         description: Unauthorized
  */
-router.get('/me', authController.getCurrentUser);
+router.get('/me', jwtAuth, authController.getCurrentUser);
 
 export default router;

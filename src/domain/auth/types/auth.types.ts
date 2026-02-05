@@ -15,6 +15,7 @@ export interface SignUpDTO {
   user_type: UserType;
   display_name?: string;
   university_id?: string; // Required if user_type is 'university'
+  auth_user_id?: string; // Supabase Auth UUID (optional)
 }
 
 /**

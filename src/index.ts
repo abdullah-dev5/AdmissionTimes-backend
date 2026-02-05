@@ -5,6 +5,21 @@
  * routes, and error handlers.
  */
 
+// Type augmentation for Express Request (must be at top level)
+import { UserContext } from '@domain/admissions/types/admissions.types';
+
+declare global {
+  namespace Express {
+    interface Request {
+      /**
+       * User context attached by authentication middleware
+       * Populated from JWT token claims by jwtAuth middleware
+       */
+      user?: UserContext;
+    }
+  }
+}
+
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
@@ -12,9 +27,10 @@ import { config } from '@config/config';
 import { errorHandler } from '@shared/middleware/errorHandler';
 import { sendSuccess } from '@shared/utils/response';
 import { initializePool, testConnection, closePool } from '@db/connection';
-import { mockAuth } from '@shared/middleware/auth';
+import { jwtAuth } from '@shared/middleware/jwtAuth';
 import { registerDomains } from '@domain/index';
 import { swaggerSpec } from '@config/swagger';
+import authRoutes from '@domain/auth/routes/auth.routes';
 
 // Initialize Express application
 const app: Application = express();
@@ -44,10 +60,13 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customfavIcon: '/favicon.ico',
 }));
 
-// ⚠️ AUTH DISABLED — placeholder only
-// This middleware attaches user context but does not validate or block requests
-// Will be replaced with real Supabase Auth in future phase
-app.use(mockAuth);
+// Auth routes (public) - sign in/up must be accessible without JWT
+app.use('/api/v1/auth', authRoutes);
+
+// 🔐 REAL JWT AUTHENTICATION (Phase 4C-1)
+// All other routes under /api/v1 require valid JWT token
+// Health check and API docs remain public
+app.use('/api/v1', jwtAuth);
 
 /**
  * @swagger

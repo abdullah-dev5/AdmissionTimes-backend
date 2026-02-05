@@ -1,6 +1,8 @@
--- Migration: Row Level Security (RLS) Policies
+-- Migration: Row Level Security (RLS) Policies (PHASE 1)
 -- Created: 2026-01-05
--- Description: Enables RLS and creates security policies for all tables
+-- Updated: 2026-02-05
+-- Description: Role-based RLS policies with auth.uid() enforcement
+-- Status: Phase 1 - Secure RLS & JWT Verification
 
 -- ============================================================================
 -- ENABLE ROW LEVEL SECURITY
@@ -17,136 +19,215 @@ ALTER TABLE analytics_events ENABLE ROW LEVEL SECURITY;
 -- ADMISSIONS POLICIES
 -- ============================================================================
 
--- Public read access for verified admissions
+-- Policy 1: Public (anonymous) can read only VERIFIED admissions
 CREATE POLICY "Public read verified admissions"
   ON admissions
   FOR SELECT
-  USING (verification_status = 'verified' AND is_active = true);
+  USING (auth.role() = 'anon' AND verification_status = 'verified' AND is_active = true);
 
--- Authenticated users can read all admissions (for now, allow all)
--- TODO: Restrict to authenticated users when auth is implemented
-CREATE POLICY "Authenticated read all admissions"
+-- Policy 2: Authenticated students see verified + their own (all statuses)
+CREATE POLICY "Student read own and verified admissions"
   ON admissions
   FOR SELECT
-  USING (true);
+  USING (
+    auth.role() = 'authenticated' 
+    AND (
+      (verification_status = 'verified' AND is_active = true)
+      OR created_by = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+    )
+  );
 
--- Authenticated write access (for universities and admins)
--- TODO: Restrict based on user role when auth is implemented
-CREATE POLICY "Authenticated write admissions"
+-- Policy 3: Universities see their own admissions (all statuses)
+CREATE POLICY "University read own admissions"
   ON admissions
-  FOR ALL
-  USING (true)
-  WITH CHECK (true);
-
--- ============================================================================
--- CHANGELOGS POLICIES
--- ============================================================================
-
--- Public read access (audit trail is public)
-CREATE POLICY "Public read changelogs"
-  ON changelogs
   FOR SELECT
-  USING (true);
+  USING (
+    auth.role() = 'authenticated'
+    AND created_by = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
 
--- System-only insert (immutable - only system can insert)
--- TODO: Restrict to service role when auth is implemented
-CREATE POLICY "System insert changelogs"
-  ON changelogs
+-- Policy 4: Admins see all admissions
+CREATE POLICY "Admin read all admissions"
+  ON admissions
+  FOR SELECT
+  USING (
+    (SELECT role FROM users WHERE auth_user_id = auth.uid()) = 'admin'
+  );
+
+-- Policy 5: Universities can create admissions
+CREATE POLICY "University create admissions"
+  ON admissions
   FOR INSERT
-  WITH CHECK (true);
+  WITH CHECK (
+    auth.role() = 'authenticated'
+    AND (SELECT role FROM users WHERE auth_user_id = auth.uid()) = 'university'
+  );
 
--- No updates or deletes (immutable table)
--- RLS will prevent all updates/deletes by default
+-- Policy 6: Universities can update their own admissions
+CREATE POLICY "University update own admissions"
+  ON admissions
+  FOR UPDATE
+  USING (
+    created_by = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  )
+  WITH CHECK (
+    created_by = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
 
--- ============================================================================
--- DEADLINES POLICIES
--- ============================================================================
-
--- Public read access
-CREATE POLICY "Public read deadlines"
-  ON deadlines
-  FOR SELECT
-  USING (true);
-
--- Authenticated modify access
--- TODO: Restrict based on user role when auth is implemented
-CREATE POLICY "Authenticated modify deadlines"
-  ON deadlines
-  FOR ALL
-  USING (true)
-  WITH CHECK (true);
+-- Policy 7: Admins can update all admissions
+CREATE POLICY "Admin update all admissions"
+  ON admissions
+  FOR UPDATE
+  USING (
+    (SELECT role FROM users WHERE auth_user_id = auth.uid()) = 'admin'
+  )
+  WITH CHECK (
+    (SELECT role FROM users WHERE auth_user_id = auth.uid()) = 'admin'
+  );
 
 -- ============================================================================
 -- NOTIFICATIONS POLICIES
 -- ============================================================================
 
--- Users can read their own notifications
--- TODO: Use auth.uid() when auth is implemented
--- For now, allow read based on user_type matching
-CREATE POLICY "Read own notifications"
+-- Policy 1: Users see only their own notifications
+CREATE POLICY "User read own notifications"
   ON notifications
   FOR SELECT
-  USING (true); -- TODO: Replace with auth.uid() = user_id
+  USING (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
 
--- Users can update their own notifications (mark as read)
-CREATE POLICY "Update own notifications"
+-- Policy 2: Users can update their own notifications (mark as read)
+CREATE POLICY "User update own notifications"
   ON notifications
   FOR UPDATE
-  USING (true) -- TODO: Replace with auth.uid() = user_id
-  WITH CHECK (true);
+  USING (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  )
+  WITH CHECK (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
 
--- System can insert notifications
--- TODO: Restrict to service role when auth is implemented
-CREATE POLICY "System insert notifications"
-  ON notifications
-  FOR INSERT
-  WITH CHECK (true);
+-- Policy 3: Only backend (service role) can insert
+-- No policy needed - service role bypasses RLS
 
 -- ============================================================================
--- USER ACTIVITY POLICIES
+-- USER_PREFERENCES POLICIES
 -- ============================================================================
 
--- Users can read their own activity
--- TODO: Use auth.uid() when auth is implemented
-CREATE POLICY "Read own activity"
+CREATE POLICY "User read own preferences"
+  ON user_preferences
+  FOR SELECT
+  USING (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
+
+CREATE POLICY "User write own preferences"
+  ON user_preferences
+  FOR ALL
+  USING (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  )
+  WITH CHECK (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
+
+-- ============================================================================
+-- WATCHLISTS POLICIES
+-- ============================================================================
+
+CREATE POLICY "User read own watchlist"
+  ON watchlists
+  FOR SELECT
+  USING (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
+
+CREATE POLICY "User write own watchlist"
+  ON watchlists
+  FOR ALL
+  USING (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  )
+  WITH CHECK (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
+
+-- ============================================================================
+-- CHANGELOGS POLICIES (Audit Trail - Immutable)
+-- ============================================================================
+
+-- Policy 1: Admins see all changelogs
+CREATE POLICY "Admin read changelogs"
+  ON changelogs
+  FOR SELECT
+  USING (
+    (SELECT role FROM users WHERE auth_user_id = auth.uid()) = 'admin'
+  );
+
+-- Policy 2: Users see changelogs for their own admissions
+CREATE POLICY "User read changelogs for own admissions"
+  ON changelogs
+  FOR SELECT
+  USING (
+    admission_id IN (
+      SELECT id FROM admissions 
+      WHERE created_by = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+    )
+  );
+
+-- No INSERT/UPDATE/DELETE policies - only service role can write (audit immutability)
+
+-- ============================================================================
+-- DEADLINES POLICIES
+-- ============================================================================
+
+-- Policy 1: Public can read deadlines for verified admissions
+CREATE POLICY "Public read deadlines for verified admissions"
+  ON deadlines
+  FOR SELECT
+  USING (
+    admission_id IN (
+      SELECT id FROM admissions 
+      WHERE verification_status = 'verified' AND is_active = true
+    )
+  );
+
+-- Policy 2: Authenticated can read all deadlines
+CREATE POLICY "Authenticated read all deadlines"
+  ON deadlines
+  FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+-- Policy 3: Only backend can write deadlines
+-- No policy needed - service role bypasses RLS
+
+-- ============================================================================
+-- USER_ACTIVITY POLICIES
+-- ============================================================================
+
+-- Policy 1: Only backend can insert (system logging)
+-- No policy needed - service role bypasses RLS
+
+-- Policy 2: Users can read their own activity (optional)
+CREATE POLICY "User read own activity"
   ON user_activity
   FOR SELECT
-  USING (true); -- TODO: Replace with auth.uid() = user_id
-
--- Authenticated users can insert their own activity
--- TODO: Restrict based on user role when auth is implemented
-CREATE POLICY "Insert own activity"
-  ON user_activity
-  FOR INSERT
-  WITH CHECK (true);
+  USING (
+    user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
+  );
 
 -- ============================================================================
--- ANALYTICS EVENTS POLICIES
+-- ANALYTICS_EVENTS POLICIES
 -- ============================================================================
 
--- Admin read access only
--- TODO: Restrict to admin role when auth is implemented
-CREATE POLICY "Admin read analytics"
+-- Policy 1: Only backend can insert
+-- No policy needed - service role bypasses RLS
+
+-- Policy 2: Admins can read analytics
+CREATE POLICY "Admin read analytics events"
   ON analytics_events
   FOR SELECT
-  USING (true); -- TODO: Replace with user role check
-
--- System can insert analytics events
--- TODO: Restrict to service role when auth is implemented
-CREATE POLICY "System insert analytics"
-  ON analytics_events
-  FOR INSERT
-  WITH CHECK (true);
-
--- ============================================================================
--- NOTES FOR FUTURE AUTH INTEGRATION
--- ============================================================================
-
--- When Supabase Auth is integrated:
--- 1. Replace `USING (true)` with `USING (auth.uid() = user_id)` for user-specific data
--- 2. Add role-based policies using `auth.jwt() ->> 'user_role'`
--- 3. Use service role for system inserts (bypass RLS)
--- 4. Update policies to check user roles:
---    - Students: read verified admissions, own notifications/activity
---    - Universities: read/write own admissions, own notifications
---    - Admins: full access to all tables
+  USING (
+    (SELECT role FROM users WHERE auth_user_id = auth.uid()) = 'admin'
+  );

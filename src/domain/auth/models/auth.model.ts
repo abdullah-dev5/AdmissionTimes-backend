@@ -41,13 +41,14 @@ export const emailExists = async (email: string): Promise<boolean> => {
 export const createUser = async (data: SignUpDTO): Promise<AuthUser> => {
   const sql = `
     INSERT INTO users (
-      email, password, role, display_name, organization_id, status
+      auth_user_id, email, password, role, display_name, organization_id, status
     )
-    VALUES ($1, $2, $3, $4, $5, $6)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING id, email, role, organization_id, display_name, created_at, updated_at
   `;
 
   const params = [
+    data.auth_user_id || null,
     data.email,
     data.password, // Plain text for now
     data.user_type,
@@ -64,6 +65,37 @@ export const createUser = async (data: SignUpDTO): Promise<AuthUser> => {
     email: user.email,
     role: user.role as any, // Map role to user_type
     university_id: user.organization_id, // Map organization_id to university_id in response
+    display_name: user.display_name,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  };
+};
+
+/**
+ * Find user by auth_user_id (Supabase Auth UUID)
+ *
+ * @param authUserId - Supabase Auth UUID
+ * @returns User record (without password) or null if not found
+ */
+export const findUserByAuthUserId = async (authUserId: string): Promise<AuthUser | null> => {
+  const sql = `
+    SELECT id, email, role, organization_id, display_name, created_at, updated_at
+    FROM users
+    WHERE auth_user_id = $1
+  `;
+  const result = await query(sql, [authUserId]);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const user = result.rows[0];
+
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role as any,
+    university_id: user.organization_id,
     display_name: user.display_name,
     created_at: user.created_at,
     updated_at: user.updated_at,

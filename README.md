@@ -10,26 +10,26 @@ Backend service for managing university admission information, verification work
 
 ## 📖 Documentation
 
-👉 **[docs/00_START_HERE.md](docs/00_START_HERE.md)** ⭐ Start here for visual overview  
-👉 **[docs/MASTER_DOCUMENTATION_INDEX.md](docs/MASTER_DOCUMENTATION_INDEX.md)** - Links to all documentation
+### 🎯 Main Source of Truth
+👉 **[COMPREHENSIVE_SYSTEM_DOCUMENTATION.md](COMPREHENSIVE_SYSTEM_DOCUMENTATION.md)** ⭐ **Single source of truth** - All architecture, fixes, auth policy, achievements, and future roadmap
 
-### For Frontend Team 👨‍💻
-- **[docs/API_CONTRACT_CORRECTED_JAN_2026.md](docs/API_CONTRACT_CORRECTED_JAN_2026.md)** - Complete API specification
-- **[docs/ALIGNMENT_FIXES_AND_RECOMMENDATIONS.md](docs/ALIGNMENT_FIXES_AND_RECOMMENDATIONS.md)** - Code fixes & examples
-- **[docs/FRONTEND_TODO_ALIGNMENT_JAN_2026.md](docs/FRONTEND_TODO_ALIGNMENT_JAN_2026.md)** - Integration checklist
+### Quick Start by Role
+- **Frontend Team**: [docs/00_START_HERE.md](docs/00_START_HERE.md) → [docs/FRONTEND_SETUP_GUIDE.md](docs/FRONTEND_SETUP_GUIDE.md) → [docs/API_CONTRACT_CORRECTED_JAN_2026.md](docs/API_CONTRACT_CORRECTED_JAN_2026.md)
+- **Backend Team**: [COMPREHENSIVE_SYSTEM_DOCUMENTATION.md](COMPREHENSIVE_SYSTEM_DOCUMENTATION.md) → [docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md](docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md) → [docs/CODE_REVIEW_COMPLETE_JAN_2026.md](docs/CODE_REVIEW_COMPLETE_JAN_2026.md)
+- **Project Managers**: [COMPREHENSIVE_SYSTEM_DOCUMENTATION.md](COMPREHENSIVE_SYSTEM_DOCUMENTATION.md) (Executive Summary section)
 
-### For Backend Team 🛠️
-- **[docs/FINAL_SYSTEM_REPORT_JAN_2026.md](docs/FINAL_SYSTEM_REPORT_JAN_2026.md)** - System architecture & 51 endpoints
-- **[docs/CODE_REVIEW_COMPLETE_JAN_2026.md](docs/CODE_REVIEW_COMPLETE_JAN_2026.md)** - Code review findings
-- **[docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md](docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md)** - Phase 4C+ roadmap
-
-### For Project Managers 📊
-- **[docs/DELIVERY_SUMMARY_JAN_2026.md](docs/DELIVERY_SUMMARY_JAN_2026.md)** - Delivery status
-- **[docs/COMPLETE_PROJECT_ANALYSIS_FINAL_REPORT.md](docs/COMPLETE_PROJECT_ANALYSIS_FINAL_REPORT.md)** - Full analysis
+### Reference Documents
+- **[docs/API_CONTRACT_CORRECTED_JAN_2026.md](docs/API_CONTRACT_CORRECTED_JAN_2026.md)** - Complete API contract (51 endpoints)
+- **[docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md](docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md)** - Prioritized TODO list and phase roadmap
+- **[docs/CODE_REVIEW_COMPLETE_JAN_2026.md](docs/CODE_REVIEW_COMPLETE_JAN_2026.md)** - Code review & implementation verification
+- **[docs/FINAL_SYSTEM_REPORT_JAN_2026.md](docs/FINAL_SYSTEM_REPORT_JAN_2026.md)** - Detailed system architecture report
+- **[docs/FRONTEND_TODO_ALIGNMENT_JAN_2026.md](docs/FRONTEND_TODO_ALIGNMENT_JAN_2026.md)** - Frontend integration checklist
+- **[docs/FRONTEND_SETUP_GUIDE.md](docs/FRONTEND_SETUP_GUIDE.md)** - Frontend setup & environment guide
+- **[docs/00_START_HERE.md](docs/00_START_HERE.md)** - Visual ASCII overview
 
 ### Additional Resources 📚
 - **[project-docs/](project-docs/)** - Architecture & planning documents
-- **[docs/deprecated/](docs/deprecated/)** - Archived documentation
+- **[phases/](phases/)** - Detailed phase completion reports
 - **[postman_collection.json](postman_collection.json)** - API testing suite
 
 ---

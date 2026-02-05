@@ -20,7 +20,6 @@ import analyticsRoutes from './analytics/routes/analytics.routes';
 import changelogsRoutes from './changelogs/routes/changelogs.routes';
 import watchlistsRoutes from './watchlists/routes/watchlists.routes';
 import dashboardRoutes from './dashboard/routes/dashboard.routes';
-import authRoutes from './auth/routes/auth.routes';
 
 /**
  * Registers all domain routes with the Express application
@@ -28,9 +27,6 @@ import authRoutes from './auth/routes/auth.routes';
  * @param app - Express application instance
  */
 export function registerDomains(app: Application): void {
-  // Auth Domain (Basic Authentication)
-  app.use('/api/v1/auth', authRoutes);
-  
   // Admissions Domain (Core)
   app.use('/api/v1/admissions', admissionsRoutes);
   

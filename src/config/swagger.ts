@@ -42,7 +42,7 @@ const options: swaggerJsdoc.Options = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'JWT token authentication (currently using mock auth)',
+          description: 'JWT token authentication (Supabase Auth)',
         },
       },
       schemas: {
