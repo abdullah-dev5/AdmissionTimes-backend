@@ -58,6 +58,8 @@ export interface CreateAdmissionDTO {
   location?: string;
   delivery_mode?: string;
   requirements?: Record<string, any>;
+  verification_status?: 'draft' | 'pending' | 'verified' | 'rejected' | 'disputed';
+  university_id?: string;
 }
 
 /**

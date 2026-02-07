@@ -274,15 +274,26 @@ export const getUniversityDashboard = async (
         SELECT 
           id::text,
           title,
+          description,
+          program_type,
           degree_level,
-          verification_status::text,
+          field_of_study,
+          duration,
+          tuition_fee,
+          currency,
+          application_fee,
           deadline::text,
+          start_date,
+          location,
+          delivery_mode,
+          requirements,
+          verification_status::text,
           created_at::text,
           updated_at::text
         FROM admissions
         WHERE university_id = $2 OR created_by = $1
         ORDER BY updated_at DESC
-        LIMIT 5
+        -- LIMIT removed - show all admissions
       ),
       pending_verifications AS (
         SELECT 
@@ -296,7 +307,7 @@ export const getUniversityDashboard = async (
         WHERE (a.university_id = $2 OR a.created_by = $1)
           AND a.verification_status = 'pending'
         ORDER BY a.created_at DESC
-        LIMIT 5
+        LIMIT 20
       ),
       recent_changes AS (
         SELECT 
@@ -312,7 +323,7 @@ export const getUniversityDashboard = async (
         INNER JOIN admissions a ON a.id = cl.admission_id
         WHERE a.university_id = $2 OR a.created_by = $1
         ORDER BY cl.created_at DESC
-        LIMIT 5
+        LIMIT 10
       ),
       recent_notifications AS (
         SELECT 
@@ -328,7 +339,7 @@ export const getUniversityDashboard = async (
         WHERE user_id = $1 
           AND user_type = 'university'
         ORDER BY created_at DESC
-        LIMIT 5
+        LIMIT 10
       )
       SELECT 
         (SELECT row_to_json(us) FROM university_stats us) as stats,

@@ -41,13 +41,14 @@ export const signUp = async (req: Request, res: Response): Promise<void> => {
 
     const data: SignUpDTO = validation.value;
 
+    // TODO: Enable university_id validation later
     // Additional validation: university_id required for university users
-    if (data.user_type === 'university' && !data.university_id) {
-      sendError(res, 'University ID is required for university accounts', 400, {
-        errors: { university_id: 'University ID is required' },
-      });
-      return;
-    }
+    // if (data.user_type === 'university' && !data.university_id) {
+    //   sendError(res, 'University ID is required for university accounts', 400, {
+    //     errors: { university_id: 'University ID is required' },
+    //   });
+    //   return;
+    // }
 
     // Call service
     const result = await authService.signUp(data);

@@ -81,7 +81,7 @@ export const findMany = async (
  * @returns Created admission record
  */
 export const create = async (
-  data: Omit<Admission, 'id' | 'created_at' | 'updated_at' | 'verification_status'>,
+  data: Omit<Admission, 'id' | 'created_at' | 'updated_at'>,
   createdBy: string | null = null
 ): Promise<Admission> => {
   const sql = `
@@ -114,7 +114,7 @@ export const create = async (
     data.delivery_mode,
     data.requirements ? JSON.stringify(data.requirements) : null,
     createdBy,
-    'draft', // Always create as draft
+    data.verification_status || 'draft',
     data.is_active ?? true,
   ];
 
