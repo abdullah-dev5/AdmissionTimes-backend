@@ -52,6 +52,43 @@ export interface UpdateUserRoleDTO {
 }
 
 /**
+ * University profile record interface
+ * Matches the universities table
+ */
+export interface UniversityProfile {
+  id: string;
+  name: string;
+  city: string | null;
+  country: string | null;
+  website: string | null;
+  logo_url: string | null;
+  description: string | null;
+  address: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Update university profile DTO
+ */
+export interface UpdateUniversityProfileDTO {
+  name?: string;
+  city?: string | null;
+  country?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  description?: string | null;
+  address?: string | null;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+}
+
+/**
  * User filter parameters
  * Used for filtering and searching users
  */

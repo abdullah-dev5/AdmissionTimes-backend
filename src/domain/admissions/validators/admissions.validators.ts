@@ -121,6 +121,15 @@ export const createAdmissionSchema = Joi.object({
     .messages({
       'object.base': 'Requirements must be a valid JSON object',
     }),
+
+  verification_status: Joi.string()
+    .valid('draft', 'pending', 'verified', 'rejected', 'disputed')
+    .optional()
+    .default('draft'),
+
+  university_id: Joi.string()
+    .uuid()
+    .optional(),
 });
 
 /**

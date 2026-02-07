@@ -20,6 +20,7 @@ import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import {
   UpdateUserDTO,
   UpdateUserRoleDTO,
+  UpdateUniversityProfileDTO,
   UserQueryParams,
   UserContext,
 } from '../types/users.types';
@@ -158,6 +159,49 @@ export const updateUserRole = async (
     const user = await usersService.updateRole(id, data, userContext);
 
     sendSuccess(res, user, 'User role updated successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get current university profile
+ * 
+ * GET /api/v1/users/me/university-profile
+ */
+export const getCurrentUniversityProfile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userContext = req.user as UserContext | undefined;
+
+    const profile = await usersService.getUniversityProfile(userContext);
+
+    sendSuccess(res, profile, 'University profile retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Update current university profile
+ * 
+ * PUT /api/v1/users/me/university-profile
+ */
+export const updateCurrentUniversityProfile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const data = req.validated as UpdateUniversityProfileDTO;
+    const userContext = req.user as UserContext | undefined;
+
+    const profile = await usersService.updateUniversityProfile(data, userContext);
+
+    sendSuccess(res, profile, 'University profile updated successfully');
   } catch (error) {
     next(error);
   }

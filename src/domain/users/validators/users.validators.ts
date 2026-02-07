@@ -80,6 +80,22 @@ export const updateUserSchema = Joi.object({
 });
 
 /**
+ * Update university profile validation schema
+ */
+export const updateUniversityProfileSchema = Joi.object({
+  name: Joi.string().min(2).max(255).optional(),
+  city: Joi.string().max(100).allow(null, '').optional(),
+  country: Joi.string().max(100).allow(null, '').optional(),
+  website: Joi.string().max(255).allow(null, '').optional(),
+  logo_url: Joi.string().max(2000).allow(null, '').optional(),
+  description: Joi.string().allow(null, '').optional(),
+  address: Joi.string().allow(null, '').optional(),
+  contact_name: Joi.string().max(255).allow(null, '').optional(),
+  contact_email: Joi.string().email().max(255).allow(null, '').optional(),
+  contact_phone: Joi.string().max(50).allow(null, '').optional(),
+});
+
+/**
  * Update user role validation schema (admin only)
  */
 export const updateUserRoleSchema = Joi.object({

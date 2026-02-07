@@ -10,6 +10,7 @@ import * as usersController from '../controllers/users.controller';
 import {
   updateUserSchema,
   updateUserRoleSchema,
+  updateUniversityProfileSchema,
   userQuerySchema,
   uuidParamSchema,
 } from '../validators/users.validators';
@@ -111,6 +112,19 @@ router.put(
   '/me',
   validateBody(updateUserSchema),
   usersController.updateCurrentUser
+);
+
+// GET /api/v1/users/me/university-profile - Get university profile
+router.get(
+  '/me/university-profile',
+  usersController.getCurrentUniversityProfile
+);
+
+// PUT /api/v1/users/me/university-profile - Update university profile
+router.put(
+  '/me/university-profile',
+  validateBody(updateUniversityProfileSchema),
+  usersController.updateCurrentUniversityProfile
 );
 
 // User Preferences routes (nested under /api/v1/users/me/preferences)
@@ -329,6 +343,151 @@ router.patch(
   validateParams(uuidParamSchema),
   validateBody(updateUserRoleSchema),
   usersController.updateUserRole
+);
+
+/**
+ * @swagger
+ * /api/v1/users/me/university-profile:
+ *   get:
+ *     summary: Get current university profile
+ *     tags: [Users]
+ *     description: Retrieve the university profile for the currently authenticated university user
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved university profile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/UniversityProfile'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden (university users only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: University profile not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// GET /api/v1/users/me/university-profile - Get current university profile
+router.get(
+  '/me/university-profile',
+  usersController.getCurrentUniversityProfile
+);
+
+/**
+ * @swagger
+ * /api/v1/users/me/university-profile:
+ *   put:
+ *     summary: Update current university profile
+ *     tags: [Users]
+ *     description: Update the university profile for the currently authenticated university user
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 255
+ *                 description: University name
+ *               city:
+ *                 type: string
+ *                 maxLength: 100
+ *                 description: City where university is located
+ *               country:
+ *                 type: string
+ *                 maxLength: 100
+ *                 description: Country where university is located
+ *               website:
+ *                 type: string
+ *                 maxLength: 255
+ *                 format: url
+ *                 description: University website URL
+ *               logo_url:
+ *                 type: string
+ *                 description: University logo image URL or base64 data URL
+ *               description:
+ *                 type: string
+ *                 description: University description
+ *               address:
+ *                 type: string
+ *                 description: University physical address
+ *               contact_name:
+ *                 type: string
+ *                 maxLength: 255
+ *                 description: Contact person name
+ *               contact_email:
+ *                 type: string
+ *                 format: email
+ *                 description: Contact person email
+ *               contact_phone:
+ *                 type: string
+ *                 maxLength: 50
+ *                 description: Contact person phone number
+ *     responses:
+ *       200:
+ *         description: Successfully updated university profile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/UniversityProfile'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden (university users only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: University profile not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// PUT /api/v1/users/me/university-profile - Update current university profile
+router.put(
+  '/me/university-profile',
+  validateBody(updateUniversityProfileSchema),
+  usersController.updateCurrentUniversityProfile
 );
 
 export default router;

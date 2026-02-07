@@ -20,6 +20,8 @@ import {
   CreateUserDTO,
   UpdateUserDTO,
   UpdateUserRoleDTO,
+  UpdateUniversityProfileDTO,
+  UniversityProfile,
   UserFilters,
   UserContext,
 } from '../types/users.types';
@@ -241,6 +243,103 @@ export const updateRole = async (
   }
 
   return updated;
+};
+
+/**
+ * Get university profile for current user
+ * 
+ * @param userContext - User context
+ * @returns University profile
+ */
+export const getUniversityProfile = async (userContext?: UserContext): Promise<UniversityProfile> => {
+  if (!userContext || !userContext.id) {
+    throw new AppError('User not authenticated', 401);
+  }
+
+  const user = await usersModel.findById(userContext.id);
+
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  if (user.role !== USER_TYPE.UNIVERSITY) {
+    throw new AppError('Forbidden', 403);
+  }
+
+  if (!user.organization_id) {
+    throw new AppError('Organization ID not set for university user', 400);
+  }
+
+  const existing = await usersModel.findUniversityById(user.organization_id);
+
+  if (existing) {
+    return existing as UniversityProfile;
+  }
+
+  // Return a minimal profile if record doesn't exist yet
+  return {
+    id: user.organization_id,
+    name: user.display_name,
+    city: null,
+    country: null,
+    website: null,
+    logo_url: null,
+    description: null,
+    address: null,
+    contact_name: null,
+    contact_email: null,
+    contact_phone: null,
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+};
+
+/**
+ * Update university profile for current user
+ * 
+ * @param data - University profile data
+ * @param userContext - User context
+ * @returns Updated university profile
+ */
+export const updateUniversityProfile = async (
+  data: UpdateUniversityProfileDTO,
+  userContext?: UserContext
+): Promise<UniversityProfile> => {
+  if (!userContext || !userContext.id) {
+    throw new AppError('User not authenticated', 401);
+  }
+
+  const user = await usersModel.findById(userContext.id);
+
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  if (user.role !== USER_TYPE.UNIVERSITY) {
+    throw new AppError('Forbidden', 403);
+  }
+
+  if (!user.organization_id) {
+    throw new AppError('Organization ID not set for university user', 400);
+  }
+
+  const name = data.name || user.display_name;
+
+  const updated = await usersModel.upsertUniversityProfile(user.organization_id, {
+    name,
+    city: data.city ?? null,
+    country: data.country ?? null,
+    website: data.website ?? null,
+    logo_url: data.logo_url ?? null,
+    description: data.description ?? null,
+    address: data.address ?? null,
+    contact_name: data.contact_name ?? null,
+    contact_email: data.contact_email ?? null,
+    contact_phone: data.contact_phone ?? null,
+  });
+
+  return updated as UniversityProfile;
 };
 
 /**

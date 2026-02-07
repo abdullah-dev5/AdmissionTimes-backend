@@ -14,7 +14,7 @@
  */
 
 import { query } from '@db/connection';
-import { User, UserFilters, CreateUserDTO, UpdateUserDTO } from '../types/users.types';
+import { User, UserFilters, CreateUserDTO, UpdateUserDTO, UniversityProfile, UpdateUniversityProfileDTO } from '../types/users.types';
 import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/users.constants';
 
@@ -315,3 +315,86 @@ function buildFindManyQuery(
 
   return { sql, params };
 }
+
+/**
+ * Find university by ID
+ * 
+ * @param id - University UUID
+ * @returns University profile or null if not found
+ */
+export const findUniversityById = async (id: string): Promise<UniversityProfile | null> => {
+  const sql = 'SELECT * FROM universities WHERE id = $1';
+  const result = await query(sql, [id]);
+  return result.rows[0] || null;
+};
+
+/**
+ * Insert or update university profile
+ * Uses UPSERT (INSERT ... ON CONFLICT ... DO UPDATE)
+ * 
+ * @param id - University UUID
+ * @param data - University profile data to insert/update
+ * @returns Updated university profile
+ */
+export const upsertUniversityProfile = async (
+  id: string,
+  data: UpdateUniversityProfileDTO
+): Promise<UniversityProfile> => {
+  // Build dynamic SET clause based on provided fields
+  const updates: string[] = [];
+  const params: any[] = [id];
+  let paramIndex = 2;
+
+  // Map DTO fields to database column names
+  const fieldMapping = {
+    name: 'name',
+    city: 'city',
+    country: 'country',
+    website: 'website',
+    logo_url: 'logo_url',
+    description: 'description',
+    address: 'address',
+    contact_name: 'contact_name',
+    contact_email: 'contact_email',
+    contact_phone: 'contact_phone',
+  };
+
+  // Dynamically build UPDATE SET clause
+  for (const [key, dbColumn] of Object.entries(fieldMapping)) {
+    if (key in data && data[key as keyof UpdateUniversityProfileDTO] !== undefined) {
+      updates.push(`${dbColumn} = $${paramIndex}`);
+      params.push(data[key as keyof UpdateUniversityProfileDTO]);
+      paramIndex++;
+    }
+  }
+
+  // Always update the updated_at timestamp
+  updates.push(`updated_at = NOW()`);
+
+  if (updates.length === 1) {
+    // Only updated_at, so just do a simple INSERT or UPDATE
+    const sql = `
+      INSERT INTO universities (id, updated_at) VALUES ($1, NOW())
+      ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+      RETURNING *;
+    `;
+    const result = await query(sql, [id]);
+    return result.rows[0];
+  }
+
+  // Build the INSERT INTO clause with the fields being updated
+  const insertFields = Object.values(fieldMapping).filter((_, idx) => {
+    return idx < params.length - 1; // Exclude timestamp
+  });
+
+  const sql = `
+    INSERT INTO universities (id, ${insertFields.join(', ')}, created_at, updated_at)
+    VALUES ($1, ${Array.from({ length: paramIndex - 2 }, (_, i) => `$${i + 2}`).join(', ')}, NOW(), NOW())
+    ON CONFLICT (id) DO UPDATE SET
+    ${updates.join(', ')}
+    RETURNING *;
+  `;
+
+  const result = await query(sql, params);
+  return result.rows[0];
+};

@@ -30,15 +30,25 @@ export const signUp = async (data: SignUpDTO): Promise<SignUpResponse> => {
     throw new AppError('Email already exists', 400);
   }
 
+  // TODO: Enable university_id validation later
   // Validate university_id for university users
-  if (data.user_type === 'university') {
-    if (!data.university_id) {
-      throw new AppError('University ID is required for university accounts', 400);
-    }
+  // if (data.user_type === 'university') {
+  //   if (!data.university_id) {
+  //     throw new AppError('University ID is required for university accounts', 400);
+  //   }
 
-    // Verify university exists (check if organization_id exists in users table or create universities table check)
-    // For now, we'll just validate the UUID format - actual university validation can be added later
-    // when universities table is created
+  //   // Verify university exists (check if organization_id exists in users table or create universities table check)
+  //   // For now, we'll just validate the UUID format - actual university validation can be added later
+  //   // when universities table is created
+  // }
+
+  // TEMPORARY: Auto-generate university_id for university users if not provided
+  // This allows them to create admissions without manual university_id entry
+  if (data.user_type === 'university' && !data.university_id) {
+    // Generate a UUID v4 for the university
+    const { randomUUID } = require('crypto');
+    data.university_id = randomUUID();
+    console.log(`[Auth Service] Auto-generated university_id for ${data.email}: ${data.university_id}`);
   }
 
   // Create user
