@@ -40,6 +40,12 @@ export const updateWatchlistSchema = Joi.object({
     .messages({
       'string.max': `Notes must not exceed ${FIELD_LIMITS.NOTES_MAX} characters`,
     }),
+
+  alert_opt_in: Joi.boolean()
+    .optional()
+    .messages({
+      'boolean.base': 'alert_opt_in must be a boolean',
+    }),
 });
 
 /**

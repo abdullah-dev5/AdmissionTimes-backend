@@ -237,6 +237,10 @@ router.get(
  *                 maxLength: 5000
  *                 description: Optional notes about this admission
  *                 example: 'Updated notes'
+ *               alert_opt_in:
+ *                 type: boolean
+ *                 description: Enable or disable alert notifications for this admission
+ *                 example: true
  *     responses:
  *       200:
  *         description: Watchlist item updated successfully

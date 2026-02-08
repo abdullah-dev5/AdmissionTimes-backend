@@ -154,6 +154,11 @@ export const update = async (
     params.push(data.notes);
   }
 
+  if (data.alert_opt_in !== undefined) {
+    updates.push(`alert_opt_in = $${paramIndex++}`);
+    params.push(data.alert_opt_in);
+  }
+
   if (updates.length === 0) {
     // No updates, return existing
     return findById(id);
