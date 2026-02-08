@@ -14,6 +14,7 @@ export interface Watchlist {
   user_id: string;
   admission_id: string;
   notes: string | null;
+  alert_opt_in: boolean;
   created_at: string; // ISO8601 timestamp
   updated_at: string; // ISO8601 timestamp
 }
@@ -43,10 +44,11 @@ export interface CreateWatchlistDTO {
 
 /**
  * Update watchlist DTO
- * Used for updating watchlist notes
+ * Used for updating watchlist notes and alert settings
  */
 export interface UpdateWatchlistDTO {
   notes?: string | null;
+  alert_opt_in?: boolean;
 }
 
 /**
