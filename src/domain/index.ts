@@ -12,6 +12,8 @@
 
 import { Application } from 'express';
 import admissionsRoutes from './admissions/routes/admissions.routes';
+import universityAdmissionsRoutes from './admissions/routes/university-admissions.routes';
+import adminAdmissionsRoutes from './admissions/routes/admin-admissions.routes';
 import notificationsRoutes from './notifications/routes/notifications.routes';
 import deadlinesRoutes from './deadlines/routes/deadlines.routes';
 import userActivityRoutes from './user-activity/routes/user-activity.routes';
@@ -29,6 +31,10 @@ import dashboardRoutes from './dashboard/routes/dashboard.routes';
 export function registerDomains(app: Application): void {
   // Admissions Domain (Core)
   app.use('/api/v1/admissions', admissionsRoutes);
+  
+  // Admissions Alias Routes (Frontend Compatibility)
+  app.use('/api/v1/university/admissions', universityAdmissionsRoutes);
+  app.use('/api/v1/admin/admissions', adminAdmissionsRoutes);
   
   // Supporting Domains (Phase 4A)
   app.use('/api/v1/notifications', notificationsRoutes);

@@ -48,7 +48,7 @@ const router: Router = Router();
  *         name: activity_type
  *         schema:
  *           type: string
- *           enum: [viewed, searched, compared, watchlisted]
+ *           enum: [viewed, searched, compared, watchlisted, view, search, saved, alert, deadline, notification]
  *         description: Filter by activity type
  *       - in: query
  *         name: entity_type
@@ -107,6 +107,75 @@ router.get(
   '/',
   validateQuery(userActivityQuerySchema),
   userActivityController.getActivities
+);
+
+/**
+ * @swagger
+ * /api/v1/activity/me:
+ *   get:
+ *     summary: Get current user's activities
+ *     tags: [Activity]
+ *     description: Retrieve paginated list of activities for the authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *         description: Number of items per page
+ *       - in: query
+ *         name: activity_type
+ *         schema:
+ *           type: string
+ *         description: Filter by activity type
+ *       - in: query
+ *         name: entity_type
+ *         schema:
+ *           type: string
+ *         description: Filter by entity type (e.g., "admission")
+ *       - in: query
+ *         name: entity_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Filter by entity ID
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved activities
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/PaginatedResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/UserActivity'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// GET /api/v1/activity/me - Get current user's activities
+router.get(
+  '/me',
+  validateQuery(userActivityQuerySchema),
+  userActivityController.getMyActivities
 );
 
 /**

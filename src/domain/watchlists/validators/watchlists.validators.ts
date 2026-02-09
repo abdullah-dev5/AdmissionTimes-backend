@@ -113,3 +113,16 @@ export const uuidParamSchema = Joi.object({
       'any.required': 'ID is required',
     }),
 });
+
+/**
+ * Admission ID parameter validation schema
+ */
+export const admissionIdParamSchema = Joi.object({
+  admissionId: Joi.string()
+    .uuid()
+    .required()
+    .messages({
+      'string.guid': 'admissionId must be a valid UUID',
+      'any.required': 'admissionId is required',
+    }),
+});

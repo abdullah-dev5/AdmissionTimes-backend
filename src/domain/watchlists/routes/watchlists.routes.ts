@@ -10,6 +10,7 @@ import * as watchlistsController from '../controllers/watchlists.controller';
 import {
   watchlistQuerySchema,
   uuidParamSchema,
+  admissionIdParamSchema,
   createWatchlistSchema,
   updateWatchlistSchema,
 } from '../validators/watchlists.validators';
@@ -281,6 +282,33 @@ router.patch(
 
 /**
  * @swagger
+ * /api/v1/watchlists/{id}/toggle-alert:
+ *   patch:
+ *     summary: Toggle alert for watchlist item
+ *     tags: [Watchlists]
+ *     description: Toggle alert_opt_in for a watchlist item
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Watchlist item UUID
+ *     responses:
+ *       200:
+ *         description: Watchlist item updated successfully
+ */
+router.patch(
+  '/:id/toggle-alert',
+  validateParams(uuidParamSchema),
+  watchlistsController.toggleAlert
+);
+
+/**
+ * @swagger
  * /api/v1/watchlists/{id}:
  *   delete:
  *     summary: Remove admission from watchlist
@@ -320,6 +348,33 @@ router.delete(
   '/:id',
   validateParams(uuidParamSchema),
   watchlistsController.removeFromWatchlist
+);
+
+/**
+ * @swagger
+ * /api/v1/watchlists/admission/{admissionId}:
+ *   delete:
+ *     summary: Remove admission from watchlist by admission ID
+ *     tags: [Watchlists]
+ *     description: Remove a watchlist entry by admission UUID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: admissionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Admission UUID
+ *     responses:
+ *       200:
+ *         description: Admission removed from watchlist successfully
+ */
+router.delete(
+  '/admission/:admissionId',
+  validateParams(admissionIdParamSchema),
+  watchlistsController.removeByAdmissionId
 );
 
 export default router;

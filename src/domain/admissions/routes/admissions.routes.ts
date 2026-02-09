@@ -379,6 +379,13 @@ router.put(
   admissionsController.updateAdmission
 );
 
+// DELETE /api/v1/admissions/:id - Delete admission (soft delete)
+router.delete(
+  '/:id',
+  validateParams(uuidParamSchema),
+  admissionsController.deleteAdmission
+);
+
 /**
  * @swagger
  * /api/v1/admissions/{id}/submit:

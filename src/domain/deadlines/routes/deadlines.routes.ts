@@ -56,7 +56,7 @@ const router: Router = Router();
  *         name: deadline_type
  *         schema:
  *           type: string
- *           enum: [application, document_submission, payment, other]
+ *           enum: [application, decision, enrollment, document, interview, document_submission, payment, orientation, other]
  *         description: Filter by deadline type
  *       - in: query
  *         name: is_overdue
@@ -148,7 +148,7 @@ router.get(
  *                 description: Admission ID
  *               deadline_type:
  *                 type: string
- *                 enum: [application, document_submission, payment, other]
+ *                 enum: [application, decision, enrollment, document, interview, document_submission, payment, orientation, other]
  *                 description: Deadline type
  *               deadline_date:
  *                 type: string
@@ -243,6 +243,36 @@ router.post(
 router.get(
   '/upcoming',
   deadlinesController.getUpcomingDeadlines
+);
+
+/**
+ * @swagger
+ * /api/v1/deadlines/urgent:
+ *   get:
+ *     summary: Get urgent deadlines
+ *     tags: [Deadlines]
+ *     description: Retrieve urgent deadlines (deadlines within next 3 days), ordered by nearest deadline first
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved urgent deadlines
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/DeadlineWithMetadata'
+ */
+// GET /api/v1/deadlines/urgent - Get urgent deadlines (within 3 days)
+router.get(
+  '/urgent',
+  deadlinesController.getUrgentDeadlines
 );
 
 /**

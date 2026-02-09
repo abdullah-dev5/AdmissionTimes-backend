@@ -139,6 +139,28 @@ export const updateWatchlist = async (
 };
 
 /**
+ * Toggle alert opt-in for watchlist item
+ *
+ * PATCH /api/v1/watchlists/:id/toggle-alert
+ */
+export const toggleAlert = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const userContext = req.user as UserContext | undefined;
+
+    const watchlist = await watchlistsService.toggleAlert(id, userContext);
+
+    sendSuccess(res, watchlist, 'Watchlist alert updated successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Remove admission from watchlist
  * 
  * DELETE /api/v1/watchlists/:id
@@ -153,6 +175,28 @@ export const removeFromWatchlist = async (
     const userContext = req.user as UserContext | undefined;
 
     await watchlistsService.removeFromWatchlist(id, userContext);
+
+    sendSuccess(res, null, 'Admission removed from watchlist successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Remove admission from watchlist by admission ID
+ *
+ * DELETE /api/v1/watchlists/admission/:admissionId
+ */
+export const removeByAdmissionId = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { admissionId } = req.params as { admissionId: string };
+    const userContext = req.user as UserContext | undefined;
+
+    await watchlistsService.removeByAdmissionId(admissionId, userContext);
 
     sendSuccess(res, null, 'Admission removed from watchlist successfully');
   } catch (error) {

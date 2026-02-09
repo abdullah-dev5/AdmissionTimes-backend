@@ -9,8 +9,9 @@ import { Router } from 'express';
 import * as analyticsController from '../controllers/analytics.controller';
 import {
   createAnalyticsEventSchema,
+  analyticsQuerySchema,
 } from '../validators/analytics.validators';
-import { validateBody } from '@shared/middleware/validation';
+import { validateBody, validateQuery } from '@shared/middleware/validation';
 
 const router: Router = Router();
 
@@ -38,7 +39,7 @@ const router: Router = Router();
  *             properties:
  *               event_type:
  *                 type: string
- *                 enum: [admission_viewed, admission_created, verification_completed, verification_rejected, deadline_approaching, search_performed, comparison_made]
+ *                 enum: [admission_viewed, admission_created, admission_updated, verification_completed, verification_rejected, admission_searched]
  *                 description: Type of event
  *               entity_type:
  *                 type: string
@@ -87,6 +88,83 @@ router.post(
 
 /**
  * @swagger
+ * /api/v1/analytics/user-activity:
+ *   get:
+ *     summary: Get analytics events (filtered)
+ *     tags: [Analytics]
+ *     description: Retrieve analytics events with filters and pagination.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *       - in: query
+ *         name: event_type
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: user_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: user_type
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: entity_type
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: entity_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: date_from
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - in: query
+ *         name: date_to
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved analytics events
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/PaginatedResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ */
+// GET /api/v1/analytics/user-activity - List analytics events
+router.get(
+  '/user-activity',
+  validateQuery(analyticsQuerySchema),
+  analyticsController.getEvents
+);
+
+/**
+ * @swagger
  * /api/v1/analytics/stats:
  *   get:
  *     summary: Get general statistics
@@ -125,6 +203,12 @@ router.post(
 // GET /api/v1/analytics/stats - Get general statistics
 router.get(
   '/stats',
+  analyticsController.getGeneralStatistics
+);
+
+// GET /api/v1/analytics/system-metrics - Alias for general statistics
+router.get(
+  '/system-metrics',
   analyticsController.getGeneralStatistics
 );
 
@@ -168,6 +252,12 @@ router.get(
 // GET /api/v1/analytics/admissions - Get admission statistics
 router.get(
   '/admissions',
+  analyticsController.getAdmissionStatistics
+);
+
+// GET /api/v1/analytics/admission-stats - Alias for admission statistics
+router.get(
+  '/admission-stats',
   analyticsController.getAdmissionStatistics
 );
 
