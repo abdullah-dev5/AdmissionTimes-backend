@@ -193,6 +193,26 @@ export const updateWatchlist = async (
 };
 
 /**
+ * Toggle alert opt-in for watchlist item
+ *
+ * @param id - Watchlist UUID
+ * @param userContext - User context (for access control)
+ * @returns Updated watchlist record
+ */
+export const toggleAlert = async (
+  id: string,
+  userContext?: UserContext
+): Promise<Watchlist> => {
+  const watchlist = await getWatchlistById(id, userContext);
+
+  return updateWatchlist(
+    id,
+    { alert_opt_in: !watchlist.alert_opt_in },
+    userContext
+  );
+};
+
+/**
  * Remove admission from watchlist
  * 
  * @param id - Watchlist UUID
@@ -213,6 +233,36 @@ export const removeFromWatchlist = async (
 
   // Delete watchlist
   const deleted = await watchlistsModel.deleteById(id);
+
+  if (!deleted) {
+    throw new AppError('Watchlist item not found', 404);
+  }
+};
+
+/**
+ * Remove watchlist item by admission ID
+ *
+ * @param admissionId - Admission UUID
+ * @param userContext - User context (for access control)
+ */
+export const removeByAdmissionId = async (
+  admissionId: string,
+  userContext?: UserContext
+): Promise<void> => {
+  if (!userContext || !userContext.id) {
+    throw new AppError('Authentication required', 401);
+  }
+
+  const watchlist = await watchlistsModel.findByUserAndAdmission(
+    userContext.id,
+    admissionId
+  );
+
+  if (!watchlist) {
+    throw new AppError('Watchlist item not found', 404);
+  }
+
+  const deleted = await watchlistsModel.deleteById(watchlist.id);
 
   if (!deleted) {
     throw new AppError('Watchlist item not found', 404);

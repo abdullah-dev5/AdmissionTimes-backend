@@ -467,6 +467,56 @@ export const dispute = async (
 };
 
 /**
+ * Delete an admission (soft delete)
+ * 
+ * @param id - Admission UUID
+ * @param userContext - User context
+ * @returns Deleted admission record
+ * @throws AppError if cannot be deleted
+ */
+export const remove = async (
+  id: string,
+  userContext?: UserContext
+): Promise<Admission> => {
+  const existing = await admissionsModel.findById(id, true);
+
+  if (!existing) {
+    throw new AppError('Admission not found', 404);
+  }
+
+  // Access control: only admin or owning university
+  if (!userContext || userContext.role === 'guest' || userContext.role === 'student') {
+    throw new AppError('Forbidden', 403);
+  }
+
+  if (userContext.role === 'university') {
+    const isOwner = existing.created_by === userContext.id || existing.university_id === userContext.university_id;
+    if (!isOwner) {
+      throw new AppError('Admission not found', 404);
+    }
+  }
+
+  const deleted = await admissionsModel.deleteById(id);
+
+  if (!deleted) {
+    throw new AppError('Admission not found', 404);
+  }
+
+  await createChangelogEntry({
+    admission_id: deleted.id,
+    actor_type: userContext.role === 'admin' ? 'admin' : 'university',
+    changed_by: userContext.id || null,
+    action_type: CHANGE_TYPE.UPDATED,
+    field_name: 'is_active',
+    old_value: true,
+    new_value: false,
+    diff_summary: 'Admission deactivated (soft delete)',
+  });
+
+  return deleted;
+};
+
+/**
  * Get changelogs for an admission
  * 
  * @param admissionId - Admission UUID

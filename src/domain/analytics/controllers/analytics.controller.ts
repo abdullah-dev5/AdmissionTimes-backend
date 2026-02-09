@@ -14,10 +14,12 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { sendSuccess } from '@shared/utils/response';
+import { sendSuccess, sendPaginated } from '@shared/utils/response';
+import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import * as analyticsService from '../services/analytics.service';
 import {
   CreateAnalyticsEventDTO,
+  AnalyticsQueryParams,
 } from '../types/analytics.types';
 
 /**
@@ -114,6 +116,53 @@ export const getActivityFeed = async (
     const feed = await analyticsService.getActivityFeed(limit);
 
     sendSuccess(res, feed, 'Activity feed retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get analytics events with filters and pagination
+ *
+ * GET /api/v1/analytics/user-activity
+ */
+export const getEvents = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const queryParams = req.validated as AnalyticsQueryParams;
+
+    const { page, limit } = parsePagination({
+      page: queryParams.page,
+      limit: queryParams.limit,
+    });
+
+    const filters = {
+      event_type: queryParams.event_type,
+      entity_type: queryParams.entity_type,
+      entity_id: queryParams.entity_id,
+      user_type: queryParams.user_type,
+      user_id: queryParams.user_id,
+      date_from: queryParams.date_from,
+      date_to: queryParams.date_to,
+    };
+
+    const sort = queryParams.sort || 'created_at';
+    const order = queryParams.order || 'desc';
+
+    const { events, total } = await analyticsService.getEvents(
+      filters,
+      page,
+      limit,
+      sort,
+      order
+    );
+
+    const pagination = calculatePagination(total, page, limit);
+
+    sendPaginated(res, events, pagination, 'Success');
   } catch (error) {
     next(error);
   }

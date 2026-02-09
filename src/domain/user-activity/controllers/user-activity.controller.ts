@@ -15,6 +15,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { sendSuccess, sendPaginated } from '@shared/utils/response';
+import { AppError } from '@shared/middleware/errorHandler';
 import * as userActivityService from '../services/user-activity.service';
 import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import {
@@ -88,6 +89,55 @@ export const getActivities = async (
     );
 
     // Calculate pagination metadata
+    const pagination = calculatePagination(total, page, limit);
+
+    sendPaginated(res, activities, pagination, 'Success');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get current user's activities
+ * 
+ * GET /api/v1/activity/me
+ */
+export const getMyActivities = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const queryParams = req.validated as UserActivityQueryParams;
+    const userContext = req.user as UserContext | undefined;
+
+    if (!userContext || !userContext.id) {
+      throw new AppError('Authentication required', 401);
+    }
+
+    const { page, limit } = parsePagination({
+      page: queryParams.page,
+      limit: queryParams.limit,
+    });
+
+    const filters = {
+      activity_type: queryParams.activity_type,
+      entity_type: queryParams.entity_type,
+      entity_id: queryParams.entity_id,
+    };
+
+    const sort = queryParams.sort || 'created_at';
+    const order = queryParams.order || 'desc';
+
+    const { activities, total } = await userActivityService.getMany(
+      filters,
+      page,
+      limit,
+      sort,
+      order,
+      userContext
+    );
+
     const pagination = calculatePagination(total, page, limit);
 
     sendPaginated(res, activities, pagination, 'Success');

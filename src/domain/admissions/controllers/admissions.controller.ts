@@ -25,6 +25,7 @@ import {
   RejectAdmissionDTO,
   SubmitAdmissionDTO,
   DisputeAdmissionDTO,
+  AdminVerifyAdmissionDTO,
   AdmissionQueryParams,
   UserContext,
 } from '../types/admissions.types';
@@ -198,6 +199,46 @@ export const rejectAdmission = async (
 };
 
 /**
+ * Admin verify/reject admission (alias endpoint)
+ * 
+ * POST /api/v1/admin/admissions/:id/verify
+ */
+export const adminVerifyAdmission = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const data = req.validated as AdminVerifyAdmissionDTO;
+    const userContext = req.user as UserContext | undefined;
+
+    if (data.verification_status === 'rejected') {
+      const admission = await admissionsService.reject(
+        id,
+        {
+          rejection_reason: data.rejection_reason || 'Rejected by admin',
+          rejected_by: data.rejected_by,
+        },
+        userContext
+      );
+      sendSuccess(res, admission, 'Admission rejected successfully');
+      return;
+    }
+
+    const admission = await admissionsService.verify(
+      id,
+      { verified_by: data.verified_by },
+      userContext
+    );
+
+    sendSuccess(res, admission, 'Admission verified successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Submit an admission (university - moves draft to pending)
  * 
  * PATCH /api/v1/admissions/:id/submit
@@ -238,6 +279,28 @@ export const disputeAdmission = async (
     const admission = await admissionsService.dispute(id, data, userContext);
 
     sendSuccess(res, admission, 'Admission disputed successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Delete an admission (soft delete)
+ * 
+ * DELETE /api/v1/admissions/:id
+ */
+export const deleteAdmission = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const userContext = req.user as UserContext | undefined;
+
+    const admission = await admissionsService.remove(id, userContext);
+
+    sendSuccess(res, admission, 'Admission deleted successfully');
   } catch (error) {
     next(error);
   }

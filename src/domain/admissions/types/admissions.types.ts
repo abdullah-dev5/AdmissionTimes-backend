@@ -111,6 +111,17 @@ export interface RejectAdmissionDTO {
 }
 
 /**
+ * Admin verify/reject request DTO (alias endpoint)
+ */
+export interface AdminVerifyAdmissionDTO {
+  verification_status: 'verified' | 'rejected';
+  verified_by?: string;
+  rejected_by?: string;
+  rejection_reason?: string;
+  notes?: string;
+}
+
+/**
  * Submit admission request DTO (Draft → Pending)
  */
 export interface SubmitAdmissionDTO {

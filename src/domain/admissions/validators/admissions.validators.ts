@@ -179,6 +179,55 @@ export const rejectAdmissionSchema = Joi.object({
 });
 
 /**
+ * Admin verify/reject validation schema (alias endpoint)
+ */
+export const adminVerifyAdmissionSchema = Joi.object({
+  verification_status: Joi.string()
+    .valid('verified', 'rejected')
+    .required()
+    .messages({
+      'any.only': 'verification_status must be either "verified" or "rejected"',
+      'any.required': 'verification_status is required',
+    }),
+
+  verified_by: Joi.string()
+    .uuid()
+    .allow(null, '')
+    .optional()
+    .messages({
+      'string.guid': 'verified_by must be a valid UUID',
+    }),
+
+  rejected_by: Joi.string()
+    .uuid()
+    .allow(null, '')
+    .optional()
+    .messages({
+      'string.guid': 'rejected_by must be a valid UUID',
+    }),
+
+  rejection_reason: Joi.string()
+    .min(FIELD_LIMITS.REJECTION_REASON_MIN)
+    .max(FIELD_LIMITS.REJECTION_REASON_MAX)
+    .when('verification_status', {
+      is: 'rejected',
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(null, ''),
+    })
+    .messages({
+      'string.empty': 'Rejection reason is required',
+      'string.min': `Rejection reason must be at least ${FIELD_LIMITS.REJECTION_REASON_MIN} characters`,
+      'string.max': `Rejection reason must not exceed ${FIELD_LIMITS.REJECTION_REASON_MAX} characters`,
+      'any.required': 'Rejection reason is required',
+    }),
+
+  notes: Joi.string()
+    .max(FIELD_LIMITS.REJECTION_REASON_MAX)
+    .allow(null, '')
+    .optional(),
+});
+
+/**
  * Query parameters validation schema
  */
 export const admissionQuerySchema = Joi.object({

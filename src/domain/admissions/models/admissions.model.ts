@@ -193,6 +193,23 @@ export const update = async (
 };
 
 /**
+ * Soft delete admission (set is_active = false)
+ * 
+ * @param id - Admission UUID
+ * @returns Updated admission record or null if not found
+ */
+export const deleteById = async (id: string): Promise<Admission | null> => {
+  const sql = `
+    UPDATE admissions
+    SET is_active = false, updated_at = NOW()
+    WHERE id = $1 AND is_active = true
+    RETURNING *
+  `;
+  const result = await query(sql, [id]);
+  return result.rows[0] || null;
+};
+
+/**
  * Build COUNT query with filters
  * 
  * @param filters - Filter criteria

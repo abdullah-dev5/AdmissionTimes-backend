@@ -136,6 +136,26 @@ export const getUpcomingDeadlines = async (
 };
 
 /**
+ * Get urgent deadlines (within 3 days)
+ * 
+ * GET /api/v1/deadlines/urgent
+ */
+export const getUrgentDeadlines = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    // Urgent deadlines are limited to 3 days
+    const deadlines = await deadlinesService.getUpcoming(3);
+
+    sendSuccess(res, deadlines, 'Urgent deadlines retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Create a new deadline
  * 
  * POST /api/v1/deadlines

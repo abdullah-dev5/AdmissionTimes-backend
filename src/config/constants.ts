@@ -72,8 +72,13 @@ export type ChangeType = typeof CHANGE_TYPE[keyof typeof CHANGE_TYPE];
  */
 export const DEADLINE_TYPE = {
   APPLICATION: 'application',
+  DECISION: 'decision',
+  ENROLLMENT: 'enrollment',
+  DOCUMENT: 'document',
+  INTERVIEW: 'interview',
   DOCUMENT_SUBMISSION: 'document_submission',
   PAYMENT: 'payment',
+  ORIENTATION: 'orientation',
   OTHER: 'other',
 } as const;
 
@@ -101,6 +106,12 @@ export const ACTIVITY_TYPE = {
   SEARCHED: 'searched',
   COMPARED: 'compared',
   WATCHLISTED: 'watchlisted',
+  VIEW: 'view',
+  SEARCH: 'search',
+  SAVED: 'saved',
+  ALERT: 'alert',
+  DEADLINE: 'deadline',
+  NOTIFICATION: 'notification',
 } as const;
 
 export type ActivityType = typeof ACTIVITY_TYPE[keyof typeof ACTIVITY_TYPE];
