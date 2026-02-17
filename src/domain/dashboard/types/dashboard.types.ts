@@ -117,10 +117,16 @@ export interface RecentAdmission {
   id: string;
   title: string;
   degree_level: string;
-  verification_status: 'verified' | 'pending' | 'rejected';
+  verification_status: 'verified' | 'pending' | 'rejected' | 'disputed' | 'draft';
   deadline: string;
   created_at: string;
   updated_at: string;
+  verified_by?: string | null;
+  verified_at?: string | null;
+  rejection_reason?: string | null;
+  dispute_reason?: string | null;
+  verification_comments?: string | null;
+  admin_notes?: string | null;
 }
 
 /**

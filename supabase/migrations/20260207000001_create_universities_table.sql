@@ -34,14 +34,15 @@ COMMENT ON COLUMN universities.contact_phone IS 'Primary contact phone for unive
 -- INDEXES
 -- ============================================================================
 
-CREATE INDEX idx_universities_name ON universities(name);
-CREATE INDEX idx_universities_city ON universities(city);
-CREATE INDEX idx_universities_created_at ON universities(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_universities_name ON universities(name);
+CREATE INDEX IF NOT EXISTS idx_universities_city ON universities(city);
+CREATE INDEX IF NOT EXISTS idx_universities_created_at ON universities(created_at DESC);
 
 -- ============================================================================
 -- TRIGGERS
 -- ============================================================================
 
+DROP TRIGGER IF EXISTS update_universities_updated_at ON universities;
 CREATE TRIGGER update_universities_updated_at
   BEFORE UPDATE ON universities
   FOR EACH ROW

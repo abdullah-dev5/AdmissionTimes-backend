@@ -288,6 +288,12 @@ export const getUniversityDashboard = async (
           delivery_mode,
           requirements,
           verification_status::text,
+          verified_by::text,
+          verified_at::text,
+          rejection_reason,
+          dispute_reason,
+          verification_comments,
+          admin_notes,
           created_at::text,
           updated_at::text
         FROM admissions

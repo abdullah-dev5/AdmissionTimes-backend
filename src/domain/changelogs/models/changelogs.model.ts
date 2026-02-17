@@ -46,15 +46,19 @@ export const findByAdmissionId = async (
   limit: number,
   sort: string = 'created_at',
   order: 'asc' | 'desc' = 'desc'
-): Promise<Changelog[]> => {
+): Promise<(Changelog & { program_title?: string })[]> => {
   const offset = calculateOffset(page, limit);
   const sortField = SORTABLE_FIELDS.includes(sort as any) ? sort : 'created_at';
   const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
   const sql = `
-    SELECT * FROM changelogs
-    WHERE admission_id = $1
-    ORDER BY ${sortField} ${sortOrder}
+    SELECT 
+      c.*,
+      a.title as program_title
+    FROM changelogs c
+    LEFT JOIN admissions a ON c.admission_id = a.id
+    WHERE c.admission_id = $1
+    ORDER BY c.${sortField} ${sortOrder}
     LIMIT $2 OFFSET $3
   `;
 
@@ -102,7 +106,7 @@ export const findMany = async (
   limit: number,
   sort: string = 'created_at',
   order: 'asc' | 'desc' = 'desc'
-): Promise<Changelog[]> => {
+): Promise<(Changelog & { program_title?: string })[]> => {
   const offset = calculateOffset(page, limit);
   const { sql, params } = buildFindManyQuery(filters, sort, order, limit, offset);
   const result = await query(sql, params);
@@ -262,9 +266,13 @@ function buildFindManyQuery(
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const sql = `
-    SELECT * FROM changelogs
+    SELECT 
+      c.*,
+      a.title as program_title
+    FROM changelogs c
+    LEFT JOIN admissions a ON c.admission_id = a.id
     ${whereClause}
-    ORDER BY ${sortField} ${sortOrder}
+    ORDER BY c.${sortField} ${sortOrder}
     LIMIT $${paramIndex++} OFFSET $${paramIndex}
   `;
 
