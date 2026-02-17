@@ -283,7 +283,22 @@ export const jwtAuth = async (
       email: email,
     } as UserContext;
 
-    console.log('✅ User authenticated:', { userId: databaseUserId, userRole, email });
+    console.log('✅ [JWT] User authenticated:', { 
+      userId: databaseUserId, 
+      userRole,
+      email,
+      endpoint: req.path,
+      method: req.method,
+      authUserId: payload.sub,
+    });
+    console.log('✅ [JWT] Full JWT payload:', {
+      sub: payload.sub,
+      email: payload.email,
+      iat: payload.iat,
+      exp: payload.exp,
+      user_metadata: payload.user_metadata,
+      app_metadata: payload.app_metadata,
+    });
     next();
   } catch (error: any) {
     console.error('❌ JWT validation error:', error.message);
