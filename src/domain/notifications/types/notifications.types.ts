@@ -5,7 +5,7 @@
  * These types ensure type safety across controllers, services, and models.
  */
 
-import { NotificationCategory, NotificationPriority, UserType } from '@config/constants';
+import { NotificationPriority, NotificationType, UserType } from '@config/constants';
 
 /**
  * Core notification record interface
@@ -13,9 +13,9 @@ import { NotificationCategory, NotificationPriority, UserType } from '@config/co
  */
 export interface Notification {
   id: string;
-  user_id: string | null;
-  user_type: UserType;
-  category: NotificationCategory;
+  recipient_id: string | null;
+  role_type: UserType;
+  notification_type: NotificationType;
   priority: NotificationPriority;
   title: string;
   message: string;
@@ -24,6 +24,7 @@ export interface Notification {
   is_read: boolean;
   read_at: string | null; // ISO8601 timestamp
   action_url: string | null; // Frontend route
+  event_key: string;
   created_at: string; // ISO8601 timestamp
 }
 
@@ -32,15 +33,16 @@ export interface Notification {
  * Used for creating new notifications
  */
 export interface CreateNotificationDTO {
-  user_id?: string | null;
-  user_type: UserType;
-  category: NotificationCategory;
+  recipient_id?: string | null;
+  role_type: UserType;
+  notification_type: NotificationType;
   priority?: NotificationPriority;
   title: string;
   message: string;
   related_entity_type?: string | null;
   related_entity_id?: string | null;
   action_url?: string | null;
+  event_key: string;
 }
 
 /**
@@ -48,9 +50,9 @@ export interface CreateNotificationDTO {
  * Used for filtering notifications
  */
 export interface NotificationFilters {
-  user_id?: string | null;
-  user_type?: UserType;
-  category?: NotificationCategory;
+  recipient_id?: string | null;
+  role_type?: UserType;
+  notification_type?: NotificationType;
   priority?: NotificationPriority;
   is_read?: boolean;
   related_entity_type?: string;

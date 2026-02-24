@@ -40,12 +40,12 @@ export const createUserSchema = Joi.object({
       'any.required': 'Display name is required',
     }),
 
-  organization_id: Joi.string()
+  university_id: Joi.string()
     .uuid()
     .allow(null, '')
     .optional()
     .messages({
-      'string.guid': 'organization_id must be a valid UUID',
+      'string.guid': 'university_id must be a valid UUID',
     }),
 
   status: Joi.string()
@@ -70,12 +70,12 @@ export const updateUserSchema = Joi.object({
       'string.max': `Display name must not exceed ${FIELD_LIMITS.DISPLAY_NAME_MAX} characters`,
     }),
 
-  organization_id: Joi.string()
+  university_id: Joi.string()
     .uuid()
     .allow(null, '')
     .optional()
     .messages({
-      'string.guid': 'organization_id must be a valid UUID',
+      'string.guid': 'university_id must be a valid UUID',
     }),
 });
 
@@ -148,12 +148,12 @@ export const userQuerySchema = Joi.object({
       'any.only': 'status must be either "active" or "suspended"',
     }),
 
-  organization_id: Joi.string()
+  university_id: Joi.string()
     .uuid()
     .allow('')
     .optional()
     .messages({
-      'string.guid': 'organization_id must be a valid UUID',
+      'string.guid': 'university_id must be a valid UUID',
     }),
 
   auth_user_id: Joi.string()

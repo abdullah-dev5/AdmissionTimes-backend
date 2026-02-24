@@ -25,21 +25,28 @@ export const USER_TYPE = {
   STUDENT: 'student',
   UNIVERSITY: 'university',
   ADMIN: 'admin',
+  MAINTENANCE: 'maintenance',
 } as const;
 
 export type UserType = typeof USER_TYPE[keyof typeof USER_TYPE];
 
 /**
- * Notification categories
+ * Notification types
  */
-export const NOTIFICATION_CATEGORY = {
-  VERIFICATION: 'verification',
-  DEADLINE: 'deadline',
-  SYSTEM: 'system',
-  UPDATE: 'update',
+export const NOTIFICATION_TYPE = {
+  ADMISSION_SUBMITTED: 'admission_submitted',
+  ADMISSION_RESUBMITTED: 'admission_resubmitted',
+  ADMISSION_VERIFIED: 'admission_verified',
+  ADMISSION_REJECTED: 'admission_rejected',
+  ADMISSION_REVISION_REQUIRED: 'admission_revision_required',
+  ADMISSION_UPDATED_SAVED: 'admission_updated_saved',
+  DEADLINE_NEAR: 'deadline_near',
+  SYSTEM_BROADCAST: 'system_broadcast',
+  DISPUTE_RAISED: 'dispute_raised',
+  SYSTEM_ERROR: 'system_error',
 } as const;
 
-export type NotificationCategory = typeof NOTIFICATION_CATEGORY[keyof typeof NOTIFICATION_CATEGORY];
+export type NotificationType = typeof NOTIFICATION_TYPE[keyof typeof NOTIFICATION_TYPE];
 
 /**
  * Notification priorities

@@ -73,19 +73,30 @@ export const findMany = async (
  * @returns Created notification record
  */
 export const create = async (data: CreateNotificationDTO): Promise<Notification> => {
+  console.log(`📊 [DB] Attempting to create notification:`, {
+    recipient_id: data.recipient_id,
+    role_type: data.role_type,
+    notification_type: data.notification_type,
+    related_entity_id: data.related_entity_id,
+    event_key: data.event_key,
+    title: data.title?.substring(0, 50),
+  });
+
   const sql = `
     INSERT INTO notifications (
-      user_id, user_type, category, priority, title, message,
-      related_entity_type, related_entity_id, action_url, is_read
+      recipient_id, role_type, notification_type, priority, title, message,
+      related_entity_type, related_entity_id, action_url, is_read, event_key
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    ON CONFLICT (recipient_id, notification_type, related_entity_id, event_key)
+    DO NOTHING
     RETURNING *
   `;
 
   const params = [
-    data.user_id || null,
-    data.user_type,
-    data.category,
+    data.recipient_id || null,
+    data.role_type,
+    data.notification_type,
     data.priority || DEFAULTS.PRIORITY,
     data.title,
     data.message,
@@ -93,10 +104,45 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
     data.related_entity_id || null,
     data.action_url || null,
     DEFAULTS.IS_READ,
+    data.event_key,
   ];
 
   const result = await query(sql, params);
-  return result.rows[0];
+  if (result.rows[0]) {
+    console.log(`✅ [DB] Notification created successfully:`, { id: result.rows[0].id, created_at: result.rows[0].created_at });
+    return result.rows[0];
+  }
+
+  console.log(`⚠️ [DB] INSERT returned no rows - checking if duplicate via constraint...`);
+
+  const fallbackSql = `
+    SELECT * FROM notifications
+    WHERE recipient_id = $1
+      AND notification_type = $2
+      AND related_entity_id IS NOT DISTINCT FROM $3
+      AND event_key = $4
+    LIMIT 1
+  `;
+  const fallback = await query(fallbackSql, [
+    data.recipient_id || null,
+    data.notification_type,
+    data.related_entity_id || null,
+    data.event_key,
+  ]);
+  
+  if (fallback.rows[0]) {
+    console.log(`✅ [DB] Found existing notification via fallback (duplicate suppressed):`, { id: fallback.rows[0].id, created_at: fallback.rows[0].created_at });
+    return fallback.rows[0];
+  }
+  
+  // This should never happen - either INSERT succeeds or constraint hits
+  console.error(`❌ [DB] CRITICAL: Notification not created and not found in fallback query`);
+  console.error(`   → recipient_id: ${data.recipient_id}`);
+  console.error(`   → notification_type: ${data.notification_type}`);
+  console.error(`   → event_key: ${data.event_key}`);
+  
+  throw new Error(`Failed to create or find notification: recipient=${data.recipient_id}, type=${data.notification_type}, event_key=${data.event_key}`);
+
 };
 
 /**
@@ -129,27 +175,15 @@ export const markAsRead = async (
  * @returns Number of notifications marked as read
  */
 export const markAllAsRead = async (
-  userId: string | null,
-  userType: string
+  recipientId: string,
+  roleType: string
 ): Promise<number> => {
-  let sql: string;
-  let params: any[];
-
-  if (userId) {
-    sql = `
-      UPDATE notifications
-      SET is_read = true, read_at = NOW()
-      WHERE user_id = $1 AND user_type = $2 AND is_read = false
-    `;
-    params = [userId, userType];
-  } else {
-    sql = `
-      UPDATE notifications
-      SET is_read = true, read_at = NOW()
-      WHERE user_id IS NULL AND user_type = $1 AND is_read = false
-    `;
-    params = [userType];
-  }
+  const sql = `
+    UPDATE notifications
+    SET is_read = true, read_at = NOW()
+    WHERE recipient_id = $1 AND role_type = $2 AND is_read = false
+  `;
+  const params = [recipientId, roleType];
 
   const result = await query(sql, params);
   return result.rowCount || 0;
@@ -163,27 +197,15 @@ export const markAllAsRead = async (
  * @returns Unread notification count
  */
 export const getUnreadCount = async (
-  userId: string | null,
-  userType: string
+  recipientId: string,
+  roleType: string
 ): Promise<number> => {
-  let sql: string;
-  let params: any[];
-
-  if (userId) {
-    sql = `
-      SELECT COUNT(*) as count
-      FROM notifications
-      WHERE user_id = $1 AND user_type = $2 AND is_read = false
-    `;
-    params = [userId, userType];
-  } else {
-    sql = `
-      SELECT COUNT(*) as count
-      FROM notifications
-      WHERE user_id IS NULL AND user_type = $1 AND is_read = false
-    `;
-    params = [userType];
-  }
+  const sql = `
+    SELECT COUNT(*) as count
+    FROM notifications
+    WHERE recipient_id = $1 AND role_type = $2 AND is_read = false
+  `;
+  const params = [recipientId, roleType];
 
   const result = await query(sql, params);
   return parseInt(result.rows[0].count, 10);
@@ -213,25 +235,25 @@ function buildCountQuery(filters: NotificationFilters): { sql: string; params: a
   let paramIndex = 1;
 
   // User ID filter
-  if (filters.user_id !== undefined) {
-    if (filters.user_id === null) {
-      conditions.push('user_id IS NULL');
+  if (filters.recipient_id !== undefined) {
+    if (filters.recipient_id === null) {
+      conditions.push('recipient_id IS NULL');
     } else {
-      conditions.push(`user_id = $${paramIndex++}`);
-      params.push(filters.user_id);
+      conditions.push(`recipient_id = $${paramIndex++}`);
+      params.push(filters.recipient_id);
     }
   }
 
-  // User type filter
-  if (filters.user_type) {
-    conditions.push(`user_type = $${paramIndex++}`);
-    params.push(filters.user_type);
+  // Role type filter
+  if (filters.role_type) {
+    conditions.push(`role_type = $${paramIndex++}`);
+    params.push(filters.role_type);
   }
 
-  // Category filter
-  if (filters.category) {
-    conditions.push(`category = $${paramIndex++}`);
-    params.push(filters.category);
+  // Notification type filter
+  if (filters.notification_type) {
+    conditions.push(`notification_type = $${paramIndex++}`);
+    params.push(filters.notification_type);
   }
 
   // Priority filter
@@ -285,23 +307,23 @@ function buildFindManyQuery(
   let paramIndex = 1;
 
   // Apply same filters as count query
-  if (filters.user_id !== undefined) {
-    if (filters.user_id === null) {
-      conditions.push('user_id IS NULL');
+  if (filters.recipient_id !== undefined) {
+    if (filters.recipient_id === null) {
+      conditions.push('recipient_id IS NULL');
     } else {
-      conditions.push(`user_id = $${paramIndex++}`);
-      params.push(filters.user_id);
+      conditions.push(`recipient_id = $${paramIndex++}`);
+      params.push(filters.recipient_id);
     }
   }
 
-  if (filters.user_type) {
-    conditions.push(`user_type = $${paramIndex++}`);
-    params.push(filters.user_type);
+  if (filters.role_type) {
+    conditions.push(`role_type = $${paramIndex++}`);
+    params.push(filters.role_type);
   }
 
-  if (filters.category) {
-    conditions.push(`category = $${paramIndex++}`);
-    params.push(filters.category);
+  if (filters.notification_type) {
+    conditions.push(`notification_type = $${paramIndex++}`);
+    params.push(filters.notification_type);
   }
 
   if (filters.priority) {

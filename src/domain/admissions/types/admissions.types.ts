@@ -81,6 +81,8 @@ export interface AdmissionFilters {
   delivery_mode?: string;
   verification_status?: VerificationStatus | VerificationStatus[];
   created_by?: string;
+  owner_user_ids?: string[];
+  owner_university_ids?: string[];
   is_active?: boolean;
 }
 

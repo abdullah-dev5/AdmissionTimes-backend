@@ -19,6 +19,15 @@ import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/deadlines.constants';
 import { DEFAULTS } from '../constants/deadlines.constants';
 
+export interface DeadlineReminderTarget {
+  deadline_id: string;
+  deadline_type: string;
+  deadline_date: string;
+  admission_id: string;
+  admission_title: string;
+  recipient_id: string;
+}
+
 /**
  * Find deadline by ID
  * 
@@ -303,6 +312,132 @@ function buildFindManyQuery(
 
   return { sql, params };
 }
+
+/**
+ * Find user's upcoming deadlines with admission and university details
+ * Uses watchlist to determine which admissions are relevant to the user
+ * 
+ * @param userId - User UUID
+ * @param page - Page number (1-based)
+ * @param limit - Items per page
+ * @param lookAheadDays - Number of days in future to look
+ * @param alertOptInOnly - Only return deadlines where user has alerts enabled
+ * @returns Array of deadline records with related data
+ */
+export const findUserUpcomingDeadlines = async (
+  userId: string,
+  page: number,
+  limit: number,
+  lookAheadDays: number = 7,
+  alertOptInOnly: boolean = true
+): Promise<any[]> => {
+  const offset = calculateOffset(page, limit);
+  const futureDate = new Date();
+  futureDate.setDate(futureDate.getDate() + lookAheadDays);
+  
+  const now = new Date().toISOString();
+  const future = futureDate.toISOString();
+  
+  const sql = `
+    SELECT DISTINCT
+      d.*,
+      a.title as admission_title,
+      a.id as admission_id,
+      u.name as university_name,
+      u.logo_url as university_logo,
+      w.id as watchlist_id,
+      w.alert_opt_in,
+      EXTRACT(DAY FROM (d.deadline_date::timestamp - NOW())) as days_remaining
+    FROM watchlists w
+    JOIN admissions a ON w.admission_id = a.id
+    JOIN deadlines d ON a.id = d.admission_id
+    LEFT JOIN universities u ON a.university_id = u.id
+    WHERE w.user_id = $1
+      AND d.deadline_date >= $2
+      AND d.deadline_date <= $3
+      ${alertOptInOnly ? "AND w.alert_opt_in = true" : ""}
+    ORDER BY d.deadline_date ASC
+    LIMIT $4 OFFSET $5
+  `;
+  
+  const result = await query(sql, [userId, now, future, limit, offset]);
+  return result.rows;
+};
+
+/**
+ * Count user's upcoming deadlines
+ * 
+ * @param userId - User UUID
+ * @param lookAheadDays - Number of days in future to look
+ * @param alertOptInOnly - Only count deadlines where user has alerts enabled
+ * @returns Total count of matching deadlines
+ */
+export const countUserUpcomingDeadlines = async (
+  userId: string,
+  lookAheadDays: number = 7,
+  alertOptInOnly: boolean = true
+): Promise<number> => {
+  const futureDate = new Date();
+  futureDate.setDate(futureDate.getDate() + lookAheadDays);
+  
+  const now = new Date().toISOString();
+  const future = futureDate.toISOString();
+  
+  const sql = `
+    SELECT COUNT(DISTINCT d.id) as count
+    FROM watchlists w
+    JOIN admissions a ON w.admission_id = a.id
+    JOIN deadlines d ON a.id = d.admission_id
+    WHERE w.user_id = $1
+      AND d.deadline_date >= $2
+      AND d.deadline_date <= $3
+      ${alertOptInOnly ? "AND w.alert_opt_in = true" : ""}
+  `;
+  
+  const result = await query(sql, [userId, now, future]);
+  return parseInt(result.rows[0]?.count || 0, 10);
+};
+
+/**
+ * Find reminder targets for upcoming deadlines.
+ *
+ * Targets are users who:
+ * - have the admission in watchlist
+ * - opted in for alerts
+ * - admission is active + verified
+ * - deadline is within [now, now + lookAheadDays]
+ */
+export const findReminderTargets = async (
+  lookAheadDays: number = 7
+): Promise<DeadlineReminderTarget[]> => {
+  const futureDate = new Date();
+  futureDate.setDate(futureDate.getDate() + lookAheadDays);
+
+  const now = new Date().toISOString();
+  const future = futureDate.toISOString();
+
+  const sql = `
+    SELECT DISTINCT
+      d.id::text AS deadline_id,
+      d.deadline_type,
+      d.deadline_date,
+      a.id::text AS admission_id,
+      a.title AS admission_title,
+      w.user_id::text AS recipient_id
+    FROM deadlines d
+    JOIN admissions a ON a.id = d.admission_id
+    JOIN watchlists w ON w.admission_id = a.id
+    WHERE a.is_active = true
+      AND a.verification_status = 'verified'
+      AND w.alert_opt_in = true
+      AND d.deadline_date >= $1
+      AND d.deadline_date <= $2
+    ORDER BY d.deadline_date ASC
+  `;
+
+  const result = await query(sql, [now, future]);
+  return result.rows;
+};
 
 /**
  * Delete a deadline

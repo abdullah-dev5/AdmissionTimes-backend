@@ -7,8 +7,9 @@
 
 /**
  * Email frequency options
+ * Note: 'immediate' is the only option. Email on/off controlled by email_notifications_enabled.
  */
-export type EmailFrequency = 'immediate' | 'daily' | 'weekly' | 'never';
+export type EmailFrequency = 'immediate';
 
 /**
  * Language options

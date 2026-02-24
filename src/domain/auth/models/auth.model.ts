@@ -41,10 +41,10 @@ export const emailExists = async (email: string): Promise<boolean> => {
 export const createUser = async (data: SignUpDTO): Promise<AuthUser> => {
   const sql = `
     INSERT INTO users (
-      auth_user_id, email, password, role, display_name, organization_id, status
+      auth_user_id, email, password, role, display_name, university_id, status
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING id, email, role, organization_id, display_name, created_at, updated_at
+    RETURNING id, email, role, university_id, display_name, created_at, updated_at
   `;
 
   const params = [
@@ -64,7 +64,7 @@ export const createUser = async (data: SignUpDTO): Promise<AuthUser> => {
     id: user.id,
     email: user.email,
     role: user.role as any, // Map role to user_type
-    university_id: user.organization_id, // Map organization_id to university_id in response
+    university_id: user.university_id,
     display_name: user.display_name,
     created_at: user.created_at,
     updated_at: user.updated_at,
@@ -79,7 +79,7 @@ export const createUser = async (data: SignUpDTO): Promise<AuthUser> => {
  */
 export const findUserByAuthUserId = async (authUserId: string): Promise<AuthUser | null> => {
   const sql = `
-    SELECT id, email, role, organization_id, display_name, created_at, updated_at
+    SELECT id, email, role, university_id, display_name, created_at, updated_at
     FROM users
     WHERE auth_user_id = $1
   `;
@@ -95,7 +95,7 @@ export const findUserByAuthUserId = async (authUserId: string): Promise<AuthUser
     id: user.id,
     email: user.email,
     role: user.role as any,
-    university_id: user.organization_id,
+    university_id: user.university_id,
     display_name: user.display_name,
     created_at: user.created_at,
     updated_at: user.updated_at,
@@ -126,7 +126,7 @@ export const verifyCredentials = async (
     id: user.id,
     email: user.email,
     role: user.role as any, // Map role to user_type
-    university_id: user.organization_id,
+    university_id: user.university_id,
     display_name: user.display_name,
     created_at: user.created_at,
     updated_at: user.updated_at,
@@ -141,7 +141,7 @@ export const verifyCredentials = async (
  */
 export const findUserById = async (id: string): Promise<AuthUser | null> => {
   const sql = `
-    SELECT id, email, role, organization_id, display_name, created_at, updated_at
+    SELECT id, email, role, university_id, display_name, created_at, updated_at
     FROM users
     WHERE id = $1
   `;
@@ -157,7 +157,7 @@ export const findUserById = async (id: string): Promise<AuthUser | null> => {
     id: user.id,
     email: user.email,
     role: user.role as any, // Map role to user_type
-    university_id: user.organization_id,
+    university_id: user.university_id,
     display_name: user.display_name,
     created_at: user.created_at,
     updated_at: user.updated_at,

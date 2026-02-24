@@ -238,6 +238,23 @@ function buildCountQuery(filters: AdmissionFilters): { sql: string; params: any[
     params.push(filters.created_by);
   }
 
+  // Owner scope filter (university visibility across linked identities)
+  if ((filters.owner_user_ids && filters.owner_user_ids.length > 0) || (filters.owner_university_ids && filters.owner_university_ids.length > 0)) {
+    const ownerConditions: string[] = [];
+
+    if (filters.owner_user_ids && filters.owner_user_ids.length > 0) {
+      ownerConditions.push(`created_by = ANY($${paramIndex++}::uuid[])`);
+      params.push(filters.owner_user_ids);
+    }
+
+    if (filters.owner_university_ids && filters.owner_university_ids.length > 0) {
+      ownerConditions.push(`university_id = ANY($${paramIndex++}::uuid[])`);
+      params.push(filters.owner_university_ids);
+    }
+
+    conditions.push(`(${ownerConditions.join(' OR ')})`);
+  }
+
   // Program type filter
   if (filters.program_type) {
     conditions.push(`program_type ILIKE $${paramIndex++}`);
@@ -318,6 +335,23 @@ function buildFindManyQuery(
   if (filters.created_by) {
     conditions.push(`created_by = $${paramIndex++}`);
     params.push(filters.created_by);
+  }
+
+  // Owner scope filter (university visibility across linked identities)
+  if ((filters.owner_user_ids && filters.owner_user_ids.length > 0) || (filters.owner_university_ids && filters.owner_university_ids.length > 0)) {
+    const ownerConditions: string[] = [];
+
+    if (filters.owner_user_ids && filters.owner_user_ids.length > 0) {
+      ownerConditions.push(`created_by = ANY($${paramIndex++}::uuid[])`);
+      params.push(filters.owner_user_ids);
+    }
+
+    if (filters.owner_university_ids && filters.owner_university_ids.length > 0) {
+      ownerConditions.push(`university_id = ANY($${paramIndex++}::uuid[])`);
+      params.push(filters.owner_university_ids);
+    }
+
+    conditions.push(`(${ownerConditions.join(' OR ')})`);
   }
 
   if (filters.program_type) {

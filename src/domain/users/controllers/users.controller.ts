@@ -114,7 +114,7 @@ export const getUsers = async (
     const filters = {
       role: queryParams.role,
       status: queryParams.status,
-      organization_id: queryParams.organization_id,
+      university_id: queryParams.university_id,
       auth_user_id: queryParams.auth_user_id,
     };
 

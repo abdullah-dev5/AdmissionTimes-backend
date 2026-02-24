@@ -144,15 +144,15 @@ export const create = async (data: CreateUserDTO): Promise<User> => {
     }
   }
 
-  // Validate organization_id for university users
-  if (data.role === USER_TYPE.UNIVERSITY && !data.organization_id) {
-    // Organization ID is optional but recommended for university users
+  // Validate university_id for university users
+  if (data.role === USER_TYPE.UNIVERSITY && !data.university_id) {
+    // University ID is optional but recommended for university users
     // We'll allow it to be null for now
   }
 
-  // Validate organization_id not set for non-university users
-  if (data.role !== USER_TYPE.UNIVERSITY && data.organization_id) {
-    throw new AppError('Organization ID can only be set for university users', 400);
+  // Validate university_id not set for non-university users
+  if (data.role !== USER_TYPE.UNIVERSITY && data.university_id) {
+    throw new AppError('University ID can only be set for university users', 400);
   }
 
   return await usersModel.create(data);
@@ -180,14 +180,14 @@ export const updateCurrentUser = async (
     throw new AppError('User not found', 404);
   }
 
-  // Validate organization_id for university users
-  if (user.role === USER_TYPE.UNIVERSITY && data.organization_id !== undefined) {
-    // Allow organization_id update for university users
+  // Validate university_id for university users
+  if (user.role === USER_TYPE.UNIVERSITY && data.university_id !== undefined) {
+    // Allow university_id update for university users
   }
 
-  // Validate organization_id not set for non-university users
-  if (user.role !== USER_TYPE.UNIVERSITY && data.organization_id) {
-    throw new AppError('Organization ID can only be set for university users', 400);
+  // Validate university_id not set for non-university users
+  if (user.role !== USER_TYPE.UNIVERSITY && data.university_id) {
+    throw new AppError('University ID can only be set for university users', 400);
   }
 
   const updated = await usersModel.update(userContext.id, data);
@@ -224,16 +224,16 @@ export const updateRole = async (
     throw new AppError('User not found', 404);
   }
 
-  // Validate organization_id for university users
-  if (data.role === USER_TYPE.UNIVERSITY && user.organization_id === null) {
-    // Organization ID is optional but recommended
-    // We'll allow role change without organization_id
+  // Validate university_id for university users
+  if (data.role === USER_TYPE.UNIVERSITY && user.university_id === null) {
+    // University ID is optional but recommended
+    // We'll allow role change without university_id
   }
 
-  // Clear organization_id if changing from university to non-university
+  // Clear university_id if changing from university to non-university
   if (user.role === USER_TYPE.UNIVERSITY && data.role !== USER_TYPE.UNIVERSITY) {
-    // Clear organization_id when changing from university role
-    await usersModel.update(id, { organization_id: null });
+    // Clear university_id when changing from university role
+    await usersModel.update(id, { university_id: null });
   }
 
   const updated = await usersModel.updateRole(id, data.role);
@@ -266,11 +266,11 @@ export const getUniversityProfile = async (userContext?: UserContext): Promise<U
     throw new AppError('Forbidden', 403);
   }
 
-  if (!user.organization_id) {
-    throw new AppError('Organization ID not set for university user', 400);
+  if (!user.university_id) {
+    throw new AppError('University ID not set for university user', 400);
   }
 
-  const existing = await usersModel.findUniversityById(user.organization_id);
+  const existing = await usersModel.findUniversityById(user.university_id);
 
   if (existing) {
     return existing as UniversityProfile;
@@ -278,7 +278,7 @@ export const getUniversityProfile = async (userContext?: UserContext): Promise<U
 
   // Return a minimal profile if record doesn't exist yet
   return {
-    id: user.organization_id,
+    id: user.university_id,
     name: user.display_name,
     city: null,
     country: null,
@@ -320,13 +320,13 @@ export const updateUniversityProfile = async (
     throw new AppError('Forbidden', 403);
   }
 
-  if (!user.organization_id) {
-    throw new AppError('Organization ID not set for university user', 400);
+  if (!user.university_id) {
+    throw new AppError('University ID not set for university user', 400);
   }
 
   const name = data.name || user.display_name;
 
-  const updated = await usersModel.upsertUniversityProfile(user.organization_id, {
+  const updated = await usersModel.upsertUniversityProfile(user.university_id, {
     name,
     city: data.city ?? null,
     country: data.country ?? null,
@@ -371,7 +371,7 @@ export const findOrCreateByAuthUserId = async (
     auth_user_id: authUserId,
     role: defaultRole as any,
     display_name: defaultDisplayName,
-    organization_id: null,
+    university_id: null,
     status: 'active',
   });
 

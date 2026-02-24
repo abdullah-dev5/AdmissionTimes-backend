@@ -31,6 +31,7 @@ import { jwtAuth } from '@shared/middleware/jwtAuth';
 import { registerDomains } from '@domain/index';
 import { swaggerSpec } from '@config/swagger';
 import authRoutes from '@domain/auth/routes/auth.routes';
+import { initializeScheduler } from '@shared/scheduler';
 
 // Initialize Express application
 const app: Application = express();
@@ -142,6 +143,9 @@ const server = app.listen(PORT, async () => {
   if (!dbConnected) {
     console.error('⚠️  Warning: Database connection test failed. Some features may not work.');
   }
+  
+  // Initialize scheduled tasks
+  initializeScheduler();
 });
 
 // Graceful shutdown

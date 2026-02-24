@@ -12,6 +12,7 @@ import * as adminController from '../controllers/admin.controller';
 import { adminOnly } from '../middleware/adminOnly';
 import {
   verifyAdmissionSchema,
+  revisionRequiredSchema,
   bulkVerifySchema,
   adminFilterSchema,
   uuidParamSchema,
@@ -374,6 +375,14 @@ router.post(
   validateParams(uuidParamSchema),
   validateBody(verifyAdmissionSchema),
   adminController.verifyAdmission
+);
+
+// POST /api/v1/admin/admissions/:id/revision-required - Request revision from university
+router.post(
+  '/admissions/:id/revision-required',
+  validateParams(uuidParamSchema),
+  validateBody(revisionRequiredSchema),
+  adminController.requestRevision
 );
 
 /**

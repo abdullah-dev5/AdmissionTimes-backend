@@ -86,7 +86,7 @@ export const findMany = async (
 export const create = async (data: CreateUserDTO): Promise<User> => {
   const sql = `
     INSERT INTO users (
-      auth_user_id, role, display_name, organization_id, status
+      auth_user_id, role, display_name, university_id, status
     )
     VALUES ($1, $2, $3, $4, $5)
     RETURNING *
@@ -96,7 +96,7 @@ export const create = async (data: CreateUserDTO): Promise<User> => {
     data.auth_user_id || null,
     data.role,
     data.display_name,
-    data.organization_id || null,
+    data.university_id || null,
     data.status || 'active',
   ];
 
@@ -123,7 +123,7 @@ export const update = async (
   // Map of field names to their parameterized values
   const fieldMap: Record<string, any> = {
     display_name: data.display_name,
-    organization_id: data.organization_id,
+    university_id: data.university_id,
   };
 
   // Build SET clause for provided fields
@@ -229,10 +229,10 @@ function buildCountQuery(filters: UserFilters): { sql: string; params: any[] } {
     params.push(filters.status);
   }
 
-  // Organization ID filter
-  if (filters.organization_id) {
-    conditions.push(`organization_id = $${paramIndex++}`);
-    params.push(filters.organization_id);
+  // University ID filter
+  if (filters.university_id) {
+    conditions.push(`university_id = $${paramIndex++}`);
+    params.push(filters.university_id);
   }
 
   // Auth user ID filter
@@ -286,10 +286,10 @@ function buildFindManyQuery(
     params.push(filters.status);
   }
 
-  // Organization ID filter
-  if (filters.organization_id) {
-    conditions.push(`organization_id = $${paramIndex++}`);
-    params.push(filters.organization_id);
+  // University ID filter
+  if (filters.university_id) {
+    conditions.push(`university_id = $${paramIndex++}`);
+    params.push(filters.university_id);
   }
 
   // Auth user ID filter

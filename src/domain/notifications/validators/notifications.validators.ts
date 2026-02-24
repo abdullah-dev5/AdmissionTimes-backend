@@ -6,35 +6,35 @@
  */
 
 import Joi from 'joi';
-import { NOTIFICATION_CATEGORY, NOTIFICATION_PRIORITY, USER_TYPE } from '@config/constants';
+import { NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE } from '@config/constants';
 import { FIELD_LIMITS, DEFAULTS } from '../constants/notifications.constants';
 
 /**
  * Create notification validation schema
  */
 export const createNotificationSchema = Joi.object({
-  user_id: Joi.string()
+  recipient_id: Joi.string()
     .uuid()
-    .allow(null, '')
-    .optional()
+    .required()
     .messages({
-      'string.guid': 'user_id must be a valid UUID',
+      'string.guid': 'recipient_id must be a valid UUID',
+      'any.required': 'recipient_id is required',
     }),
 
-  user_type: Joi.string()
+  role_type: Joi.string()
     .valid(...Object.values(USER_TYPE))
     .required()
     .messages({
-      'any.only': `user_type must be one of: ${Object.values(USER_TYPE).join(', ')}`,
-      'any.required': 'user_type is required',
+      'any.only': `role_type must be one of: ${Object.values(USER_TYPE).join(', ')}`,
+      'any.required': 'role_type is required',
     }),
 
-  category: Joi.string()
-    .valid(...Object.values(NOTIFICATION_CATEGORY))
+  notification_type: Joi.string()
+    .valid(...Object.values(NOTIFICATION_TYPE))
     .required()
     .messages({
-      'any.only': `category must be one of: ${Object.values(NOTIFICATION_CATEGORY).join(', ')}`,
-      'any.required': 'category is required',
+      'any.only': `notification_type must be one of: ${Object.values(NOTIFICATION_TYPE).join(', ')}`,
+      'any.required': 'notification_type is required',
     }),
 
   priority: Joi.string()
@@ -88,6 +88,14 @@ export const createNotificationSchema = Joi.object({
       'string.max': `Action URL must not exceed ${FIELD_LIMITS.ACTION_URL_MAX} characters`,
       'string.uri': 'Action URL must be a valid URI',
     }),
+
+  event_key: Joi.string()
+    .max(200)
+    .required()
+    .messages({
+      'string.empty': 'event_key is required',
+      'any.required': 'event_key is required',
+    }),
 });
 
 /**
@@ -116,26 +124,26 @@ export const notificationQuerySchema = Joi.object({
       'number.max': 'Limit must not exceed 100',
     }),
 
-  user_id: Joi.string()
+  recipient_id: Joi.string()
     .uuid()
     .allow('')
     .optional()
     .messages({
-      'string.guid': 'user_id must be a valid UUID',
+      'string.guid': 'recipient_id must be a valid UUID',
     }),
 
-  user_type: Joi.string()
+  role_type: Joi.string()
     .valid(...Object.values(USER_TYPE))
     .optional()
     .messages({
-      'any.only': `user_type must be one of: ${Object.values(USER_TYPE).join(', ')}`,
+      'any.only': `role_type must be one of: ${Object.values(USER_TYPE).join(', ')}`,
     }),
 
-  category: Joi.string()
-    .valid(...Object.values(NOTIFICATION_CATEGORY))
+  notification_type: Joi.string()
+    .valid(...Object.values(NOTIFICATION_TYPE))
     .optional()
     .messages({
-      'any.only': `category must be one of: ${Object.values(NOTIFICATION_CATEGORY).join(', ')}`,
+      'any.only': `notification_type must be one of: ${Object.values(NOTIFICATION_TYPE).join(', ')}`,
     }),
 
   priority: Joi.string()
@@ -164,7 +172,7 @@ export const notificationQuerySchema = Joi.object({
     }),
 
   sort: Joi.string()
-    .valid('created_at', 'read_at', 'priority', 'category')
+    .valid('created_at', 'read_at', 'priority', 'notification_type')
     .optional()
     .messages({
       'any.only': 'Invalid sort field',
