@@ -273,8 +273,18 @@ export const jwtAuth = async (
 
     // Extract user context from verified token
     const userRole = payload.user_metadata?.role || 'student';
-    const universityId = payload.user_metadata?.university_id || null;
+    let universityId = payload.user_metadata?.university_id || null;
     const email = payload.email || null;
+
+    // For university users, fetch their university_id from database if university_id is missing
+    if (userRole === 'university' && !universityId && databaseUserId) {
+      const userSql = 'SELECT university_id::text as university_id FROM users WHERE id = $1';
+      const userResult = await query(userSql, [databaseUserId]);
+      if (userResult.rows.length > 0 && userResult.rows[0].university_id) {
+        universityId = userResult.rows[0].university_id;
+        console.log(`🔄 [JWT] Using database university_id for university user ${email}: ${universityId}`);
+      }
+    }
 
     req.user = {
       id: databaseUserId, // Use database ID, not Supabase auth_user_id

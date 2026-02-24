@@ -45,6 +45,11 @@ export const errorHandler = (
     timestamp: new Date().toISOString(),
   });
 
+  // Notify admins on unexpected errors (non-AppError)
+  if (!(err instanceof AppError)) {
+    void notifyAdminsOfSystemError(err, req);
+  }
+
   // Handle AppError instances
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
@@ -64,6 +69,37 @@ export const errorHandler = (
     ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
   });
 };
+
+async function notifyAdminsOfSystemError(err: Error, req: Request): Promise<void> {
+  try {
+    const { query } = await import('@db/connection');
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
+    const { NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE } = await import('@config/constants');
+
+    const adminResult = await query('SELECT id::text as id FROM users WHERE role = $1', [USER_TYPE.ADMIN]);
+    const recipients = adminResult.rows.map((row: { id: string }) => ({ id: row.id, role: USER_TYPE.ADMIN }));
+
+    if (recipients.length === 0) {
+      return;
+    }
+
+    const eventKey = `system_error:${Date.now()}:${req.method}:${req.originalUrl}`;
+
+    await publishNotification({
+      recipients,
+      notification_type: NOTIFICATION_TYPE.SYSTEM_ERROR,
+      priority: NOTIFICATION_PRIORITY.HIGH,
+      title: 'System Error',
+      message: `Unhandled error: ${err.message} (${req.method} ${req.originalUrl})`,
+      related_entity_type: 'system',
+      related_entity_id: null,
+      action_url: null,
+      event_key: eventKey,
+    });
+  } catch (notifyError) {
+    console.error('Failed to publish system error notification:', notifyError);
+  }
+}
 
 /**
  * Async error handler wrapper

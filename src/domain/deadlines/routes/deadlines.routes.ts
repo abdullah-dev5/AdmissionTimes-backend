@@ -275,6 +275,12 @@ router.get(
   deadlinesController.getUrgentDeadlines
 );
 
+// POST /api/v1/deadlines/notify-upcoming - Trigger deadline reminder notifications (admin only)
+router.post(
+  '/notify-upcoming',
+  deadlinesController.triggerDeadlineReminders
+);
+
 /**
  * @swagger
  * /api/v1/deadlines/{id}:
@@ -440,6 +446,103 @@ router.delete(
   '/:id',
   validateParams(uuidParamSchema),
   deadlinesController.deleteDeadline
+);
+
+/**
+ * @swagger
+ * /api/v1/users/me/upcoming-deadlines:
+ *   get:
+ *     summary: Get user's upcoming deadlines with details
+ *     tags: [Deadlines, Users]
+ *     description: Retrieve paginated list of upcoming deadlines for the current user, including admission and university information
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 7
+ *         description: Number of days ahead to look for deadlines
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *         description: Number of items per page
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: alert_enabled
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Only include deadlines with alerts enabled
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved user's upcoming deadlines
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                         format: uuid
+ *                       admission_id:
+ *                         type: string
+ *                         format: uuid
+ *                       admission_title:
+ *                         type: string
+ *                       deadline_date:
+ *                         type: string
+ *                         format: date-time
+ *                       days_remaining:
+ *                         type: integer
+ *                       urgency_level:
+ *                         type: string
+ *                         enum: [low, medium, high, critical, expired]
+ *                       university_name:
+ *                         type: string
+ *                       university_logo:
+ *                         type: string
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     total:
+ *                       type: integer
+ *                     pages:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// GET /api/v1/users/me/upcoming-deadlines - Get user's upcoming deadlines
+router.get(
+  '/me/upcoming-deadlines',
+  deadlinesController.getUserUpcomingDeadlines
 );
 
 export default router;

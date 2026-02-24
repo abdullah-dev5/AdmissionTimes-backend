@@ -19,6 +19,7 @@ import {
   UniversityDashboardData,
   AdminDashboardData,
 } from '../types/dashboard.types';
+import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
 
 /**
  * Get student dashboard data
@@ -70,9 +71,14 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           
           (SELECT COUNT(DISTINCT n.id)
            FROM notifications n
-           WHERE n.user_id = $1 
-             AND n.user_type = 'student'
-             AND n.is_read = false) as unread_notifications
+           WHERE n.recipient_id = $1 
+             AND n.role_type = 'student'
+             AND n.is_read = false) as unread_notifications,
+          
+          (SELECT COUNT(DISTINCT r.id)
+           FROM recommendations r
+           WHERE r.user_id = $1 
+             AND r.expires_at > NOW()) as recommendations_count
         FROM (SELECT 1) as dummy
       ),
       recommended_programs AS (
@@ -87,17 +93,20 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           COALESCE(a.application_fee, 0) as application_fee,
           a.location,
           a.verification_status,
-          0 as match_score,
-          'Recommended based on your preferences' as match_reason,
+          COALESCE(r.score, 0) as match_score,
+          COALESCE(r.reason, 'Recommended for you') as match_reason,
           CASE WHEN w.id IS NOT NULL THEN true ELSE false END as saved,
           COALESCE(w.alert_opt_in, false) as alert_enabled
-        FROM admissions a
+        FROM recommendations r
+        INNER JOIN admissions a ON r.admission_id = a.id
         LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
-        WHERE a.verification_status = 'verified'
+        WHERE r.user_id = $1
+          AND r.expires_at > NOW()
+          AND a.verification_status = 'verified'
           AND a.deadline > NOW()
           AND a.is_active = true
-        ORDER BY a.deadline ASC
-        LIMIT 4
+        ORDER BY r.score DESC, a.deadline ASC
+        LIMIT 10
       ),
       upcoming_deadlines AS (
         SELECT 
@@ -127,7 +136,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
       recent_notifications AS (
         SELECT 
           id::text,
-          category::text,
+          notification_type::text,
           priority::text,
           title,
           message,
@@ -135,8 +144,8 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           created_at::text,
           action_url
         FROM notifications
-        WHERE user_id = $1 
-          AND user_type = 'student'
+        WHERE recipient_id = $1 
+          AND role_type = 'student'
         ORDER BY created_at DESC
         LIMIT 5
       ),
@@ -148,7 +157,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           id::text as related_entity_id,
           'notification' as related_entity_type
         FROM notifications
-        WHERE user_id = $1 AND user_type = 'student'
+        WHERE recipient_id = $1 AND role_type = 'student'
         
         UNION ALL
         
@@ -176,6 +185,50 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
     const result = await query(dashboardQuery, [userId]);
     const row = result.rows[0];
 
+    // If no recommendations exist, generate them on-demand
+    let recommendedPrograms = row.recommended_programs || [];
+    if (recommendedPrograms.length === 0) {
+      try {
+        console.log(`[Dashboard] No recommendations found for user ${userId}, generating...`);
+        await recommendationsService.generateRecommendationsForUser(userId);
+        
+        // Re-fetch recommendations after generation
+        const recsQuery = `
+          SELECT 
+            a.id,
+            COALESCE(a.university_id::text, 'unknown') as university_id,
+            COALESCE(a.location, 'Unknown University') as university_name,
+            a.title,
+            a.degree_level,
+            a.deadline::text as deadline,
+            EXTRACT(DAY FROM (a.deadline - NOW()))::int as days_remaining,
+            COALESCE(a.application_fee, 0) as application_fee,
+            a.location,
+            a.verification_status,
+            COALESCE(r.score, 0) as match_score,
+            COALESCE(r.reason, 'Recommended for you') as match_reason,
+            CASE WHEN w.id IS NOT NULL THEN true ELSE false END as saved,
+            COALESCE(w.alert_opt_in, false) as alert_enabled
+          FROM recommendations r
+          INNER JOIN admissions a ON r.admission_id = a.id
+          LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
+          WHERE r.user_id = $1
+            AND r.expires_at > NOW()
+            AND a.verification_status = 'verified'
+            AND a.deadline > NOW()
+            AND a.is_active = true
+          ORDER BY r.score DESC, a.deadline ASC
+          LIMIT 10
+        `;
+        const recsResult = await query(recsQuery, [userId]);
+        recommendedPrograms = recsResult.rows;
+        console.log(`[Dashboard] Generated ${recommendedPrograms.length} recommendations`);
+      } catch (genError) {
+        console.warn('[Dashboard] Failed to generate recommendations:', genError);
+        // Continue without recommendations rather than failing the entire dashboard
+      }
+    }
+
     // Transform the result to match the expected structure
     // Ensure all fields use snake_case and proper types
     const dashboardData: StudentDashboardData = {
@@ -183,11 +236,11 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
         active_admissions: parseInt(row.stats?.active_admissions || 0, 10),
         saved_count: parseInt(row.stats?.saved_count || 0, 10),
         upcoming_deadlines: parseInt(row.stats?.upcoming_deadlines || 0, 10),
-        recommendations_count: Array.isArray(row.recommended_programs) ? row.recommended_programs.length : 0,
+        recommendations_count: parseInt(row.stats?.recommendations_count || 0, 10),
         unread_notifications: parseInt(row.stats?.unread_notifications || 0, 10),
         urgent_deadlines: parseInt(row.stats?.urgent_deadlines || 0, 10),
       },
-      recommended_programs: (row.recommended_programs || []).map((program: any) => ({
+      recommended_programs: (recommendedPrograms || []).map((program: any) => ({
         ...program,
         verification_status: program.verification_status || 'verified',
         match_score: parseInt(program.match_score || 0, 10),
@@ -239,8 +292,57 @@ export const getUniversityDashboard = async (
   }
 
   try {
-    // Use university_id from user context or parameter
-    const effectiveUniversityId = universityId || userId; // Fallback to userId if no university_id
+    // Get full linked identity set (same logic as admissions.service.ts)
+    const linkedIdentitiesSql = `
+      WITH base_user AS (
+        SELECT id, auth_user_id, email, university_id
+        FROM users
+        WHERE id = $1::uuid
+      ),
+      linked_users AS (
+        SELECT u.id, u.auth_user_id, u.university_id
+        FROM users u, base_user b
+        WHERE u.role = 'university'
+          AND (
+            u.id = b.id
+            OR u.auth_user_id = b.auth_user_id
+            OR (b.email IS NOT NULL AND u.email = b.email)
+            OR (b.university_id IS NOT NULL AND u.university_id = b.university_id)
+          )
+      )
+      SELECT
+        COALESCE(array_agg(DISTINCT id::text) FILTER (WHERE id IS NOT NULL), ARRAY[]::text[]) as user_ids,
+        COALESCE(array_agg(DISTINCT auth_user_id::text) FILTER (WHERE auth_user_id IS NOT NULL), ARRAY[]::text[]) as auth_user_ids,
+        COALESCE(array_agg(DISTINCT university_id::text) FILTER (WHERE university_id IS NOT NULL), ARRAY[]::text[]) as university_ids
+      FROM linked_users;
+    `;
+
+    const identitiesResult = await query(linkedIdentitiesSql, [userId]);
+    const identities = identitiesResult.rows[0] || { user_ids: [], auth_user_ids: [], university_ids: [] };
+
+    // Ensure arrays are never null or empty
+    const allUserIds = Array.isArray(identities.user_ids) && identities.user_ids.length > 0 
+      ? identities.user_ids 
+      : [userId];
+    const allAuthUserIds = Array.isArray(identities.auth_user_ids) && identities.auth_user_ids.length > 0
+      ? identities.auth_user_ids
+      : [];
+    const allUniversityIds = Array.isArray(identities.university_ids) && identities.university_ids.length > 0
+      ? identities.university_ids
+      : universityId ? [universityId] : [];
+
+    // Combine user IDs and auth user IDs for created_by matching
+    // (users might have same auth_user_id with different user table IDs)
+    const combinedUserIds = [...new Set([...allUserIds, ...allAuthUserIds])];
+    // University IDs should ONLY contain organization IDs, NOT auth_user_ids
+    const combinedUniversityIds = allUniversityIds;
+
+    console.log('🔵 [dashboardService] Linked identities resolved:', {
+      userId,
+      universityId,
+      combinedUserIds,
+      combinedUniversityIds,
+    });
 
     const dashboardQuery = `
       WITH university_stats AS (
@@ -267,8 +369,9 @@ export const getUniversityDashboard = async (
             THEN a.id 
           END) as pending_audits
         FROM admissions a
-        LEFT JOIN notifications n ON n.user_id = $1 AND n.user_type = 'university'
-        WHERE a.university_id = $2 OR a.created_by = $1
+        LEFT JOIN notifications n ON n.recipient_id = $1 AND n.role_type = 'university'
+        WHERE (a.created_by::text = ANY($2::text[]) OR a.university_id::text = ANY($3::text[]))
+          AND a.is_active = true
       ),
       recent_admissions AS (
         SELECT 
@@ -297,9 +400,9 @@ export const getUniversityDashboard = async (
           created_at::text,
           updated_at::text
         FROM admissions
-        WHERE university_id = $2 OR created_by = $1
+        WHERE (created_by::text = ANY($2::text[]) OR university_id::text = ANY($3::text[]))
+          AND is_active = true
         ORDER BY updated_at DESC
-        -- LIMIT removed - show all admissions
       ),
       pending_verifications AS (
         SELECT 
@@ -310,8 +413,9 @@ export const getUniversityDashboard = async (
           'pending' as verification_status,
           NULL as admin_notes
         FROM admissions a
-        WHERE (a.university_id = $2 OR a.created_by = $1)
+        WHERE (a.created_by::text = ANY($2::text[]) OR a.university_id::text = ANY($3::text[]))
           AND a.verification_status = 'pending'
+          AND a.is_active = true
         ORDER BY a.created_at DESC
         LIMIT 20
       ),
@@ -327,14 +431,14 @@ export const getUniversityDashboard = async (
           COALESCE(cl.changed_by::text, 'system') as changed_by
         FROM changelogs cl
         INNER JOIN admissions a ON a.id = cl.admission_id
-        WHERE a.university_id = $2 OR a.created_by = $1
+        WHERE a.created_by::text = ANY($2::text[]) OR a.university_id::text = ANY($3::text[])
         ORDER BY cl.created_at DESC
         LIMIT 10
       ),
       recent_notifications AS (
         SELECT 
           id::text,
-          category::text,
+          notification_type::text,
           priority::text,
           title,
           message,
@@ -342,8 +446,8 @@ export const getUniversityDashboard = async (
           created_at::text,
           action_url
         FROM notifications
-        WHERE user_id = $1 
-          AND user_type = 'university'
+        WHERE recipient_id = $1 
+          AND role_type = 'university'
         ORDER BY created_at DESC
         LIMIT 10
       )
@@ -355,7 +459,7 @@ export const getUniversityDashboard = async (
         COALESCE((SELECT json_agg(row_to_json(rn)) FROM recent_notifications rn), '[]'::json) as recent_notifications;
     `;
 
-    const result = await query(dashboardQuery, [userId, effectiveUniversityId]);
+    const result = await query(dashboardQuery, [userId, combinedUserIds, combinedUniversityIds]);
     const row = result.rows[0];
 
     // Transform the result to match the expected structure

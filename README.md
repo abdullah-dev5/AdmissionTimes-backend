@@ -1,384 +1,245 @@
 # AdmissionTimes Backend
 
-Backend service for managing university admission information, verification workflows, deadlines, notifications, and user activity tracking. Built with Clean Architecture and Domain-Driven Design principles.
+Backend service for managing university admission information, verification workflows, deadlines, notifications, and recommendations.
 
-**Status:** ✅ Production Ready (Phases 1-5B Complete)  
-**Current Version:** 1.0.0  
-**Last Updated:** January 28, 2026
+**Status:** ✅ Production Ready  
+**Version:** 1.0.0  
+**Last Updated:** February 25, 2026
 
 ---
 
 ## 📖 Documentation
 
-### 🎯 Main Source of Truth
-👉 **[COMPREHENSIVE_SYSTEM_DOCUMENTATION.md](COMPREHENSIVE_SYSTEM_DOCUMENTATION.md)** ⭐ **Single source of truth** - All architecture, fixes, auth policy, achievements, and future roadmap
+### 👉 Main Documentation
+For complete documentation, see **[../admission-times-frontend/project-docs/README.md](../admission-times-frontend/project-docs/README.md)**
 
-### Quick Start by Role
-- **Frontend Team**: [docs/00_START_HERE.md](docs/00_START_HERE.md) → [docs/FRONTEND_SETUP_GUIDE.md](docs/FRONTEND_SETUP_GUIDE.md) → [docs/API_CONTRACT_CORRECTED_JAN_2026.md](docs/API_CONTRACT_CORRECTED_JAN_2026.md)
-- **Backend Team**: [COMPREHENSIVE_SYSTEM_DOCUMENTATION.md](COMPREHENSIVE_SYSTEM_DOCUMENTATION.md) → [docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md](docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md) → [docs/CODE_REVIEW_COMPLETE_JAN_2026.md](docs/CODE_REVIEW_COMPLETE_JAN_2026.md)
-- **Project Managers**: [COMPREHENSIVE_SYSTEM_DOCUMENTATION.md](COMPREHENSIVE_SYSTEM_DOCUMENTATION.md) (Executive Summary section)
+### Quick Links
+- **Architecture Overview**: [project-docs/overview.md](../admission-times-frontend/project-docs/overview.md)
+- **Tech Stack**: [project-docs/tech-specs.md](../admission-times-frontend/project-docs/tech-specs.md)
+- **Database Schema**: [project-docs/requirements.md](../admission-times-frontend/project-docs/requirements.md)
+- **API Documentation**: Run `pnpm run dev` → Visit `http://localhost:3000/api-docs`
 
-### Reference Documents
-- **[docs/API_CONTRACT_CORRECTED_JAN_2026.md](docs/API_CONTRACT_CORRECTED_JAN_2026.md)** - Complete API contract (51 endpoints)
-- **[docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md](docs/BACKEND_TODO_PRIORITIZED_JAN_2026.md)** - Prioritized TODO list and phase roadmap
-- **[docs/CODE_REVIEW_COMPLETE_JAN_2026.md](docs/CODE_REVIEW_COMPLETE_JAN_2026.md)** - Code review & implementation verification
-- **[docs/FINAL_SYSTEM_REPORT_JAN_2026.md](docs/FINAL_SYSTEM_REPORT_JAN_2026.md)** - Detailed system architecture report
-- **[docs/FRONTEND_TODO_ALIGNMENT_JAN_2026.md](docs/FRONTEND_TODO_ALIGNMENT_JAN_2026.md)** - Frontend integration checklist
-- **[docs/FRONTEND_SETUP_GUIDE.md](docs/FRONTEND_SETUP_GUIDE.md)** - Frontend setup & environment guide
-- **[docs/00_START_HERE.md](docs/00_START_HERE.md)** - Visual ASCII overview
-
-### Additional Resources 📚
-- **[project-docs/](project-docs/)** - Architecture & planning documents
-- **[phases/](phases/)** - Detailed phase completion reports
-- **[postman_collection.json](postman_collection.json)** - API testing suite
+### Recently Implemented Features ✨
+- **Recommendation System** - Smart collaborative filtering ([README](src/domain/recommendations/README.md))
+- **Deadline Reminders** - 3-tier notification system (7, 3, 1 day emails)
+- **Email Notifications** - Gmail SMTP integration
+- **User Preferences** - Email notification controls
 
 ---
 
-## 🚀 Features
+## 🚀 Key Features
 
-- **Admissions Management** - Complete CRUD + verification workflow (draft → pending → verified/rejected/disputed)
-- **Notifications System** - Categories, priorities, entity linking, read tracking
-- **Deadlines Management** - Types, timezone support, urgency calculation, reminders
-- **User Activity Tracking** - Activity types, entity linking, metadata
-- **Users Management** - Roles (student, university, admin) with RLS enforcement
-- **Analytics** - Event tracking, statistics aggregation, minimal metadata
-- **Changelogs** - Immutable audit trail (actor_type, action_type, field tracking, diff summaries)
-- **Watchlists** - Bookmark admissions with optional notes
-- **User Preferences** - Email/push notifications, categories, language, timezone, theme
-- **API Documentation** - Complete Swagger/OpenAPI (51 endpoints, 9 domains)
+✅ **Admissions Management** - Complete CRUD + verification workflow  
+✅ **Notifications System** - Email + in-app notifications  
+✅ **Deadlines Management** - Automatic reminders with 3-tier system  
+✅ **User Activity Tracking** - Complete audit trail  
+✅ **Users Management** - Role-based access (student, university, admin)  
+✅ **Watchlists** - Bookmark programs with optional notes  
+✅ **Recommendations** - Collaborative filtering suggestions  
+✅ **API Documentation** - Complete Swagger/OpenAPI endpoints  
+
+---
 
 ## 🛠️ Tech Stack
 
-- **Runtime**: Node.js (v18+)
-- **Framework**: Express.js (v5.2.1)
-- **Language**: TypeScript (v5.9.3, strict mode)
-- **Package Manager**: pnpm (v10+)
-- **Database**: PostgreSQL (via Supabase)
-- **Validation**: Joi
+- **Runtime**: Node.js v22+
+- **Language**: TypeScript (strict mode)
+- **Framework**: Express.js 5.x
+- **Database**: PostgreSQL (Supabase pooler)
+- **Validation**: Zod schemas
 - **Documentation**: Swagger/OpenAPI
-- **Auth**: Mock headers (current), Supabase JWT (Phase 4C)
+- **Email**: Nodemailer + Gmail SMTP
+- **Scheduling**: Node-cron (daily batch jobs)
 
-## 📋 Prerequisites
+---
 
-- Node.js (v18 or higher)
-- pnpm (v10 or higher)
-- PostgreSQL (via Supabase local or cloud)
+## 🚀 Quick Start
 
-## 🔧 Installation
-
-1. Clone the repository:
+### 1. Install Dependencies
 ```bash
-git clone https://github.com/abdullah-dev5/AdmissionTimes-backend.git
 cd admission-times-backend
-```
-
-2. Install dependencies:
-```bash
 pnpm install
 ```
 
-3. Set up environment variables:
+### 2. Setup Environment
 ```bash
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env with your database credentials
 ```
 
-4. Set up database:
+### 3. Database Setup
 ```bash
-# Run Supabase migrations
-pnpm migrate
+# Run migrations
+pnpm run migrate
 
-# Seed database with test data
-pnpm seed
+# Test connection
+pnpm run db:test
 ```
 
-## 🚀 Development
-
-Run the development server with hot reload:
+### 4. Start Development Server
 ```bash
-pnpm dev
+pnpm run dev
+# Server: http://localhost:3000
+# API Docs: http://localhost:3000/api-docs
 ```
 
-The server will start on `http://localhost:3000` (or the port specified in your `.env` file).
+### 5. Type Check
+```bash
+pnpm tsc --noEmit
+```
 
-### Available Scripts
-
-- `pnpm dev` - Start development server with hot reload
-- `pnpm build` - Build the TypeScript project
-- `pnpm start` - Start the production server (requires build first)
-- `pnpm type-check` - Type check without building
-- `pnpm migrate` - Run database migrations
-- `pnpm seed` - Seed database with test data
-- `pnpm seed <table>` - Seed specific table (e.g., `pnpm seed admissions`)
+---
 
 ## 📁 Project Structure
 
 ```
-admission-times-backend/
-├── src/
-│   ├── config/              # Configuration files
-│   │   ├── config.ts        # Main config loader
-│   │   ├── constants.ts     # System constants
-│   │   └── swagger.ts       # Swagger/OpenAPI config
-│   │
-│   ├── domain/              # Domain-driven modules
-│   │   ├── index.ts         # Domain registration
-│   │   │
-│   │   ├── admissions/      # ✅ Core Domain (10 endpoints)
-│   │   ├── notifications/   # ✅ Supporting Domain (7 endpoints)
-│   │   ├── deadlines/       # ✅ Supporting Domain (6 endpoints)
-│   │   ├── user-activity/   # ✅ Supporting Domain (2 endpoints)
-│   │   ├── users/           # ✅ Core Domain (5 endpoints)
-│   │   ├── analytics/       # ✅ Core Domain (5 endpoints)
-│   │   ├── changelogs/      # ✅ Core Domain (3 endpoints)
-│   │   ├── watchlists/      # ✅ Advanced Domain (5 endpoints)
-│   │   └── user-preferences/# ✅ Advanced Domain (3 endpoints)
-│   │
-│   ├── shared/              # Shared utilities
-│   │   ├── middleware/     # Custom middleware
-│   │   └── utils/           # Utility functions
-│   │
-│   ├── db/                  # Database layer
-│   │   └── connection.ts    # Database connection
-│   │
-│   └── index.ts             # Application entry point
-│
-├── project-docs/             # Project documentation
-├── supabase/                 # Supabase configuration
-│   ├── migrations/           # Database migrations
-│   └── seeds/                # Database seeds
-│       ├── typescript/       # TypeScript seed files
-│       └── sql/              # SQL seed files
-├── scripts/                  # Utility scripts
-│   └── run-migrations.ts     # Migration runner
-├── dist/                     # Compiled JavaScript (generated)
-└── tests/                    # Test files (planned)
+src/
+├── domain/                 # Domain-driven design modules
+│   ├── admissions/        # Core admissions module
+│   ├── notifications/     # Notification system
+│   ├── deadlines/         # Deadline management
+│   ├── recommendations/   # Smart recommendations
+│   ├── watchlists/        # Bookmark management
+│   ├── users/             # User management
+│   ├── dashboard/         # Aggregated data
+│   └── ...
+├── shared/                 # Cross-cutting concerns
+│   ├── middleware/         # Auth, validation, error handling
+│   ├── utils/              # Helpers, formatters
+│   └── scheduler/          # Background jobs
+├── config/                 # Configuration files
+├── database/               # Connection pool & migrations
+└── index.ts                # Application entry point
 ```
 
-## 🌐 API Endpoints
+---
 
-### Health & Documentation
-- `GET /health` - Health check endpoint
-- `GET /api-docs` - Swagger UI documentation
+## 🔌 API Endpoints
 
-### Admissions Domain (10 endpoints)
-- `GET /api/v1/admissions` - List admissions
-- `GET /api/v1/admissions/:id` - Get admission detail
-- `POST /api/v1/admissions` - Create admission
-- `PUT /api/v1/admissions/:id` - Update admission
-- `DELETE /api/v1/admissions/:id` - Delete admission
-- `PATCH /api/v1/admissions/:id/submit` - Submit for verification
-- `PATCH /api/v1/admissions/:id/verify` - Verify admission (admin)
-- `PATCH /api/v1/admissions/:id/reject` - Reject admission (admin)
-- `PATCH /api/v1/admissions/:id/dispute` - Dispute admission (university)
-- `GET /api/v1/admissions/:id/changelogs` - Get admission changelogs
+### Recommendations (NEW)
+- `GET /api/v1/recommendations` - Get personalized recommendations
+- `POST /api/v1/recommendations/refresh` - Force refresh
+- `GET /api/v1/recommendations/count` - Get recommendation count
+- `POST /api/v1/recommendations/generate-all` - Batch generate (admin)
+- `DELETE /api/v1/recommendations/cleanup` - Clean expired (admin)
 
-### Notifications Domain (7 endpoints)
-- `GET /api/v1/notifications` - List notifications
-- `GET /api/v1/notifications/unread-count` - Get unread count
-- `GET /api/v1/notifications/:id` - Get notification detail
-- `PATCH /api/v1/notifications/:id/read` - Mark as read
-- `PATCH /api/v1/notifications/read-all` - Mark all as read
-- `POST /api/v1/notifications` - Create notification
-- `DELETE /api/v1/notifications/:id` - Delete notification
+### Notifications
+- `GET /api/v1/notifications` - Get user notifications
+- `POST /api/v1/notifications/:id/read` - Mark as read
+- `PUT /api/v1/notifications/mark-all-read` - Mark all as read
 
-### Deadlines Domain (6 endpoints)
+### Deadlines
 - `GET /api/v1/deadlines` - List deadlines
-- `GET /api/v1/deadlines/upcoming` - Get upcoming deadlines
-- `GET /api/v1/deadlines/:id` - Get deadline detail
-- `POST /api/v1/deadlines` - Create deadline
-- `PUT /api/v1/deadlines/:id` - Update deadline
-- `DELETE /api/v1/deadlines/:id` - Delete deadline
+- `GET /api/v1/deadlines/reminders/:admission_id` - Get reminders
 
-### User Activity Domain (2 endpoints)
-- `GET /api/v1/activity` - List activities
-- `GET /api/v1/activity/:id` - Get activity detail
+### Admissions
+- `GET /api/v1/admissions` - List admissions
+- `POST /api/v1/admissions` - Create admission
+- `GET /api/v1/admissions/:id` - Get admission details
+- `PUT /api/v1/admissions/:id` - Update admission
 
-### Users Domain (5 endpoints)
-- `GET /api/v1/users/me` - Get current user profile
-- `PUT /api/v1/users/me` - Update current user profile
-- `GET /api/v1/users/:id` - Get user by ID
-- `GET /api/v1/users` - List users (admin only)
-- `PATCH /api/v1/users/:id/role` - Update user role (admin only)
+See full API docs at `http://localhost:3000/api-docs`
 
-### Analytics Domain (5 endpoints)
-- `POST /api/v1/analytics/events` - Track event
-- `GET /api/v1/analytics/stats` - Get general statistics
-- `GET /api/v1/analytics/admissions` - Admission statistics
-- `GET /api/v1/analytics/users` - User statistics
-- `GET /api/v1/analytics/activity` - Aggregated activity feed
-
-### Changelogs Domain (3 endpoints)
-- `GET /api/v1/changelogs` - List changelogs (with filters)
-- `GET /api/v1/changelogs/:id` - Get changelog by ID
-- `GET /api/v1/changelogs/admission/:admissionId` - Get admission changelogs
-
-### Watchlists Domain (5 endpoints)
-- `GET /api/v1/watchlists` - List user's watchlists
-- `POST /api/v1/watchlists` - Add admission to watchlist
-- `GET /api/v1/watchlists/:id` - Get watchlist item
-- `PATCH /api/v1/watchlists/:id` - Update watchlist notes
-- `DELETE /api/v1/watchlists/:id` - Remove from watchlist
-
-### User Preferences Domain (3 endpoints)
-- `GET /api/v1/users/me/preferences` - Get user preferences
-- `PUT /api/v1/users/me/preferences` - Update preferences (full update)
-- `PATCH /api/v1/users/me/preferences` - Partial update preferences
-
-**Total: 51 API Endpoints**
-
-## 📚 API Documentation
-
-Interactive API documentation is available at:
-- **Swagger UI**: `http://localhost:3000/api-docs`
-
-All endpoints are fully documented with:
-- Request/response schemas
-- Query parameters
-- Request body examples
-- Response examples
-- Error responses
-
-## 🔗 Frontend Integration
-
-**For Frontend Developers:**
-
-- **[Frontend Integration Guide](FRONTEND_INTEGRATION_GUIDE.md)** - Complete guide for integrating with the backend API
-- **[API Contract](API_CONTRACT.md)** - Detailed API contract with all endpoints and data structures
-- **[Backend Achievement Summary](BACKEND_ACHIEVEMENT_SUMMARY.md)** - Summary of backend features and capabilities
-- **[Frontend-Backend Alignment Checklist](FRONTEND_BACKEND_ALIGNMENT_CHECKLIST.md)** - Checklist for ensuring proper integration
-
-**Quick Start:**
-1. Read the [Frontend Integration Guide](FRONTEND_INTEGRATION_GUIDE.md)
-2. Review the [API Contract](API_CONTRACT.md) for endpoint details
-3. Use Swagger UI (`/api-docs`) for interactive testing
-4. Follow the [Alignment Checklist](FRONTEND_BACKEND_ALIGNMENT_CHECKLIST.md) for integration
-
-## 🏗️ Architecture & Design Patterns
-
-**For Developers:**
-
-- **[Design Patterns & Best Practices](DESIGN_PATTERNS_AND_BEST_PRACTICES.md)** - Comprehensive reference for all design patterns, system design principles, SOLID principles, and best practices
-- **[System Concepts](SYSTEM_CONCEPTS.md)** - Foundational system concepts and principles
-- **[Project Context & Best Practices](PROJECT_CONTEXT_AND_BEST_PRACTICES.md)** - Detailed project context and development guidelines
-
-**Architecture:**
-- **Domain-Driven Design (DDD)** - Code organized around business domains
-- **Clean Architecture** - Separation of concerns into distinct layers
-- **SOLID Principles** - Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion
-- **Design Patterns** - Repository, Service Layer, DTO, Middleware, Factory, Strategy, Observer
-- Authentication requirements
-- Error responses
-- Example values
+---
 
 ## 🔐 Authentication
 
-Currently using **mock authentication** for development. Real Supabase Auth integration is planned for Phase 4C.
+All endpoints (except `/auth/*` and `/health`) require JWT authentication.
 
-**Development Headers:**
-- `x-user-id`: User UUID (optional)
-- `x-user-role`: 'student' | 'university' | 'admin' (optional)
-- `x-university-id`: University UUID (optional, for university users)
+**Header:**
+```
+Authorization: Bearer <access_token>
+```
 
-## 🗄️ Database
+**User Context:**
+```typescript
+req.user = {
+  id: string;           // User UUID
+  role: 'student' | 'university' | 'admin' | 'guest';
+  university_id?: string | null;
+}
+```
 
-The project uses **PostgreSQL** via Supabase Cloud with:
-- Row Level Security (RLS) policies
-- Database migrations
-- Connection pooling (Session Pooler for IPv4 compatibility)
-- Database seeding system
+---
 
-**Database Tables:**
-- `admissions` - Core admission records
-- `changelogs` - Immutable audit trail
-- `deadlines` - Deadline management
+## 📊 Database
+
+### Connection Pool
+- **Host**: aws-1-ap-northeast-2.pooler.supabase.com
+- **Pool Size**: 10-20 connections
+- **Timeout**: 30 seconds
+
+### Key Tables
+- `users` - User accounts
+- `admissions` - University programs
 - `notifications` - User notifications
-- `user_activity` - Activity tracking
-- `analytics_events` - Analytics events
-- `users` - User identity mapping
-- `watchlists` - User watchlists
-- `user_preferences` - User preferences
+- `deadlines` - Application deadlines
+- `recommendations` - Pre-computed suggestions
+- `watchlists` - Bookmarked programs
+- `user_preferences` - User settings
 
-**Database Seeding:**
-- Comprehensive seeding system with 9 seed files
-- Idempotent (safe to run multiple times)
-- Transaction-safe execution
-- 120+ realistic test records
-- See `supabase/seeds/typescript/` for seed files
+---
 
-## 📖 Documentation
+## 🧪 Testing
 
-Comprehensive project documentation is available in:
+### Type Checking
+```bash
+pnpm tsc --noEmit
+```
 
-**Project Documentation (`project-docs/`):**
-- **index.md** - Documentation index
-- **overview.md** - Project overview and objectives
-- **requirements.md** - System requirements and features
-- **tech-specs.md** - Technical specifications
-- **user-structure.md** - User flow and project structure
-- **timeline.md** - Project timeline and progress
-- **backend-architecture.md** - Complete backend architecture blueprint
-- **achievements-summary.md** - Summary of completed work
+### Run Tests
+```bash
+pnpm test
+```
 
-**Phase Documentation (`phases/`):**
-- Phase reports and implementation summaries
-- Roadmaps and planning documents
-- See `phases/README.md` for complete list
-
-
-## 🏗️ Architecture
-
-The project follows **Clean Architecture** and **Domain-Driven Design** principles:
-
-- **Controllers**: HTTP input/output only
-- **Services**: Business logic and orchestration
-- **Models**: Database access only
-- **Validators**: Joi schemas for validation
-- **Types**: TypeScript types and DTOs
-- **Constants**: Domain-specific constants
-
-**Key Principles:**
-- Domain isolation (no cross-domain model access)
-- Service-level orchestration
-- Consistent response formats
-- Comprehensive error handling
-- Type safety (100% TypeScript)
-
-
-## 🚢 Deployment
-
-### Prerequisites
-- Node.js v18+
-- PostgreSQL database
-- Environment variables configured
-
-### Steps
-1. Build the project: `pnpm build`
-2. Set up environment variables (see `.env.example`)
-3. Run database migrations: `pnpm migrate`
-4. Seed database (optional): `pnpm seed`
-5. Start the server: `pnpm start`
+---
 
 ## 📝 Environment Variables
 
-See `.env.example` for all available environment variables. Key variables:
+```env
+# Database
+DATABASE_URL=postgresql://...
+DATABASE_POOL_HOST=...
+DATABASE_POOL_PORT=...
 
-- `PORT` - Server port (default: 3000)
-- `NODE_ENV` - Environment (development/production)
-- `DB_HOST` - Database host (Supabase Cloud pooler)
-- `DB_PORT` - Database port (5432)
-- `DB_NAME` - Database name (postgres)
-- `DB_USER` - Database user (postgres.[PROJECT_REF] for pooler)
-- `DB_PASSWORD` - Database password
-- `DB_POOL_MAX` - Connection pool size (15 for free tier)
+# JWT
+JWT_SECRET=your_secret_key
+JWT_EXPIRY=24h
 
-## 🤝 Contributing
+# Email (Gmail)
+GMAIL_USER=your_email@gmail.com
+GMAIL_APP_PASSWORD=your_app_password
 
-## 📄 License
+# Server
+PORT=3000
+NODE_ENV=development
+CORS_ORIGIN=http://localhost:5173
+```
 
-ISC
+---
 
+## 🚢 Deployment
 
-*
+### Build
+```bash
+pnpm run build
+```
 
-For detailed progress tracking, see `project-docs/timeline.md`.
+### Start Production
+```bash
+NODE_ENV=production pnpm start
+```
+
+---
+
+## 🔗 Related Resources
+
+- **Frontend**: [../admission-times-frontend](../admission-times-frontend)
+- **Mobile App**: [../AdmissionTimes-MobileApp](../AdmissionTimes-MobileApp)
+- **Documentation**: [../admission-times-frontend/project-docs](../admission-times-frontend/project-docs)
+
+---
+
+**Current Version:** 1.0.0  
+**Last Updated:** February 25, 2026  
+**Status:** Active Development

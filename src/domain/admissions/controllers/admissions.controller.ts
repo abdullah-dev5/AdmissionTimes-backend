@@ -199,6 +199,52 @@ export const rejectAdmission = async (
 };
 
 /**
+ * Submit an admission (university only)
+ *
+ * PATCH /api/v1/admissions/:id/submit
+ */
+export const submitAdmission = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const data = req.validated as SubmitAdmissionDTO;
+    const userContext = req.user as UserContext | undefined;
+
+    const admission = await admissionsService.submit(id, data, userContext);
+
+    sendSuccess(res, admission, 'Admission submitted successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Dispute a rejected admission (university only)
+ *
+ * PATCH /api/v1/admissions/:id/dispute
+ */
+export const disputeAdmission = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const data = req.validated as DisputeAdmissionDTO;
+    const userContext = req.user as UserContext | undefined;
+
+    const admission = await admissionsService.dispute(id, data, userContext);
+
+    sendSuccess(res, admission, 'Admission disputed successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Admin verify/reject admission (alias endpoint)
  * 
  * POST /api/v1/admin/admissions/:id/verify
@@ -233,52 +279,6 @@ export const adminVerifyAdmission = async (
     );
 
     sendSuccess(res, admission, 'Admission verified successfully');
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Submit an admission (university - moves draft to pending)
- * 
- * PATCH /api/v1/admissions/:id/submit
- */
-export const submitAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as SubmitAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.submit(id, data, userContext);
-
-    sendSuccess(res, admission, 'Admission submitted successfully');
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Dispute a rejected admission (university - moves rejected to disputed)
- * 
- * PATCH /api/v1/admissions/:id/dispute
- */
-export const disputeAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as DisputeAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.dispute(id, data, userContext);
-
-    sendSuccess(res, admission, 'Admission disputed successfully');
   } catch (error) {
     next(error);
   }

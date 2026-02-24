@@ -7,6 +7,8 @@
 
 import { Router } from 'express';
 import * as notificationsController from '../controllers/notifications.controller';
+import { sendBroadcast } from '../controllers/notifications.broadcast.controller';
+import { testNotificationCreation } from '../controllers/notifications.test.controller';
 import {
   notificationQuerySchema,
   uuidParamSchema,
@@ -47,11 +49,11 @@ const router: Router = Router();
  *           default: 20
  *         description: Number of items per page
  *       - in: query
- *         name: category
+ *         name: notification_type
  *         schema:
  *           type: string
- *           enum: [verification, deadline, system, update]
- *         description: Filter by notification category
+ *           enum: [admission_submitted, admission_resubmitted, admission_verified, admission_rejected, admission_revision_required, admission_updated_saved, deadline_near, system_broadcast, dispute_raised, system_error]
+ *         description: Filter by notification type
  *       - in: query
  *         name: priority
  *         schema:
@@ -67,7 +69,7 @@ const router: Router = Router();
  *         name: sort
  *         schema:
  *           type: string
- *           enum: [created_at, read_at, priority, category]
+ *           enum: [created_at, read_at, priority, notification_type]
  *           default: created_at
  *         description: Field to sort by
  *       - in: query
@@ -127,23 +129,23 @@ router.get(
  *           schema:
  *             type: object
  *             required:
- *               - user_type
- *               - category
+ *               - role_type
+ *               - notification_type
  *               - title
  *               - message
  *             properties:
- *               user_id:
+ *               recipient_id:
  *                 type: string
  *                 format: uuid
- *                 description: User ID (optional, null for system-wide notifications)
- *               user_type:
+ *                 description: Recipient ID
+ *               role_type:
  *                 type: string
  *                 enum: [student, university, admin]
- *                 description: User type
- *               category:
+ *                 description: Recipient role type
+ *               notification_type:
  *                 type: string
- *                 enum: [verification, deadline, system, update]
- *                 description: Notification category
+ *                 enum: [admission_submitted, admission_resubmitted, admission_verified, admission_rejected, admission_revision_required, admission_updated_saved, deadline_near, system_broadcast, dispute_raised, system_error]
+ *                 description: Notification type
  *               priority:
  *                 type: string
  *                 enum: [low, medium, high, urgent]
@@ -168,6 +170,9 @@ router.get(
  *                 type: string
  *                 format: uri
  *                 description: Action URL (optional)
+ *               event_key:
+ *                 type: string
+ *                 description: Idempotency event key
  *     responses:
  *       201:
  *         description: Notification created successfully
@@ -442,5 +447,93 @@ router.delete(
   validateParams(uuidParamSchema),
   notificationsController.deleteNotification
 );
+
+/**
+ * @swagger
+ * /api/v1/notifications/broadcast:
+ *   post:
+ *     summary: Send broadcast notification
+ *     tags: [Notifications]
+ *     description: Send a broadcast notification to multiple users (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - target_type
+ *               - title
+ *               - message
+ *             properties:
+ *               target_type:
+ *                 type: string
+ *                 enum: [all, role, maintenance, emergency]
+ *                 description: Broadcast target type
+ *               target_roles:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   enum: [student, university, admin, maintenance]
+ *                 description: Target roles (required if target_type is 'role')
+ *               title:
+ *                 type: string
+ *                 description: Notification title
+ *               message:
+ *                 type: string
+ *                 description: Notification message
+ *               priority:
+ *                 type: string
+ *                 enum: [low, medium, high, urgent]
+ *                 description: Notification priority
+ *               action_url:
+ *                 type: string
+ *                 description: Optional URL for action button
+ *     responses:
+ *       200:
+ *         description: Broadcast sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     recipients_count:
+ *                       type: integer
+ *                     success:
+ *                       type: boolean
+ *                     created_count:
+ *                       type: integer
+ *       403:
+ *         description: Forbidden - admin only
+ *       401:
+ *         description: Unauthorized
+ */
+// POST /api/v1/notifications/broadcast - Send broadcast notification (admin only)
+router.post('/broadcast', sendBroadcast);
+
+/**
+ * @swagger
+ * /api/v1/notifications/test:
+ *   post:
+ *     summary: Test notification creation (debug endpoint)
+ *     tags: [Notifications]
+ *     description: Debug endpoint to test notification creation and database connectivity
+ *     responses:
+ *       200:
+ *         description: Test completed successfully
+ *       500:
+ *         description: Test failed
+ */
+// POST /api/v1/notifications/test - Test notification creation (debug)
+router.post('/test', testNotificationCreation);
 
 export default router;

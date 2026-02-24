@@ -28,7 +28,10 @@ declare global {
  */
 export const validateBody = (schema: Joi.ObjectSchema) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const { error, value } = schema.validate(req.body, {
+    // Ensure req.body is always an object for validation
+    const bodyToValidate = req.body || {};
+    
+    const { error, value } = schema.validate(bodyToValidate, {
       abortEarly: false,
       stripUnknown: true,
     });

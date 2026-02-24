@@ -30,5 +30,5 @@ export const SORTABLE_FIELDS = [
   'created_at',
   'read_at',
   'priority',
-  'category',
+  'notification_type',
 ] as const;

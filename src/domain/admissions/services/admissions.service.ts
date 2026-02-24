@@ -26,7 +26,9 @@ import {
   DisputeAdmissionDTO,
   UserContext,
 } from '../types/admissions.types';
-import { VERIFICATION_STATUS, CHANGE_TYPE } from '@config/constants';
+import { query } from '@db/connection';
+import { CHANGE_TYPE, NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE, VERIFICATION_STATUS, type UserType, DEADLINE_TYPE } from '@config/constants';
+import * as deadlinesModel from '../../deadlines/models/deadlines.model';
 
 /**
  * Get admission by ID
@@ -106,7 +108,7 @@ export const getMany = async (
   userContext?: UserContext
 ): Promise<{ admissions: Admission[]; total: number }> => {
   // Apply access control filters
-  const effectiveFilters = applyAccessControl(filters, userContext);
+  const effectiveFilters = await applyAccessControl(filters, userContext);
 
   // Get admissions and total count
   const [admissions, total] = await Promise.all([
@@ -128,6 +130,15 @@ export const create = async (
   data: CreateAdmissionDTO,
   userContext?: UserContext
 ): Promise<Admission> => {
+  // Ensure university_id is always set for university users
+  let universityId = data.university_id;
+  
+  // If university_id is not provided and user is a university, use their university_id from context
+  if (!universityId && userContext?.role === 'university' && userContext?.university_id) {
+    universityId = userContext.university_id;
+    console.log(`🟢 [admissionsService] Using user's university_id for new admission: ${universityId}`);
+  }
+
   // Create admission (always as draft)
   // Convert undefined to null for all optional fields
   const admissionData = {
@@ -146,7 +157,7 @@ export const create = async (
     delivery_mode: data.delivery_mode ?? null,
     requirements: data.requirements ?? null,
     verification_status: data.verification_status || 'draft',
-    university_id: data.university_id || userContext?.university_id || null,
+    university_id: universityId || null,
     verified_at: null,
     verified_by: null,
     rejection_reason: null,
@@ -156,6 +167,18 @@ export const create = async (
   };
 
   const admission = await admissionsModel.create(admissionData, userContext?.id || null);
+
+  // Create deadline record in deadlines table if deadline is set
+  if (admission.deadline) {
+    console.log(`🕒 [CREATE] Creating deadline record for admission ${admission.id}`);
+    deadlinesModel.create({
+      admission_id: admission.id,
+      deadline_type: DEADLINE_TYPE.APPLICATION,
+      deadline_date: admission.deadline,
+    }).catch((err) => {
+      console.error('❌ [CREATE] Failed to create deadline record:', err?.message || err);
+    });
+  }
 
   // Create changelog entry
   await createChangelogEntry({
@@ -168,6 +191,13 @@ export const create = async (
     new_value: admission,
     diff_summary: 'Admission created',
   });
+
+  // Create notification for admins
+  if (admission.created_by) {
+    createNotificationForSubmission(admission).catch((err) => {
+      console.error('📢 Failed to create submission notification:', err?.message || err);
+    });
+  }
 
   return admission;
 };
@@ -193,30 +223,70 @@ export const update = async (
     throw new AppError('Admission not found', 404);
   }
 
-  // Check if can be updated based on status
-  if (existing.verification_status === VERIFICATION_STATUS.PENDING) {
-    throw new AppError('Cannot update pending admission', 400);
-  }
+  // Store original verification status to check if verified
+  const wasVerified = existing.verification_status === VERIFICATION_STATUS.VERIFIED;
 
-  // Handle verified → pending transition
-  let updateData: any = { ...data };
-
-  if (existing.verification_status === VERIFICATION_STATUS.VERIFIED) {
-    // Editing verified admission moves it to pending
-    updateData.verification_status = VERIFICATION_STATUS.PENDING;
-    updateData.verified_at = null;
-    updateData.verified_by = null;
-  }
-
-  // Update admission
-  const updated = await admissionsModel.update(id, updateData);
+  // Update admission - allow updates to pending and verified admissions
+  const updated = await admissionsModel.update(id, data);
 
   if (!updated) {
     throw new AppError('Failed to update admission', 500);
   }
 
+  // Sync deadline records when admission deadline changes
+  if (existing.deadline !== updated.deadline) {
+    console.log(`🕒 [UPDATE] Deadline changed for admission ${id}: ${existing.deadline} -> ${updated.deadline}`);
+    
+    if (updated.deadline) {
+      // Find existing deadline record for this admission
+      const existingDeadlines = await deadlinesModel.findByAdmissionId(id);
+      
+      if (existingDeadlines.length > 0) {
+        // Update the first (primary) deadline record
+        console.log(`🕒 [UPDATE] Updating existing deadline record ${existingDeadlines[0].id}`);
+        deadlinesModel.update(existingDeadlines[0].id, {
+          deadline_date: updated.deadline,
+          reminder_sent: false, // Reset reminder flags when deadline changes
+        }).catch((err) => {
+          console.error('❌ [UPDATE] Failed to update deadline record:', err?.message || err);
+        });
+      } else {
+        // Create new deadline record if none exists
+        console.log(`🕒 [UPDATE] Creating new deadline record for admission ${id}`);
+        deadlinesModel.create({
+          admission_id: id,
+          deadline_type: DEADLINE_TYPE.APPLICATION,
+          deadline_date: updated.deadline,
+        }).catch((err) => {
+          console.error('❌ [UPDATE] Failed to create deadline record:', err?.message || err);
+        });
+      }
+    } else {
+      // Deadline was removed - optionally delete deadline records or mark as inactive
+      console.log(`🕒 [UPDATE] Deadline removed for admission ${id}`);
+    }
+  }
+
   // Create changelog entries for changed fields
   await createChangelogForUpdate(existing, updated, userContext);
+
+  // Send notifications based on admission status
+  if (wasVerified && updated.verification_status === VERIFICATION_STATUS.VERIFIED) {
+    // Verified admission was updated (not downgraded) → notify students with watchlist
+    createNotificationForVerifiedAdmissionUpdate(updated).catch((err) => {
+      console.error('📢 Failed to notify students of admission update:', err);
+    });
+  } else if (existing.verification_status === VERIFICATION_STATUS.PENDING && updated.verification_status === VERIFICATION_STATUS.PENDING) {
+    // Pending admission was updated → notify admins
+    createNotificationForPendingAdmissionUpdate(updated).catch((err) => {
+      console.error('📢 Failed to notify admins of admission update:', err);
+    });
+  } else if (existing.verification_status === VERIFICATION_STATUS.REJECTED && updated.verification_status === VERIFICATION_STATUS.REJECTED) {
+    // Rejected admission was updated (university is challenging rejection) → notify admins
+    createNotificationForRejectedAdmissionUpdate(updated).catch((err) => {
+      console.error('📢 Failed to notify admins of rejected admission update:', err);
+    });
+  }
 
   return updated;
 };
@@ -235,10 +305,19 @@ export const verify = async (
   data: VerifyAdmissionDTO,
   userContext?: UserContext
 ): Promise<Admission> => {
+  console.log(`[VERIFY-START] verify() called for admission: ${id}`);
   const existing = await admissionsModel.findById(id, true);
 
   if (!existing) {
     throw new AppError('Admission not found', 404);
+  }
+
+  // Warn if admission has no creator
+  if (!existing.created_by) {
+    console.warn(`⚠️ [VERIFY] Admission ${id} has no created_by - notification will be skipped`);
+    console.warn(`⚠️ [VERIFY] Admission details:`, { id, title: existing.title, university_id: existing.university_id });
+  } else {
+    console.log(`✅ [VERIFY] Admission ${id} has created_by: ${existing.created_by}`);
   }
 
   // Only pending or disputed admissions can be verified
@@ -279,10 +358,22 @@ export const verify = async (
 
   // Create notification for university (if created_by exists)
   if (updated.created_by) {
-    createNotificationForVerification(updated).catch(() => {
-      // Silently fail - notification should not break the request
+    console.log(`📢 [VERIFY] Calling createNotificationForVerification for admission ${updated.id}`);
+    createNotificationForVerification(updated).catch((error) => {
+      console.error('❌ [VERIFY] Failed to create verification notification:', error?.message || error);
+      if (error?.constraint) console.error('   Constraint violation:', error.constraint);
+      if (error?.code) console.error('   Error code:', error.code);
     });
+  } else {
+    console.warn(`⚠️ [VERIFY] Skipping notification - no created_by for admission ${updated.id}`);
   }
+
+  // Notify students who saved this admission in watchlist.
+  // This covers re-verification flow: verified -> pending (edited) -> verified.
+  createNotificationForVerifiedAdmissionUpdate(updated).catch((error) => {
+    console.error('❌ [VERIFY] Failed to notify watchlist students after verification:', error?.message || error);
+    if (error?.code) console.error('   Error code:', error.code);
+  });
 
   return updated;
 };
@@ -344,9 +435,14 @@ export const reject = async (
 
   // Create notification for university (if created_by exists)
   if (updated.created_by) {
-    createNotificationForRejection(updated, data.rejection_reason).catch(() => {
-      // Silently fail - notification should not break the request
+    console.log(`📢 [REJECT] Calling createNotificationForRejection for admission ${updated.id}`);
+    createNotificationForRejection(updated, data.rejection_reason).catch((error) => {
+      console.error('❌ [REJECT] Failed to create rejection notification:', error?.message || error);
+      if (error?.constraint) console.error('   Constraint violation:', error.constraint);
+      if (error?.code) console.error('   Error code:', error.code);
     });
+  } else {
+    console.warn(`⚠️ [REJECT] Skipping notification - no created_by for admission ${updated.id}`);
   }
 
   return updated;
@@ -459,8 +555,11 @@ export const dispute = async (
   });
 
   // Create notification for admin (when admission is disputed)
-  createNotificationForDispute(updated, data.dispute_reason).catch(() => {
-    // Silently fail - notification should not break the request
+  console.log(`📢 [DISPUTE] Calling createNotificationForDispute for admission ${updated.id}`);
+  createNotificationForDispute(updated, data.dispute_reason).catch((error) => {
+    console.error('❌ [DISPUTE] Failed to create dispute notification:', error?.message || error);
+    if (error?.constraint) console.error('   Constraint violation:', error.constraint);
+    if (error?.code) console.error('   Error code:', error.code);
   });
 
   return updated;
@@ -562,10 +661,10 @@ export const getChangelogs = async (
  * @param userContext - User context
  * @returns Filters with access control applied
  */
-function applyAccessControl(
+async function applyAccessControl(
   filters: AdmissionFilters,
   userContext?: UserContext
-): AdmissionFilters {
+): Promise<AdmissionFilters> {
   const effectiveFilters = { ...filters };
 
   // Public/Student: only verified admissions
@@ -574,15 +673,72 @@ function applyAccessControl(
     effectiveFilters.is_active = true;
   }
 
-  // University: can filter by created_by to see their own
-  if (userContext?.role === 'university' && userContext.university_id) {
-    // If filtering for own admissions, show all statuses
-    if (effectiveFilters.created_by === userContext.id) {
-      // Allow all statuses for own admissions
-    } else if (!effectiveFilters.verification_status) {
-      // Default: only verified for others
-      effectiveFilters.verification_status = VERIFICATION_STATUS.VERIFIED;
+  // University: expand scope to all linked identities (db user ID, auth ID, university ID)
+  if (userContext?.role === 'university' && userContext.id) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const isUuid = (value?: string | null): value is string => !!value && uuidRegex.test(value);
+
+    // Get this university user's full identity profile
+    const baseUserSql = `
+      SELECT id::text, auth_user_id::text, email, university_id::text
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+    `;
+    const baseUserResult = await query(baseUserSql, [userContext.id]);
+    const baseUser = baseUserResult.rows[0] || null;
+
+    // Find all linked user records (same email/auth/organization)
+    const linkedUsersSql = `
+      SELECT id::text, auth_user_id::text, university_id::text
+      FROM users
+      WHERE role = 'university'
+        AND (
+          id = $1
+          OR auth_user_id = $2
+          OR ($3::text IS NOT NULL AND email = $3)
+          OR ($4::uuid IS NOT NULL AND university_id = $4)
+        )
+    `;
+
+    const linkedUsersResult = await query(linkedUsersSql, [
+      userContext.id,
+      baseUser?.auth_user_id || null,
+      baseUser?.email || null,
+      baseUser?.university_id || userContext.university_id || null,
+    ]);
+
+    const ownerUserIds = new Set<string>();
+    const ownerUniversityIds = new Set<string>();
+
+    // Add all identity variants
+    if (isUuid(userContext.id)) ownerUserIds.add(userContext.id);
+    if (isUuid(userContext.university_id)) ownerUniversityIds.add(userContext.university_id);
+    if (isUuid(baseUser?.auth_user_id)) {
+      ownerUserIds.add(baseUser.auth_user_id);
     }
+    if (isUuid(baseUser?.university_id)) ownerUniversityIds.add(baseUser.university_id);
+
+    for (const row of linkedUsersResult.rows) {
+      if (isUuid(row.id)) ownerUserIds.add(row.id);
+      if (isUuid(row.auth_user_id)) {
+        ownerUserIds.add(row.auth_user_id);
+      }
+      if (isUuid(row.university_id)) ownerUniversityIds.add(row.university_id);
+    }
+
+    effectiveFilters.owner_user_ids = Array.from(ownerUserIds);
+    effectiveFilters.owner_university_ids = Array.from(ownerUniversityIds);
+    effectiveFilters.is_active = true;
+
+    console.log('🟢 [admissionsService] Ownership scope resolved:', {
+      userContext_id: userContext.id,
+      userContext_university_id: userContext.university_id,
+      baseUser: baseUser ? { id: baseUser.id, auth_user_id: baseUser.auth_user_id, email: baseUser.email } : null,
+      linkedUsersCount: linkedUsersResult.rows.length,
+      owner_user_ids: effectiveFilters.owner_user_ids,
+      owner_university_ids: effectiveFilters.owner_university_ids,
+    });
   }
 
   // Admin: can see all (no restrictions)
@@ -755,23 +911,44 @@ async function trackAdmissionView(
  */
 async function createNotificationForVerification(admission: Admission): Promise<void> {
   try {
-    const { create } = await import('@domain/notifications/services/notifications.service');
-    const { NOTIFICATION_CATEGORY, NOTIFICATION_PRIORITY, USER_TYPE } = await import('@config/constants');
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
 
-    await create({
-      user_id: admission.created_by,
-      user_type: USER_TYPE.UNIVERSITY,
-      category: NOTIFICATION_CATEGORY.VERIFICATION,
+    const { recipients, universityId } = await resolveUniversityRecipients(admission);
+
+    if (!recipients.length) {
+      console.warn(`⚠️ [NOTIFICATION] Skipping verification notification - no university recipients found for admission ${admission.id}`);
+      return;
+    }
+
+    console.log(`📢 [NOTIFICATION] Creating verification notification for admission ${admission.id}`);
+    console.log(`   → Recipients: ${recipients.length} university users`);
+    if (universityId) {
+      console.log(`   → University ID: ${universityId}`);
+    }
+    console.log(`   → Title: ${admission.title}`);
+    
+    const eventKey = `admission_verified:${admission.id}:${universityId || admission.created_by || 'unknown'}:${Date.now()}`;
+    console.log(`   → Event key: ${eventKey}`);
+
+    const result = await publishNotification({
+      recipients,
+      notification_type: NOTIFICATION_TYPE.ADMISSION_VERIFIED,
       priority: NOTIFICATION_PRIORITY.HIGH,
       title: 'Admission Verified',
       message: `Your admission "${admission.title}" has been verified and is now visible to students.`,
       related_entity_type: 'admission',
       related_entity_id: admission.id,
       action_url: `/admissions/${admission.id}`,
+      event_key: eventKey,
     });
-  } catch (error) {
+
+    console.log(`✅ [NOTIFICATION] Successfully sent verification notification:`, result);
+  } catch (error: any) {
     // Silently fail - notification should not break the request
-    console.error('Failed to create verification notification:', error);
+    console.error(`❌ [NOTIFICATION] Failed to create verification notification for admission ${admission.id}:`);
+    console.error(`   → Error: ${error?.message || String(error)}`);
+    if (error?.code) console.error(`   → Code: ${error.code}`);
+    if (error?.constraint) console.error(`   → Constraint: ${error.constraint}`);
   }
 }
 
@@ -786,23 +963,45 @@ async function createNotificationForRejection(
   rejectionReason: string
 ): Promise<void> {
   try {
-    const { create } = await import('@domain/notifications/services/notifications.service');
-    const { NOTIFICATION_CATEGORY, NOTIFICATION_PRIORITY, USER_TYPE } = await import('@config/constants');
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
 
-    await create({
-      user_id: admission.created_by,
-      user_type: USER_TYPE.UNIVERSITY,
-      category: NOTIFICATION_CATEGORY.VERIFICATION,
+    const { recipients, universityId } = await resolveUniversityRecipients(admission);
+
+    console.log(`📢 [NOTIFICATION] Creating rejection notification for admission ${admission.id}`);
+    console.log(`   → Recipients: ${recipients.length} university users`);
+    if (universityId) {
+      console.log(`   → University ID: ${universityId}`);
+    }
+    console.log(`   → Title: ${admission.title}`);
+    console.log(`   → Reason: ${rejectionReason}`);
+
+    if (!recipients.length) {
+      console.warn(`⚠️ [NOTIFICATION] Skipping rejection notification - no university recipients found for admission ${admission.id}`);
+      return;
+    }
+
+    const eventKey = `admission_rejected:${admission.id}:${universityId || admission.created_by || 'unknown'}:${Date.now()}`;
+    console.log(`   → Event key: ${eventKey}`);
+
+    const result = await publishNotification({
+      recipients,
+      notification_type: NOTIFICATION_TYPE.ADMISSION_REJECTED,
       priority: NOTIFICATION_PRIORITY.HIGH,
       title: 'Admission Rejected',
       message: `Your admission "${admission.title}" has been rejected. Reason: ${rejectionReason}`,
       related_entity_type: 'admission',
       related_entity_id: admission.id,
       action_url: `/admissions/${admission.id}`,
+      event_key: eventKey,
     });
-  } catch (error) {
+
+    console.log(`✅ [NOTIFICATION] Successfully sent rejection notification:`, result);
+  } catch (error: any) {
     // Silently fail - notification should not break the request
-    console.error('Failed to create rejection notification:', error);
+    console.error(`❌ [NOTIFICATION] Failed to create rejection notification for admission ${admission.id}:`);
+    console.error(`   → Error: ${error?.message || String(error)}`);
+    if (error?.code) console.error(`   → Code: ${error.code}`);
+    if (error?.constraint) console.error(`   → Constraint: ${error.constraint}`);
   }
 }
 
@@ -817,23 +1016,311 @@ async function createNotificationForDispute(
   disputeReason: string
 ): Promise<void> {
   try {
-    const { create } = await import('@domain/notifications/services/notifications.service');
-    const { NOTIFICATION_CATEGORY, NOTIFICATION_PRIORITY, USER_TYPE } = await import('@config/constants');
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
 
-    // Notify admin about dispute (user_id is null for admin notifications)
-    await create({
-      user_id: null,
-      user_type: USER_TYPE.ADMIN,
-      category: NOTIFICATION_CATEGORY.VERIFICATION,
+    console.log(`📢 [NOTIFICATION] Creating dispute notification for admission ${admission.id}`);
+    console.log(`   → Title: ${admission.title}`);
+    console.log(`   → Reason: ${disputeReason}`);
+    console.log(`   → Fetching admin recipients...`);
+
+    const adminRecipients = await getAdminRecipients();
+    console.log(`   → Found ${adminRecipients.length} admins to notify:`, adminRecipients.map(a => a.id));
+
+    if (!adminRecipients.length) {
+      console.warn(`⚠️ [NOTIFICATION] No admins found to notify for dispute!`);
+      return;
+    }
+
+    const eventKey = `dispute_raised:${admission.id}:${admission.created_by || admission.id}:${Date.now()}`;
+    console.log(`   → Event key: ${eventKey}`);
+
+    const result = await publishNotification({
+      recipients: adminRecipients,
+      notification_type: NOTIFICATION_TYPE.DISPUTE_RAISED,
       priority: NOTIFICATION_PRIORITY.HIGH,
       title: 'Admission Disputed',
       message: `Admission "${admission.title}" has been disputed by university. Reason: ${disputeReason}`,
       related_entity_type: 'admission',
       related_entity_id: admission.id,
       action_url: `/admissions/${admission.id}`,
+      event_key: eventKey,
     });
-  } catch (error) {
+
+    console.log(`✅ [NOTIFICATION] Successfully sent dispute notification:`, result);
+  } catch (error: any) {
     // Silently fail - notification should not break the request
-    console.error('Failed to create dispute notification:', error);
+    console.error(`❌ [NOTIFICATION] Failed to create dispute notification for admission ${admission.id}:`);
+    console.error(`   → Error: ${error?.message || String(error)}`);
+    if (error?.code) console.error(`   → Code: ${error.code}`);
+    if (error?.constraint) console.error(`   → Constraint: ${error.constraint}`);
   }
+}
+
+/**
+ * Helper function to create notification when admission is submitted
+ * 
+ * @param admission - Created admission
+ */
+async function createNotificationForSubmission(admission: Admission): Promise<void> {
+  try {
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
+
+    console.log(`📢 [NOTIFICATION] Starting submission notification for admission ${admission.id}`);
+    console.log(`   → Created by: ${admission.created_by}`);
+    console.log(`   → Title: ${admission.title}`);
+
+    if (!admission.created_by) {
+      console.warn(`⚠️ [NOTIFICATION] Skipping submission notification - no created_by for admission ${admission.id}`);
+      return;
+    }
+
+    // Get all admins to notify
+    console.log(`📢 [NOTIFICATION] Fetching admin recipients...`);
+    const admins = await getAdminRecipients();
+    console.log(`📢 [NOTIFICATION] Found ${admins.length} admins to notify:`, admins.map(a => a.id));
+
+    if (admins.length === 0) {
+      console.warn(`⚠️ [NOTIFICATION] No admins found to notify!`);
+      return;
+    }
+
+    console.log(`📢 [NOTIFICATION] Publishing notification to ${admins.length} admins...`);
+    const result = await publishNotification({
+      recipients: admins,
+      notification_type: NOTIFICATION_TYPE.ADMISSION_SUBMITTED,
+      priority: NOTIFICATION_PRIORITY.MEDIUM,
+      title: 'New Admission Submitted',
+      message: `"${admission.title}" has been submitted for verification`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admin/verify-admissions/${admission.id}`,
+      event_key: `admission_submitted:${admission.id}:${admission.created_by}:${Date.now()}`,
+    });
+    
+    console.log(`✅ [NOTIFICATION] Successfully published submission notification:`, {
+      admins_notified: admins.length,
+      notifications_created: result.length,
+    });
+  } catch (error: any) {
+    // Silently fail - notification should not break the request
+    console.error(`❌ [NOTIFICATION] Failed to create submission notification:`, error.message);
+    console.error(`   → Stack trace:`, error.stack);
+  }
+}
+
+/**
+ * Helper function to create notification when verified admission is updated
+ * Notifies students who have this admission in their watchlist/saved
+ * 
+ * @param admission - Updated verified admission
+ */
+async function createNotificationForVerifiedAdmissionUpdate(admission: Admission): Promise<void> {
+  try {
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
+    const { query } = await import('@db/connection');
+
+    console.log(`📢 [NOTIFICATION] Creating verified admission update notification for admission ${admission.id}`);
+    console.log(`   → Title: ${admission.title}`);
+
+    if (!admission.id) {
+      console.warn(`⚠️ [NOTIFICATION] No admission ID provided for watchlist notification`);
+      return;
+    }
+
+    // Get all students who have this admission in their watchlist
+    console.log(`   → Querying watchlist for students...`);
+    const sql = `
+      SELECT DISTINCT wl.user_id
+      FROM watchlists wl
+      WHERE wl.admission_id = $1
+    `;
+    const result = await query(sql, [admission.id]);
+    const watchlistStudents = result.rows.map((row) => row.user_id as string);
+
+    console.log(`   → Found ${watchlistStudents.length} students watching this admission`);
+
+    if (watchlistStudents.length === 0) {
+      console.log(`   → No students to notify`);
+      return; // No students watching this admission
+    }
+
+    const eventKey = `admission_updated:${admission.id}:students:${Date.now()}`;
+    console.log(`   → Event key: ${eventKey}`);
+
+    const result2 = await publishNotification({
+      recipients: watchlistStudents.map((id) => ({ id, role: USER_TYPE.STUDENT })),
+      notification_type: NOTIFICATION_TYPE.ADMISSION_UPDATED_SAVED,
+      priority: NOTIFICATION_PRIORITY.MEDIUM,
+      title: `${admission.title} Updated`,
+      message: `An admission you saved has been updated. Check the details for latest information.`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admissions/${admission.id}`,
+      event_key: eventKey,
+    });
+
+    console.log(`✅ [NOTIFICATION] Successfully sent verified admission update notification to ${watchlistStudents.length} students:`, result2);
+  } catch (error: any) {
+    console.error(`❌ [NOTIFICATION] Failed to create verified admission update notification for admission ${admission.id}:`);
+    console.error(`   → Error: ${error?.message || String(error)}`);
+    if (error?.code) console.error(`   → Code: ${error.code}`);
+  }
+}
+
+/**
+ * Helper function to create notification when pending admission is updated
+ * Notifies admins about the update
+ * 
+ * @param admission - Updated pending admission
+ */
+async function createNotificationForPendingAdmissionUpdate(admission: Admission): Promise<void> {
+  try {
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
+
+    console.log(`📢 [NOTIFICATION] Creating pending admission update notification for admission ${admission.id}`);
+    console.log(`   → Title: ${admission.title}`);
+    console.log(`   → Created by: ${admission.created_by}`);
+
+    if (!admission.id || !admission.created_by) {
+      console.warn(`⚠️ [NOTIFICATION] Skipping pending update notification - missing ID (${admission.id}) or created_by (${admission.created_by})`);
+      return;
+    }
+
+    // Get all admins to notify
+    console.log(`   → Fetching admin recipients...`);
+    const admins = await getAdminRecipients();
+    console.log(`   → Found ${admins.length} admins to notify`);
+
+    if (admins.length === 0) {
+      console.warn(`⚠️ [NOTIFICATION] No admins found to notify about pending admission update!`);
+      return;
+    }
+
+    const eventKey = `admission_updated:${admission.id}:pending:${admission.created_by}:${Date.now()}`;
+    console.log(`   → Event key: ${eventKey}`);
+
+    const result = await publishNotification({
+      recipients: admins,
+      notification_type: NOTIFICATION_TYPE.ADMISSION_UPDATED_SAVED,
+      priority: NOTIFICATION_PRIORITY.LOW,
+      title: `${admission.title} Updated`,
+      message: `A pending admission has been updated by ${admission.university_id}. Review changes in verification panel.`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admin/verify-admissions/${admission.id}`,
+      event_key: eventKey,
+    });
+
+    console.log(`✅ [NOTIFICATION] Successfully sent pending admission update notification:`, result);
+  } catch (error: any) {
+    console.error(`❌ [NOTIFICATION] Failed to create pending admission update notification for admission ${admission.id}:`);
+    console.error(`   → Error: ${error?.message || String(error)}`);
+    if (error?.code) console.error(`   → Code: ${error.code}`);
+  }
+}
+
+/**
+ * Helper function to create notification when rejected admission is updated
+ * Notifies admins about the update (university is challenging the rejection)
+ * 
+ * @param admission - Updated rejected admission
+ */
+async function createNotificationForRejectedAdmissionUpdate(admission: Admission): Promise<void> {
+  try {
+    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
+
+    console.log(`📢 [NOTIFICATION] Creating rejected admission update notification for admission ${admission.id}`);
+    console.log(`   → Title: ${admission.title}`);
+    console.log(`   → Created by: ${admission.created_by}`);
+
+    if (!admission.id || !admission.created_by) {
+      console.warn(`⚠️ [NOTIFICATION] Skipping rejected update notification - missing ID (${admission.id}) or created_by (${admission.created_by})`);
+      return;
+    }
+
+    // Get all admins to notify
+    console.log(`   → Fetching admin recipients...`);
+    const admins = await getAdminRecipients();
+    console.log(`   → Found ${admins.length} admins to notify`);
+
+    if (admins.length === 0) {
+      console.warn('⚠️ [NOTIFICATION] No admins found to notify about rejected admission update');
+      return;
+    }
+
+    const eventKey = `admission_updated:${admission.id}:rejected:${admission.created_by}:${Date.now()}`;
+    console.log(`   → Event key: ${eventKey}`);
+
+    const result = await publishNotification({
+      recipients: admins,
+      notification_type: NOTIFICATION_TYPE.ADMISSION_UPDATED_SAVED,
+      priority: NOTIFICATION_PRIORITY.MEDIUM,
+      title: `${admission.title} Resubmitted`,
+      message: `A rejected admission has been resubmitted by university. Review the updated details and rejection reason.`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admin/verify-admissions/${admission.id}`,
+      event_key: eventKey,
+    });
+
+    console.log(`✅ [NOTIFICATION] Successfully sent rejected admission update notification:`, result);
+  } catch (error: any) {
+    console.error(`❌ [NOTIFICATION] Failed to create rejected admission update notification for admission ${admission.id}:`);
+    console.error(`   → Error: ${error?.message || String(error)}`);
+    if (error?.code) console.error(`   → Code: ${error.code}`);
+  }
+}
+
+async function getAdminRecipients() {
+  console.log(`🔍 [NOTIFICATION] Querying database for admin users...`);
+  const sql = `
+    SELECT id::text as id, role, email
+    FROM users
+    WHERE role = 'admin'
+  `;
+  const result = await query(sql, []);
+  console.log(`🔍 [NOTIFICATION] Admin query result: ${result.rows.length} admins found`);
+  if (result.rows.length > 0) {
+    console.log(`   → Admins:`, result.rows.map(r => ({ id: r.id, email: r.email })));
+  } else {
+    console.warn(`⚠️ [NOTIFICATION] No admin users found in database!`);
+  }
+  return result.rows.map((row) => ({ id: row.id as string, role: USER_TYPE.ADMIN }));
+}
+
+async function resolveUniversityRecipients(admission: Admission): Promise<{ recipients: Array<{ id: string; role: UserType }>; universityId?: string | null }> {
+  let universityId = admission.university_id || null;
+
+  if (!universityId && admission.created_by) {
+    const orgResult = await query(
+      'SELECT university_id::text as university_id FROM users WHERE id = $1',
+      [admission.created_by]
+    );
+    universityId = orgResult.rows[0]?.university_id || null;
+
+    if (universityId) {
+      try {
+        await admissionsModel.update(admission.id, { university_id: universityId });
+        admission.university_id = universityId;
+        console.log(`🟢 [admissionsService] Backfilled university_id for admission ${admission.id}: ${universityId}`);
+      } catch (error: any) {
+        console.warn(`⚠️ [admissionsService] Failed to backfill university_id for admission ${admission.id}:`, error?.message || error);
+      }
+    }
+  }
+
+  if (universityId) {
+    const recipientsResult = await query(
+      'SELECT id::text as id FROM users WHERE role = $1 AND university_id = $2',
+      [USER_TYPE.UNIVERSITY, universityId]
+    );
+    const recipients = recipientsResult.rows.map((row) => ({ id: row.id as string, role: USER_TYPE.UNIVERSITY }));
+    return { recipients, universityId };
+  }
+
+  if (admission.created_by) {
+    return { recipients: [{ id: admission.created_by, role: USER_TYPE.UNIVERSITY }], universityId: null };
+  }
+
+  return { recipients: [], universityId: null };
 }

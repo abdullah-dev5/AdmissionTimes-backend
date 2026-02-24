@@ -218,3 +218,88 @@ export const deleteDeadline = async (
     next(error);
   }
 };
+
+/**
+ * Trigger deadline reminder notifications (scheduler endpoint)
+ *
+ * POST /api/v1/scheduler/reminder
+ */
+export const triggerDeadlineReminders = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (req.user?.role && req.user.role !== 'admin') {
+      res.status(403).json({ success: false, message: 'Forbidden' });
+      return;
+    }
+
+    const lookAheadDays = req.body?.look_ahead_days
+      ? parseInt(String(req.body.look_ahead_days), 10)
+      : 3;
+
+    const result = await deadlinesService.triggerDeadlineReminders(lookAheadDays);
+
+    sendSuccess(res, result, 'Deadline reminders triggered successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get user's upcoming deadlines with admission and university details
+ * 
+ * GET /api/v1/users/me/upcoming-deadlines
+ */
+export const getUserUpcomingDeadlines = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user?.id; // From JWT middleware
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const {
+      days = 7,
+      limit = 20,
+      page = 1,
+      alert_enabled = true
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page as string) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(limit as string) || 20));
+    const lookAheadDays = Math.max(1, parseInt(days as string) || 7);
+    const alertOptIn = alert_enabled === 'true' || alert_enabled === true;
+
+    // Get deadlines
+    const { deadlines, total } = await deadlinesService.getUserUpcomingDeadlines(
+      userId,
+      pageNum,
+      pageSize,
+      lookAheadDays,
+      alertOptIn
+    );
+
+    // Calculate pagination metadata
+    const pagination = {
+      page: pageNum,
+      limit: pageSize,
+      total,
+      pages: Math.ceil(total / pageSize)
+    };
+
+    res.status(200).json({
+      success: true,
+      data: deadlines,
+      pagination
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

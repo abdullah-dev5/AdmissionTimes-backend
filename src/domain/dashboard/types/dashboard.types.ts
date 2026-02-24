@@ -67,7 +67,7 @@ export interface UpcomingDeadline {
  */
 export interface RecentNotification {
   id: string;
-  category: 'verification' | 'deadline' | 'system' | 'update';
+  notification_type: 'admission_submitted' | 'admission_resubmitted' | 'admission_verified' | 'admission_rejected' | 'admission_revision_required' | 'admission_updated_saved' | 'deadline_near' | 'system_broadcast' | 'dispute_raised' | 'system_error';
   priority: 'low' | 'medium' | 'high' | 'urgent';
   title: string;
   message: string;

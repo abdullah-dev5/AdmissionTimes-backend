@@ -50,6 +50,22 @@ export const verifyAdmissionSchema = Joi.object({
 });
 
 /**
+ * Request revision schema
+ */
+export const revisionRequiredSchema = Joi.object({
+  reason: Joi.string()
+    .min(10)
+    .max(1000)
+    .required()
+    .messages({
+      'string.empty': 'Reason is required',
+      'string.min': 'Reason must be at least 10 characters',
+      'string.max': 'Reason must not exceed 1000 characters',
+      'any.required': 'Reason is required',
+    }),
+});
+
+/**
  * Bulk verify schema
  */
 export const bulkVerifySchema = Joi.object({

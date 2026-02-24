@@ -51,6 +51,7 @@ export interface AdminAuditLog {
 export interface AdminAdmission {
   id: string;
   university_id: string | null;
+  created_by?: string | null;
   title: string;
   description: string | null;
   program_type: string | null;
@@ -77,6 +78,13 @@ export interface AdminVerifyAdmissionDTO {
   admin_notes?: string;
   verification_comments?: string;
   dispute_reason?: string; // Dispute explanation/reason
+}
+
+/**
+ * DTO for requesting revision on an admission
+ */
+export interface AdminRevisionRequestDTO {
+  reason: string;
 }
 
 /**

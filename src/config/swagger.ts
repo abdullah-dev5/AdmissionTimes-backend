@@ -146,21 +146,20 @@ const options: swaggerJsdoc.Options = {
               format: 'uuid',
               example: '123e4567-e89b-12d3-a456-426614174000',
             },
-            user_id: {
+            recipient_id: {
               type: 'string',
               format: 'uuid',
-              nullable: true,
               example: '123e4567-e89b-12d3-a456-426614174000',
             },
-            user_type: {
+            role_type: {
               type: 'string',
               enum: ['student', 'university', 'admin'],
               example: 'student',
             },
-            category: {
+            notification_type: {
               type: 'string',
-              enum: ['verification', 'deadline', 'system', 'update'],
-              example: 'verification',
+              enum: ['admission_submitted', 'admission_resubmitted', 'admission_verified', 'admission_rejected', 'admission_revision_required', 'admission_updated_saved', 'deadline_near', 'system_broadcast', 'dispute_raised', 'system_error'],
+              example: 'admission_verified',
             },
             priority: {
               type: 'string',
@@ -199,6 +198,10 @@ const options: swaggerJsdoc.Options = {
               type: 'string',
               nullable: true,
               example: '/admissions/123e4567-e89b-12d3-a456-426614174000',
+            },
+            event_key: {
+              type: 'string',
+              example: 'admission_verified:123e4567-e89b-12d3-a456-426614174000:admin_1',
             },
             created_at: {
               type: 'string',
@@ -523,12 +526,12 @@ const options: swaggerJsdoc.Options = {
               example: 'John Doe',
               description: 'User display name',
             },
-            organization_id: {
+            university_id: {
               type: 'string',
               format: 'uuid',
               nullable: true,
               example: '123e4567-e89b-12d3-a456-426614174000',
-              description: 'Organization ID (for university users only)',
+              description: 'University ID (for university users only)',
             },
             status: {
               type: 'string',

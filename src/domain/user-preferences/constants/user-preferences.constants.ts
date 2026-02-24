@@ -25,12 +25,11 @@ export const DEFAULTS = {
 
 /**
  * Email frequency options
+ * Note: Only 'immediate' is supported. 'never' means emails are disabled via email_notifications_enabled.
+ * Daily and weekly digest options have been removed - use email_notifications_enabled instead.
  */
 export const EMAIL_FREQUENCY_OPTIONS = [
   'immediate',
-  'daily',
-  'weekly',
-  'never',
 ] as const;
 
 /**

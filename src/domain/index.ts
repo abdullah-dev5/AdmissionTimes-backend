@@ -23,6 +23,8 @@ import analyticsRoutes from './analytics/routes/analytics.routes';
 import changelogsRoutes from './changelogs/routes/changelogs.routes';
 import watchlistsRoutes from './watchlists/routes/watchlists.routes';
 import dashboardRoutes from './dashboard/routes/dashboard.routes';
+import schedulerRoutes from './scheduler/routes/scheduler.routes';
+import recommendationsRoutes from './recommendations/routes/recommendations.routes';
 
 /**
  * Registers all domain routes with the Express application
@@ -55,6 +57,12 @@ export function registerDomains(app: Application): void {
   // Advanced Features (Phase 5)
   app.use('/api/v1/watchlists', watchlistsRoutes);
   
+  // Recommendations Domain (Smart collaborative filtering)
+  app.use('/api/v1/recommendations', recommendationsRoutes);
+  
   // Dashboard Domain (Phase 6 - Backend Implementation Plan)
   app.use('/api/v1', dashboardRoutes);
+
+  // Scheduler Domain (Phase 2 reminders)
+  app.use('/api/v1/scheduler', schedulerRoutes);
 }

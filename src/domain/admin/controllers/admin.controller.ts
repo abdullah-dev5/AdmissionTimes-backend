@@ -19,6 +19,7 @@ import * as adminService from '../services/admin.service';
 import { parsePagination, calculatePagination } from '@shared/utils/pagination';
 import {
   AdminVerifyAdmissionDTO,
+  AdminRevisionRequestDTO,
   AdminBulkVerifyDTO,
   AdminFilterParams,
   UserContext,
@@ -142,6 +143,29 @@ export const verifyAdmission = async (
     );
 
     sendSuccess(res, admission, 'Admission verified successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Request revision for an admission
+ *
+ * POST /api/v1/admin/admissions/:id/revision-required
+ */
+export const requestRevision = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const data = req.validated as AdminRevisionRequestDTO;
+    const userContext = (req.user as UserContext | undefined)!;
+
+    const admission = await adminService.requestRevision(id, data.reason, userContext);
+
+    sendSuccess(res, admission, 'Revision requested successfully');
   } catch (error) {
     next(error);
   }

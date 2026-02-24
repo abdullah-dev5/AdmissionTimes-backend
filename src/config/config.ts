@@ -53,6 +53,22 @@ export const config = {
     jwksUrl: process.env.JWT_JWKS_URL || 'https://lufhgsgubvxjrrcsevte.supabase.co/.well-known/jwks.json',
     expiryTolerance: parseInt(process.env.JWT_EXPIRY_TOLERANCE || '300', 10),
   },
+
+  // Email configuration (Phase 2: Nodemailer SMTP)
+  email: {
+    enabled: process.env.EMAIL_ENABLED === 'true',
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.EMAIL_FROM || 'admissiontimes@gmail.com',
+  },
+
+  // Realtime configuration (Phase 2: Supabase Realtime)
+  realtime: {
+    enabled: process.env.REALTIME_ENABLED === 'true',
+  },
 };
 
 /**

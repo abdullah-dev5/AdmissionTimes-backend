@@ -16,7 +16,7 @@ export interface User {
   auth_user_id: string | null; // Supabase Auth UUID (nullable for now)
   role: UserType;
   display_name: string;
-  organization_id: string | null; // For university users
+  university_id: string | null; // For university users
   status: 'active' | 'suspended';
   created_at: string; // ISO8601 timestamp
   updated_at: string; // ISO8601 timestamp
@@ -30,7 +30,7 @@ export interface CreateUserDTO {
   auth_user_id?: string | null; // Supabase Auth UUID (nullable)
   role: UserType;
   display_name: string;
-  organization_id?: string | null; // For university users
+  university_id?: string | null; // For university users
   status?: 'active' | 'suspended';
 }
 
@@ -41,7 +41,7 @@ export interface CreateUserDTO {
  */
 export interface UpdateUserDTO {
   display_name?: string;
-  organization_id?: string | null;
+  university_id?: string | null;
 }
 
 /**
@@ -95,7 +95,7 @@ export interface UpdateUniversityProfileDTO {
 export interface UserFilters {
   role?: UserType | UserType[];
   status?: 'active' | 'suspended';
-  organization_id?: string;
+  university_id?: string;
   auth_user_id?: string;
 }
 
@@ -119,5 +119,5 @@ export interface UserContext {
   id: string | null; // Internal user ID (users.id)
   auth_user_id: string | null; // Supabase Auth UUID (nullable)
   role: UserType | 'guest';
-  organization_id?: string | null;
+  university_id?: string | null;
 }

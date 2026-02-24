@@ -78,10 +78,10 @@ router.get(
  *                 minLength: 2
  *                 maxLength: 255
  *                 description: User display name
- *               organization_id:
+ *               university_id:
  *                 type: string
  *                 format: uuid
- *                 description: Organization ID (for university users only)
+ *                 description: University ID (for university users only)
  *     responses:
  *       200:
  *         description: Successfully updated user profile
@@ -168,11 +168,11 @@ router.use('/me/preferences', userPreferencesRoutes);
  *           enum: [active, suspended]
  *         description: Filter by user status
  *       - in: query
- *         name: organization_id
+ *         name: university_id
  *         schema:
  *           type: string
  *           format: uuid
- *         description: Filter by organization ID
+ *         description: Filter by university ID
  *       - in: query
  *         name: sort
  *         schema:
