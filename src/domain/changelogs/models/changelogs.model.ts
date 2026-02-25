@@ -54,9 +54,11 @@ export const findByAdmissionId = async (
   const sql = `
     SELECT 
       c.*,
-      a.title as program_title
+      a.title as program_title,
+      u.display_name as changed_by_name
     FROM changelogs c
     LEFT JOIN admissions a ON c.admission_id = a.id
+    LEFT JOIN users u ON c.changed_by = u.id
     WHERE c.admission_id = $1
     ORDER BY c.${sortField} ${sortOrder}
     LIMIT $2 OFFSET $3
@@ -268,9 +270,11 @@ function buildFindManyQuery(
   const sql = `
     SELECT 
       c.*,
-      a.title as program_title
+      a.title as program_title,
+      u.display_name as changed_by_name
     FROM changelogs c
     LEFT JOIN admissions a ON c.admission_id = a.id
+    LEFT JOIN users u ON c.changed_by = u.id
     ${whereClause}
     ORDER BY c.${sortField} ${sortOrder}
     LIMIT $${paramIndex++} OFFSET $${paramIndex}

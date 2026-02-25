@@ -78,10 +78,12 @@ router.use(adminOnly);
  *         description: Admin access required
  */
 // GET /api/v1/admin/dashboard - Get admin dashboard
-router.get(
-  '/dashboard',
-  adminController.getAdminDashboard
-);
+// NOTE: Commented out to use the comprehensive dashboard route in dashboard.routes.ts
+// which includes university name joins and proper CTE formatting
+// router.get(
+//   '/dashboard',
+//   adminController.getAdminDashboard
+// );
 
 /**
  * @swagger

@@ -223,9 +223,6 @@ export const update = async (
     throw new AppError('Admission not found', 404);
   }
 
-  // Store original verification status to check if verified
-  const wasVerified = existing.verification_status === VERIFICATION_STATUS.VERIFIED;
-
   // Update admission - allow updates to pending and verified admissions
   const updated = await admissionsModel.update(id, data);
 
@@ -271,17 +268,29 @@ export const update = async (
   await createChangelogForUpdate(existing, updated, userContext);
 
   // Send notifications based on admission status
-  if (wasVerified && updated.verification_status === VERIFICATION_STATUS.VERIFIED) {
-    // Verified admission was updated (not downgraded) → notify students with watchlist
+  // Only notify watchlist students if admission is CURRENTLY VERIFIED
+  // This ensures notifications are only sent for verified admissions, not pending ones
+  if (updated.verification_status === VERIFICATION_STATUS.VERIFIED) {
     createNotificationForVerifiedAdmissionUpdate(updated).catch((err) => {
       console.error('📢 Failed to notify students of admission update:', err);
     });
-  } else if (existing.verification_status === VERIFICATION_STATUS.PENDING && updated.verification_status === VERIFICATION_STATUS.PENDING) {
+  }
+
+  // Notify admins if admission was updated and is now PENDING (for re-verification)
+  if (existing.verification_status !== VERIFICATION_STATUS.PENDING && updated.verification_status === VERIFICATION_STATUS.PENDING) {
+    createNotificationForSubmission(updated).catch((err) => {
+      console.error('📢 Failed to notify admins of admission re-submission:', err);
+    });
+  }
+
+  if (existing.verification_status === VERIFICATION_STATUS.PENDING && updated.verification_status === VERIFICATION_STATUS.PENDING) {
     // Pending admission was updated → notify admins
     createNotificationForPendingAdmissionUpdate(updated).catch((err) => {
       console.error('📢 Failed to notify admins of admission update:', err);
     });
-  } else if (existing.verification_status === VERIFICATION_STATUS.REJECTED && updated.verification_status === VERIFICATION_STATUS.REJECTED) {
+  }
+
+  if (existing.verification_status === VERIFICATION_STATUS.REJECTED && updated.verification_status === VERIFICATION_STATUS.REJECTED) {
     // Rejected admission was updated (university is challenging rejection) → notify admins
     createNotificationForRejectedAdmissionUpdate(updated).catch((err) => {
       console.error('📢 Failed to notify admins of rejected admission update:', err);
@@ -495,6 +504,11 @@ export const submit = async (
     old_value: VERIFICATION_STATUS.DRAFT,
     new_value: VERIFICATION_STATUS.PENDING,
     diff_summary: 'Admission submitted for verification',
+  });
+
+  // Notify admins about the submission
+  createNotificationForSubmission(updated).catch((err) => {
+    console.error('📢 Failed to create submission notification for pending admission:', err?.message || err);
   });
 
   return updated;
@@ -1144,7 +1158,8 @@ async function createNotificationForVerifiedAdmissionUpdate(admission: Admission
       return; // No students watching this admission
     }
 
-    const eventKey = `admission_updated:${admission.id}:students:${Date.now()}`;
+    // Use updated_at + Date.now() for absolute uniqueness to ensure each update gets a new notification
+    const eventKey = `admission_updated:${admission.id}:verified:${admission.updated_at}:${Date.now()}`;
     console.log(`   → Event key: ${eventKey}`);
 
     const result2 = await publishNotification({

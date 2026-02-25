@@ -409,14 +409,14 @@ export const getUniversityDashboard = async (
           a.id::text,
           a.id::text as admission_id,
           a.title as program_title,
-          a.created_at::text as submitted_at,
+          a.updated_at::text as submitted_at,
           'pending' as verification_status,
           NULL as admin_notes
         FROM admissions a
         WHERE (a.created_by::text = ANY($2::text[]) OR a.university_id::text = ANY($3::text[]))
           AND a.verification_status = 'pending'
           AND a.is_active = true
-        ORDER BY a.created_at DESC
+        ORDER BY a.updated_at DESC
         LIMIT 20
       ),
       recent_changes AS (
@@ -535,12 +535,21 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
           a.id::text,
           a.id::text as admission_id,
           a.title as program_title,
-          a.created_at::text as submitted_at,
+          COALESCE(
+            univ.name,
+            user_univ.name, 
+            a.location, 
+            'Unknown University'
+          ) as university_name,
+          a.updated_at::text as submitted_at,
           'pending' as verification_status,
           NULL as admin_notes
         FROM admissions a
+        LEFT JOIN universities univ ON univ.id = a.university_id
+        LEFT JOIN users u ON u.id = a.created_by
+        LEFT JOIN universities user_univ ON user_univ.id = u.university_id
         WHERE a.verification_status = 'pending'
-        ORDER BY a.created_at DESC
+        ORDER BY a.updated_at DESC
         LIMIT 10
       ),
       recent_actions AS (
@@ -564,8 +573,11 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
         COALESCE((SELECT json_agg(row_to_json(ra)) FROM recent_actions ra), '[]'::json) as recent_actions;
     `;
 
+    console.log('🔍 [getAdminDashboard] Executing dashboard query...');
     const result = await query(dashboardQuery, []);
     const row = result.rows[0];
+
+    console.log('🔍 [getAdminDashboard] Raw pending_verifications:', JSON.stringify(row.pending_verifications, null, 2));
 
     // Transform the result to match the expected structure
     // Ensure all fields use snake_case and proper types
