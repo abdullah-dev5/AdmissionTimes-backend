@@ -26,7 +26,7 @@ export const getPendingAdmissions = async (
       `SELECT *
        FROM admissions
        WHERE verification_status = 'pending'
-       ORDER BY created_at DESC
+       ORDER BY updated_at DESC
        LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
@@ -62,7 +62,7 @@ export const getAllAdmissionsWithStatus = async (
       paramIndex++;
     }
 
-    query_str += ` ORDER BY a.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    query_str += ` ORDER BY a.updated_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
     const result = await query(query_str, params);

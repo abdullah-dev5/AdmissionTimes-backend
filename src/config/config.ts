@@ -56,7 +56,9 @@ export const config = {
 
   // Email configuration (Phase 2: Nodemailer SMTP)
   email: {
-    enabled: process.env.EMAIL_ENABLED === 'true',
+    enabled:
+      process.env.EMAIL_ENABLED === 'true' ||
+      (process.env.EMAIL_ENABLED !== 'false' && !!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS),
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT || '587', 10),
     secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587
@@ -67,7 +69,9 @@ export const config = {
 
   // Realtime configuration (Phase 2: Supabase Realtime)
   realtime: {
-    enabled: process.env.REALTIME_ENABLED === 'true',
+    enabled:
+      process.env.REALTIME_ENABLED === 'true' ||
+      (process.env.REALTIME_ENABLED !== 'false' && !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY),
   },
 };
 

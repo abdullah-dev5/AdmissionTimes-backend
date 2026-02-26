@@ -133,6 +133,11 @@ export const verifyAdmission = async (
       await notifyUniversityForVerificationStatus(updated, data.verification_status, data.rejection_reason);
     }
 
+    // Notify students watching this admission when it's verified (for re-verification too)
+    if (data.verification_status === 'verified') {
+      await notifyStudentsForVerifiedAdmissionUpdate(updated);
+    }
+
     console.log(`✅ [ADMIN] Admission ${admissionId} verified by ${adminContext.email}`);
 
     return updated;
@@ -273,6 +278,63 @@ async function notifyUniversityForRevisionRequired(
     });
   } catch (error: any) {
     console.error('❌ [ADMIN] Failed to send revision request notification:', error?.message || error);
+  }
+}
+
+/**
+ * Notify students who are watching this admission when it's verified/updated
+ * This ensures students get notifications on EVERY re-verification
+ */
+async function notifyStudentsForVerifiedAdmissionUpdate(
+  admission: AdminAdmission
+): Promise<void> {
+  try {
+    console.log(`📢 [ADMIN] Creating student notification for verified admission ${admission.id}`);
+    console.log(`   → Title: ${admission.title}`);
+
+    if (!admission.id) {
+      console.warn(`⚠️ [ADMIN] No admission ID provided for student notification`);
+      return;
+    }
+
+    // Get all students who have this admission in their watchlist
+    console.log(`   → Querying watchlist for students...`);
+    const sql = `
+      SELECT DISTINCT wl.user_id
+      FROM watchlists wl
+      WHERE wl.admission_id = $1
+    `;
+    const result = await query(sql, [admission.id]);
+    const watchlistStudents = result.rows.map((row) => row.user_id as string);
+
+    console.log(`   → Found ${watchlistStudents.length} students watching this admission`);
+
+    if (watchlistStudents.length === 0) {
+      console.log(`   → No students to notify`);
+      return; // No students watching this admission
+    }
+
+    // Use updated_at + Date.now() for absolute uniqueness to ensure each update gets a new notification
+    const eventKey = `admission_updated:${admission.id}:verified:${admission.updated_at}:${Date.now()}`;
+    console.log(`   → Event key: ${eventKey}`);
+
+    const result2 = await publishNotification({
+      recipients: watchlistStudents.map((id) => ({ id, role: USER_TYPE.STUDENT })),
+      notification_type: NOTIFICATION_TYPE.ADMISSION_UPDATED_SAVED,
+      priority: NOTIFICATION_PRIORITY.MEDIUM,
+      title: `${admission.title} Updated`,
+      message: `An admission you saved has been updated. Check the details for latest information.`,
+      related_entity_type: 'admission',
+      related_entity_id: admission.id,
+      action_url: `/admissions/${admission.id}`,
+      event_key: eventKey,
+    });
+
+    console.log(`✅ [ADMIN] Successfully sent verified admission update notification to ${watchlistStudents.length} students:`, result2);
+  } catch (error: any) {
+    console.error(`❌ [ADMIN] Failed to create student notification for admission ${admission.id}:`);
+    console.error(`   → Error: ${error?.message || String(error)}`);
+    if (error?.code) console.error(`   → Code: ${error.code}`);
   }
 }
 
