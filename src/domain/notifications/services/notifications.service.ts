@@ -20,9 +20,15 @@ import {
   NotificationFilters,
   UserContext,
 } from '../types/notifications.types';
+import { NOTIFICATION_TYPE } from '@config/constants';
 import { sendNotificationEmail } from './emailDelivery';
 import { publishNotificationToChannel } from './realtimePublisher';
-import { getUserEmailPreferences } from './userUtils';
+import { getUserNotificationPreferences } from './userUtils';
+import {
+  registerUserPushToken,
+  unregisterUserPushToken,
+  sendPushNotificationToUser,
+} from './pushDelivery';
 
 /**
  * Get notification by ID
@@ -132,23 +138,35 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
 
   try {
     const result = await notificationsModel.create(data);
+    const wasExisting = (result as Notification & { __existing?: boolean }).__existing === true;
 
-    // Phase 2: Non-blocking email delivery (conditional based on user preferences)
+    if (wasExisting) {
+      console.log(`⏭️ [SERVICE] Duplicate notification suppressed, skipping side-effects for event_key=${data.event_key}`);
+      return result;
+    }
+
     if (data.recipient_id) {
-      getUserEmailPreferences(data.recipient_id)
-        .then(({ email, emailEnabled }) => {
-          if (email && emailEnabled) {
-            console.log(`📧 [EMAIL] Sending email to user ${data.recipient_id?.substring(0, 8)}... (enabled: ${emailEnabled})`);
-            return sendNotificationEmail(result, email);
-          } else if (!emailEnabled) {
-            console.log(`⏭️ [EMAIL] Skipping email for user ${data.recipient_id?.substring(0, 8)}... (disabled by user preference)`);
-          } else {
-            console.log(`⏭️ [EMAIL] No email address found for user ${data.recipient_id?.substring(0, 8)}...`);
+      getUserNotificationPreferences(data.recipient_id)
+        .then((preferences) => {
+          const category = inferNotificationCategory(data.notification_type);
+          const categoryEnabled = preferences.categories[category] !== false;
+          const forceEmailForDeadlineReminder = data.notification_type === NOTIFICATION_TYPE.DEADLINE_NEAR;
+
+          if (preferences.email && (preferences.emailEnabled || forceEmailForDeadlineReminder) && categoryEnabled) {
+            sendNotificationEmail(result, preferences.email).catch((emailError) => {
+              console.error('[NotificationService] Email delivery failed (non-blocking):', emailError);
+            });
           }
-          return Promise.resolve();
+
+          sendPushNotificationToUser(result, {
+            pushEnabled: preferences.pushEnabled,
+            categoryEnabled,
+          }).catch((pushError) => {
+            console.error('[NotificationService] Push delivery failed (non-blocking):', pushError);
+          });
         })
         .catch((error) => {
-          console.error('[NotificationService] Email delivery failed (non-blocking):', error);
+          console.error('[NotificationService] Preference lookup failed (non-blocking):', error);
         });
     }
 
@@ -169,6 +187,59 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
     });
     throw error;
   }
+};
+
+export const registerPushToken = async (
+  userContext: UserContext | undefined,
+  input: {
+    expo_push_token: string;
+    platform?: 'ios' | 'android' | 'web' | 'unknown';
+    device_id?: string | null;
+    app_version?: string | null;
+  }
+) => {
+  if (!userContext?.id) {
+    throw new AppError('User context required', 401);
+  }
+
+  return registerUserPushToken({
+    userId: userContext.id,
+    expoPushToken: input.expo_push_token,
+    platform: input.platform,
+    deviceId: input.device_id,
+    appVersion: input.app_version,
+  });
+};
+
+export const unregisterPushToken = async (
+  userContext: UserContext | undefined,
+  input: {
+    expo_push_token: string;
+  }
+): Promise<number> => {
+  if (!userContext?.id) {
+    throw new AppError('User context required', 401);
+  }
+
+  return unregisterUserPushToken(userContext.id, input.expo_push_token);
+};
+
+const inferNotificationCategory = (notificationType: string): 'verification' | 'deadline' | 'system' | 'update' => {
+  if (notificationType === NOTIFICATION_TYPE.DEADLINE_NEAR) return 'deadline';
+  if (
+    notificationType === NOTIFICATION_TYPE.ADMISSION_VERIFIED ||
+    notificationType === NOTIFICATION_TYPE.ADMISSION_REJECTED ||
+    notificationType === NOTIFICATION_TYPE.ADMISSION_REVISION_REQUIRED
+  ) {
+    return 'verification';
+  }
+  if (
+    notificationType === NOTIFICATION_TYPE.SYSTEM_BROADCAST ||
+    notificationType === NOTIFICATION_TYPE.SYSTEM_ERROR
+  ) {
+    return 'system';
+  }
+  return 'update';
 };
 
 /**

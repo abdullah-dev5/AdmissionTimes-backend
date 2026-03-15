@@ -156,7 +156,7 @@ export const runDeadlineReminderDispatch = async (): Promise<void> => {
       : '100.0';
 
     console.log(
-      `[Scheduler] ✅ Deadline reminders complete: targets=${result.targets}, attempted=${result.attempted}, succeeded=${result.succeeded}, failed=${result.failed} (${successRate}% success, ${durationMs}ms)`
+      `[Scheduler] ✅ Deadline reminders complete: targets=${result.targets}, attempted=${result.attempted}, succeeded=${result.succeeded}, deduped=${result.deduped}, failed=${result.failed} (${successRate}% success, ${durationMs}ms)`
     );
   } catch (error) {
     const durationMs = Date.now() - startTime;
@@ -230,6 +230,14 @@ export const initializeScheduler = (): void => {
     scheduledTime.setHours(scheduledTime.getHours() + 1);
 
     const msUntilRun = scheduledTime.getTime() - now.getTime();
+
+    // Run once shortly after startup so we don't wait until the top of next hour
+    setTimeout(() => {
+      console.log('[Scheduler] Running initial deadline reminder dispatch on startup...');
+      runDeadlineReminderDispatch().catch((error) => {
+        console.error('[Scheduler] ❌ Initial deadline reminder dispatch failed:', error);
+      });
+    }, 15000);
 
     setTimeout(() => {
       runDeadlineReminderDispatch();

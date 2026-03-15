@@ -10,12 +10,24 @@ import dotenv from 'dotenv';
 // Load environment variables from .env file
 dotenv.config();
 
+const normalizeSupabaseUrl = (value?: string): string => {
+  return (value || '').trim().replace(/\/$/, '');
+};
+
+const defaultSupabaseUrl = normalizeSupabaseUrl(
+  process.env.SUPABASE_URL || 'https://lufhgsgubvxjrrcsevte.supabase.co'
+);
+
+const defaultJwtIssuer = `${defaultSupabaseUrl}/auth/v1`;
+const defaultJwksUrl = `${defaultJwtIssuer}/.well-known/jwks.json`;
+
 /**
  * Application configuration object
  */
 export const config = {
   // Server configuration
   port: parseInt(process.env.PORT || '3000', 10),
+  host: process.env.HOST || '0.0.0.0',
   env: process.env.NODE_ENV || 'development',
   
   // API configuration
@@ -39,7 +51,7 @@ export const config = {
   
   // Supabase Auth configuration (Phase 1: JWKS Verification)
   supabase: {
-    url: process.env.SUPABASE_URL || '',
+    url: defaultSupabaseUrl,
     anonKey: process.env.SUPABASE_ANON_KEY || '',
     serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     jwtSecret: process.env.SUPABASE_JWT_SECRET || '',
@@ -48,9 +60,9 @@ export const config = {
   // JWT configuration (Phase 1: JWKS Signature Verification)
   jwt: {
     algorithm: process.env.JWT_ALGORITHM || 'RS256',
-    issuer: process.env.JWT_ISSUER || 'https://lufhgsgubvxjrrcsevte.supabase.co/auth/v1',
+    issuer: process.env.JWT_ISSUER || defaultJwtIssuer,
     audience: process.env.JWT_AUDIENCE || 'authenticated',
-    jwksUrl: process.env.JWT_JWKS_URL || 'https://lufhgsgubvxjrrcsevte.supabase.co/.well-known/jwks.json',
+    jwksUrl: process.env.JWT_JWKS_URL || defaultJwksUrl,
     expiryTolerance: parseInt(process.env.JWT_EXPIRY_TOLERANCE || '300', 10),
   },
 

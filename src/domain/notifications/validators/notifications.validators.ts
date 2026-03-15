@@ -211,3 +211,57 @@ export const markReadSchema = Joi.object({
       'date.format': 'read_at must be in ISO8601 format',
     }),
 });
+
+/**
+ * Register push token schema
+ */
+export const registerPushTokenSchema = Joi.object({
+  expo_push_token: Joi.string()
+    .trim()
+    .min(10)
+    .max(300)
+    .required()
+    .messages({
+      'string.empty': 'expo_push_token is required',
+      'string.min': 'expo_push_token is invalid',
+      'string.max': 'expo_push_token is invalid',
+      'any.required': 'expo_push_token is required',
+    }),
+
+  platform: Joi.string()
+    .valid('ios', 'android', 'web', 'unknown')
+    .optional()
+    .default('unknown')
+    .messages({
+      'any.only': 'platform must be one of: ios, android, web, unknown',
+    }),
+
+  device_id: Joi.string()
+    .trim()
+    .max(255)
+    .allow(null, '')
+    .optional(),
+
+  app_version: Joi.string()
+    .trim()
+    .max(50)
+    .allow(null, '')
+    .optional(),
+});
+
+/**
+ * Unregister push token schema
+ */
+export const unregisterPushTokenSchema = Joi.object({
+  expo_push_token: Joi.string()
+    .trim()
+    .min(10)
+    .max(300)
+    .required()
+    .messages({
+      'string.empty': 'expo_push_token is required',
+      'string.min': 'expo_push_token is invalid',
+      'string.max': 'expo_push_token is invalid',
+      'any.required': 'expo_push_token is required',
+    }),
+});

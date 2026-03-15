@@ -316,7 +316,7 @@ function buildFindManyQuery(
   limit: number,
   offset: number
 ): { sql: string; params: any[] } {
-  const conditions: string[] = ['is_active = true'];
+  const conditions: string[] = ['a.is_active = true'];
   const params: any[] = [];
   let paramIndex = 1;
 
@@ -324,16 +324,16 @@ function buildFindManyQuery(
   if (filters.verification_status) {
     if (Array.isArray(filters.verification_status)) {
       const placeholders = filters.verification_status.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`verification_status IN (${placeholders})`);
+      conditions.push(`a.verification_status IN (${placeholders})`);
       params.push(...filters.verification_status);
     } else {
-      conditions.push(`verification_status = $${paramIndex++}`);
+      conditions.push(`a.verification_status = $${paramIndex++}`);
       params.push(filters.verification_status);
     }
   }
 
   if (filters.created_by) {
-    conditions.push(`created_by = $${paramIndex++}`);
+    conditions.push(`a.created_by = $${paramIndex++}`);
     params.push(filters.created_by);
   }
 
@@ -342,12 +342,12 @@ function buildFindManyQuery(
     const ownerConditions: string[] = [];
 
     if (filters.owner_user_ids && filters.owner_user_ids.length > 0) {
-      ownerConditions.push(`created_by = ANY($${paramIndex++}::uuid[])`);
+      ownerConditions.push(`a.created_by = ANY($${paramIndex++}::uuid[])`);
       params.push(filters.owner_user_ids);
     }
 
     if (filters.owner_university_ids && filters.owner_university_ids.length > 0) {
-      ownerConditions.push(`university_id = ANY($${paramIndex++}::uuid[])`);
+      ownerConditions.push(`a.university_id = ANY($${paramIndex++}::uuid[])`);
       params.push(filters.owner_university_ids);
     }
 
@@ -355,34 +355,34 @@ function buildFindManyQuery(
   }
 
   if (filters.program_type) {
-    conditions.push(`program_type ILIKE $${paramIndex++}`);
+    conditions.push(`a.program_type ILIKE $${paramIndex++}`);
     params.push(`%${filters.program_type}%`);
   }
 
   if (filters.degree_level) {
-    conditions.push(`degree_level ILIKE $${paramIndex++}`);
+    conditions.push(`a.degree_level ILIKE $${paramIndex++}`);
     params.push(`%${filters.degree_level}%`);
   }
 
   if (filters.field_of_study) {
-    conditions.push(`field_of_study ILIKE $${paramIndex++}`);
+    conditions.push(`a.field_of_study ILIKE $${paramIndex++}`);
     params.push(`%${filters.field_of_study}%`);
   }
 
   if (filters.location) {
-    conditions.push(`location ILIKE $${paramIndex++}`);
+    conditions.push(`a.location ILIKE $${paramIndex++}`);
     params.push(`%${filters.location}%`);
   }
 
   if (filters.delivery_mode) {
-    conditions.push(`delivery_mode = $${paramIndex++}`);
+    conditions.push(`a.delivery_mode = $${paramIndex++}`);
     params.push(filters.delivery_mode);
   }
 
   // Search filter
   if (filters.search) {
     const searchConditions = SEARCH_FIELDS.map((field, idx) => {
-      return `${field} ILIKE $${paramIndex + idx}`;
+      return `a.${field} ILIKE $${paramIndex + idx}`;
     });
     conditions.push(`(${searchConditions.join(' OR ')})`);
     params.push(...SEARCH_FIELDS.map(() => `%${filters.search}%`));
@@ -391,15 +391,23 @@ function buildFindManyQuery(
 
   // Validate sort field
   const sortField = SORTABLE_FIELDS.includes(sort as any) ? sort : 'created_at';
+  const qualifiedSortField = `a.${sortField}`;
   const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
   // Add pagination parameters
   params.push(limit, offset);
 
   const sql = `
-    SELECT * FROM admissions
+    SELECT
+      a.*, 
+      u.name AS university_name,
+      u.logo_url AS university_logo_url,
+      u.city AS university_city,
+      u.country AS university_country
+    FROM admissions a
+    LEFT JOIN universities u ON u.id = a.university_id
     WHERE ${conditions.join(' AND ')}
-    ORDER BY ${sortField} ${sortOrder}
+    ORDER BY ${qualifiedSortField} ${sortOrder}
     LIMIT $${paramIndex++} OFFSET $${paramIndex}
   `;
 

@@ -235,11 +235,19 @@ export const triggerDeadlineReminders = async (
       return;
     }
 
-    const lookAheadDays = req.body?.look_ahead_days
-      ? parseInt(String(req.body.look_ahead_days), 10)
-      : 3;
+    const bodyThresholds = Array.isArray(req.body?.threshold_days)
+      ? req.body.threshold_days
+      : [];
 
-    const result = await deadlinesService.triggerDeadlineReminders(lookAheadDays);
+    const parsedThresholds = bodyThresholds
+      .map((day: unknown) => Number(day))
+      .filter((day: number) => Number.isFinite(day) && day > 0)
+      .map((day: number) => Math.floor(day));
+
+    const thresholds = parsedThresholds.length > 0 ? parsedThresholds : [7, 3, 1];
+    const forceRun = req.body?.force_run === true;
+
+    const result = await deadlinesService.triggerDeadlineReminderNotifications(thresholds, { forceRun });
 
     sendSuccess(res, result, 'Deadline reminders triggered successfully');
   } catch (error) {

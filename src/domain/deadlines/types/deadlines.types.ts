@@ -19,6 +19,9 @@ export interface Deadline {
   timezone: string;
   is_flexible: boolean;
   reminder_sent: boolean;
+  reminder_sent_7d_at?: string | null;
+  reminder_sent_3d_at?: string | null;
+  reminder_sent_1d_at?: string | null;
   created_at: string; // ISO8601 timestamp
   updated_at: string; // ISO8601 timestamp
 }
@@ -55,6 +58,9 @@ export interface UpdateDeadlineDTO {
   timezone?: string;
   is_flexible?: boolean;
   reminder_sent?: boolean;
+  reminder_sent_7d_at?: string | null;
+  reminder_sent_3d_at?: string | null;
+  reminder_sent_1d_at?: string | null;
 }
 
 /**

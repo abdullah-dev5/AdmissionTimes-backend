@@ -14,7 +14,6 @@
  */
 
 import { AppError } from '@shared/middleware/errorHandler';
-import { query } from '@db/connection';
 import * as deadlinesModel from '../models/deadlines.model';
 import {
   Deadline,
@@ -27,6 +26,7 @@ import { URGENCY_THRESHOLDS } from '../constants/deadlines.constants';
 import * as admissionsModel from '@domain/admissions/models/admissions.model';
 import { NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE } from '@config/constants';
 import { enqueueNotificationJob } from '@domain/notifications/services/notificationJobQueue';
+import * as notificationsModel from '@domain/notifications/models/notifications.model';
 
 /**
  * Calculate days remaining until deadline
@@ -209,10 +209,31 @@ export const update = async (
     }
   }
 
-  const updated = await deadlinesModel.update(id, data);
+  const deadlineDateChanged =
+    data.deadline_date !== undefined &&
+    new Date(data.deadline_date).getTime() !== new Date(deadline.deadline_date).getTime();
+
+  const updatePayload: UpdateDeadlineDTO = deadlineDateChanged
+    ? {
+        ...data,
+        reminder_sent: false,
+        reminder_sent_7d_at: null,
+        reminder_sent_3d_at: null,
+        reminder_sent_1d_at: null,
+      }
+    : data;
+
+  const updated = await deadlinesModel.update(id, updatePayload);
 
   if (!updated) {
     throw new AppError('Deadline not found', 404);
+  }
+
+  if (deadlineDateChanged) {
+    const deleted = await notificationsModel.deleteDeadlineReminderNotificationsByDeadlineId(id);
+    console.log(
+      `[DeadlinesService] Deadline date changed for ${id}; reset reminder flags and cleared ${deleted} stale deadline reminder notifications`
+    );
   }
 
   return enrichDeadline(updated);
@@ -273,66 +294,9 @@ export const getUserUpcomingDeadlines = async (
 export const triggerDeadlineReminders = async (
   lookAheadDays: number = 3
 ): Promise<{ targets: number; sent: number }> => {
-  const sql = `
-    SELECT
-      d.id::text as deadline_id,
-      d.deadline_type,
-      d.deadline_date::text as deadline_date,
-      d.admission_id::text as admission_id,
-      a.title as admission_title,
-      wl.user_id::text as recipient_id
-    FROM deadlines d
-    INNER JOIN admissions a ON a.id = d.admission_id
-    INNER JOIN watchlists wl ON wl.admission_id = d.admission_id
-    WHERE d.deadline_date > NOW()
-      AND d.deadline_date <= NOW() + ($1 || ' days')::interval
-      AND a.verification_status = 'verified'
-      AND a.is_active = true
-      AND wl.alert_opt_in = true
-  `;
-
-  const result = await query(sql, [lookAheadDays]);
-  const targets = result.rows as Array<{
-    deadline_id: string;
-    deadline_date: string;
-    deadline_type: string;
-    admission_id: string;
-    admission_title: string;
-    recipient_id: string;
-  }>;
-
-  let sent = 0;
-  const reminderDeadlineIds = new Set<string>();
-
-  for (const target of targets) {
-    const daysRemaining = calculateDaysRemaining(target.deadline_date);
-    const priority = daysRemaining <= 3 ? NOTIFICATION_PRIORITY.HIGH : NOTIFICATION_PRIORITY.MEDIUM;
-    const eventKey = `deadline_near:${target.deadline_id}:${target.recipient_id}:${target.deadline_date}`;
-
-    await enqueueNotificationJob({
-      recipients: [{ id: target.recipient_id, role: USER_TYPE.STUDENT }],
-      notification_type: NOTIFICATION_TYPE.DEADLINE_NEAR,
-      priority,
-      title: 'Deadline Approaching',
-      message: `"${target.admission_title}" deadline is in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}.`,
-      related_entity_type: 'admission',
-      related_entity_id: target.admission_id,
-      action_url: `/admissions/${target.admission_id}`,
-      event_key: eventKey,
-    });
-
-    reminderDeadlineIds.add(target.deadline_id);
-    sent += 1;
-  }
-
-  if (reminderDeadlineIds.size > 0) {
-    await query(
-      `UPDATE deadlines SET reminder_sent = true, updated_at = NOW() WHERE id = ANY($1::uuid[])`,
-      [Array.from(reminderDeadlineIds)]
-    );
-  }
-
-  return { targets: targets.length, sent };
+  const thresholds = [7, 3, 1].filter((day) => day <= Math.max(1, Math.floor(lookAheadDays)));
+  const result = await triggerDeadlineReminderNotifications(thresholds.length ? thresholds : [1]);
+  return { targets: result.targets, sent: result.succeeded };
 };
 
 /**
@@ -342,19 +306,29 @@ export const triggerDeadlineReminders = async (
  * deadline_near:<deadline_id>:<recipient_id>:<yyyy-mm-dd>
  */
 export const triggerDeadlineReminderNotifications = async (
-  thresholdDays: number[] = [7, 3, 1]
-): Promise<{ targets: number; attempted: number; succeeded: number; failed: number }> => {
+  thresholdDays: number[] = [7, 3, 1],
+  options?: { forceRun?: boolean }
+): Promise<{ targets: number; attempted: number; succeeded: number; failed: number; deduped: number }> => {
+  const forceRun = options?.forceRun === true;
   const normalizedThresholds = Array.from(
     new Set(thresholdDays.map((d) => Math.max(1, Math.floor(d))).filter((d) => Number.isFinite(d)))
   ).sort((a, b) => b - a);
   const maxLookAhead = normalizedThresholds.length > 0 ? normalizedThresholds[0] : 7;
 
   const targets = await deadlinesModel.findReminderTargets(maxLookAhead);
-  const runKey = new Date().toISOString().slice(0, 10);
+  const forceRunKey = forceRun
+    ? `manual-${new Date().toISOString().replace(/[:.]/g, '-')}`
+    : null;
 
   let attempted = 0;
   let succeeded = 0;
   let failed = 0;
+  let deduped = 0;
+  const sentByThreshold: Record<number, Set<string>> = {
+    7: new Set<string>(),
+    3: new Set<string>(),
+    1: new Set<string>(),
+  };
 
   for (const target of targets) {
     const daysRemaining = calculateDaysRemaining(target.deadline_date);
@@ -367,9 +341,11 @@ export const triggerDeadlineReminderNotifications = async (
     attempted += 1;
 
     try {
-      const eventKey = `deadline_near:${target.deadline_id}:${target.recipient_id}:d${daysRemaining}:${runKey}`;
+      const eventKey = forceRunKey
+        ? `deadline_near:${target.deadline_id}:${target.recipient_id}:d${daysRemaining}:${forceRunKey}`
+        : `deadline_near:${target.deadline_id}:${target.recipient_id}:d${daysRemaining}`;
 
-      await enqueueNotificationJob({
+      const result = await enqueueNotificationJob({
         recipients: [{ id: target.recipient_id, role: USER_TYPE.STUDENT }],
         notification_type: NOTIFICATION_TYPE.DEADLINE_NEAR,
         priority,
@@ -381,7 +357,23 @@ export const triggerDeadlineReminderNotifications = async (
         event_key: eventKey,
       });
 
-      succeeded += 1;
+      const publishedNotifications = Array.isArray(result) ? result : [];
+      const createdCount = publishedNotifications.filter(
+        (notification: any) => notification && notification.__existing !== true
+      ).length;
+      const dedupedCount = publishedNotifications.filter(
+        (notification: any) => notification && notification.__existing === true
+      ).length;
+
+      deduped += dedupedCount;
+
+      if (createdCount > 0) {
+        succeeded += createdCount;
+      }
+
+      if ((createdCount > 0 || dedupedCount > 0) && sentByThreshold[daysRemaining]) {
+        sentByThreshold[daysRemaining].add(target.deadline_id);
+      }
     } catch (error) {
       failed += 1;
       console.error('❌ [DEADLINE-REMINDER] Failed to publish deadline reminder:', {
@@ -392,10 +384,19 @@ export const triggerDeadlineReminderNotifications = async (
     }
   }
 
+  // Persist per-threshold reminder send markers for operational tracking.
+  for (const threshold of [7, 3, 1]) {
+    const sentDeadlineIds = Array.from(sentByThreshold[threshold]);
+    if (sentDeadlineIds.length > 0) {
+      await deadlinesModel.markReminderThresholdSent(sentDeadlineIds, threshold);
+    }
+  }
+
   return {
     targets: targets.length,
     attempted,
     succeeded,
     failed,
+    deduped,
   };
 };

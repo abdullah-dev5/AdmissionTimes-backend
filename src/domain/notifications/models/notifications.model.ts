@@ -132,7 +132,7 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
   
   if (fallback.rows[0]) {
     console.log(`✅ [DB] Found existing notification via fallback (duplicate suppressed):`, { id: fallback.rows[0].id, created_at: fallback.rows[0].created_at });
-    return fallback.rows[0];
+    return { ...fallback.rows[0], __existing: true } as Notification;
   }
   
   // This should never happen - either INSERT succeeds or constraint hits
@@ -224,6 +224,29 @@ export const deleteById = async (id: string): Promise<boolean> => {
 };
 
 /**
+ * Delete deadline reminder notifications for a specific deadline.
+ *
+ * Used when a deadline date changes so reminder lifecycle can restart cleanly
+ * for 7/3/1 thresholds without stale deduplication state.
+ *
+ * @param deadlineId - Deadline UUID
+ * @returns Number of notifications deleted
+ */
+export const deleteDeadlineReminderNotificationsByDeadlineId = async (
+  deadlineId: string
+): Promise<number> => {
+  const sql = `
+    DELETE FROM notifications
+    WHERE notification_type = 'deadline_near'
+      AND related_entity_type = 'deadline'
+      AND related_entity_id = $1
+  `;
+
+  const result = await query(sql, [deadlineId]);
+  return result.rowCount || 0;
+};
+
+/**
  * Build COUNT query with filters
  * 
  * @param filters - Filter criteria
@@ -309,40 +332,40 @@ function buildFindManyQuery(
   // Apply same filters as count query
   if (filters.recipient_id !== undefined) {
     if (filters.recipient_id === null) {
-      conditions.push('recipient_id IS NULL');
+      conditions.push('n.recipient_id IS NULL');
     } else {
-      conditions.push(`recipient_id = $${paramIndex++}`);
+      conditions.push(`n.recipient_id = $${paramIndex++}`);
       params.push(filters.recipient_id);
     }
   }
 
   if (filters.role_type) {
-    conditions.push(`role_type = $${paramIndex++}`);
+    conditions.push(`n.role_type = $${paramIndex++}`);
     params.push(filters.role_type);
   }
 
   if (filters.notification_type) {
-    conditions.push(`notification_type = $${paramIndex++}`);
+    conditions.push(`n.notification_type = $${paramIndex++}`);
     params.push(filters.notification_type);
   }
 
   if (filters.priority) {
-    conditions.push(`priority = $${paramIndex++}`);
+    conditions.push(`n.priority = $${paramIndex++}`);
     params.push(filters.priority);
   }
 
   if (filters.is_read !== undefined) {
-    conditions.push(`is_read = $${paramIndex++}`);
+    conditions.push(`n.is_read = $${paramIndex++}`);
     params.push(filters.is_read);
   }
 
   if (filters.related_entity_type) {
-    conditions.push(`related_entity_type = $${paramIndex++}`);
+    conditions.push(`n.related_entity_type = $${paramIndex++}`);
     params.push(filters.related_entity_type);
   }
 
   if (filters.related_entity_id) {
-    conditions.push(`related_entity_id = $${paramIndex++}`);
+    conditions.push(`n.related_entity_id = $${paramIndex++}`);
     params.push(filters.related_entity_id);
   }
 
@@ -355,9 +378,21 @@ function buildFindManyQuery(
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const sql = `
-    SELECT * FROM notifications
+    SELECT
+      n.*,
+      COALESCE(univ.name, user_univ.name, a.location) AS university_name
+    FROM notifications n
+    LEFT JOIN admissions a
+      ON n.related_entity_type = 'admission'
+      AND n.related_entity_id = a.id
+    LEFT JOIN universities univ
+      ON univ.id = a.university_id
+    LEFT JOIN users u
+      ON u.id = a.created_by
+    LEFT JOIN universities user_univ
+      ON user_univ.id = u.university_id
     ${whereClause}
-    ORDER BY ${sortField} ${sortOrder}
+    ORDER BY n.${sortField} ${sortOrder}
     LIMIT $${paramIndex++} OFFSET $${paramIndex}
   `;
 
