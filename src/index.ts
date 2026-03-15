@@ -23,6 +23,7 @@ declare global {
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
+import { networkInterfaces } from 'os';
 import { config } from '@config/config';
 import { errorHandler } from '@shared/middleware/errorHandler';
 import { sendSuccess } from '@shared/utils/response';
@@ -131,12 +132,35 @@ initializePool();
 
 // Start server
 const PORT = config.port || 3000;
+const HOST = config.host || '0.0.0.0';
 
-const server = app.listen(PORT, async () => {
+const getLanUrls = () => {
+  const nets = networkInterfaces();
+  const urls: string[] = [];
+
+  Object.values(nets).forEach((addresses) => {
+    addresses?.forEach((address) => {
+      if (address.family === 'IPv4' && !address.internal) {
+        urls.push(`http://${address.address}:${PORT}/health`);
+      }
+    });
+  });
+
+  return urls;
+};
+
+const server = app.listen(PORT, HOST, async () => {
   console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`🌐 Bind host: ${HOST}`);
   console.log(`📍 Environment: ${config.env}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+
+  const lanUrls = getLanUrls();
+  if (lanUrls.length > 0) {
+    console.log('📱 LAN Health URLs (for mobile API_BASE_URL host):');
+    lanUrls.forEach((url) => console.log(`   - ${url}`));
+  }
   
   // Test database connection on startup
   const dbConnected = await testConnection();

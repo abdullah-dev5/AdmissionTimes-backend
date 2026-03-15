@@ -178,6 +178,23 @@ export interface AdminDashboardStats {
   scraper_jobs_running: number;
 }
 
+export interface AdminReminderCoverageThreshold {
+  threshold_day: 7 | 3 | 1;
+  due_targets: number;
+  sent_targets: number;
+  missing_targets: number;
+}
+
+export interface AdminReminderCoverage {
+  look_ahead_days: number;
+  total_targets_next_7_days: number;
+  total_due_now: number;
+  total_sent_now: number;
+  total_missing_now: number;
+  by_threshold: AdminReminderCoverageThreshold[];
+  generated_at: string;
+}
+
 /**
  * Admin Dashboard Data
  */
@@ -186,4 +203,5 @@ export interface AdminDashboardData {
   pending_verifications: PendingVerification[];
   recent_actions: RecentChange[];
   scraper_activity: any[]; // TODO: Define scraper activity type
+  reminder_coverage: AdminReminderCoverage;
 }

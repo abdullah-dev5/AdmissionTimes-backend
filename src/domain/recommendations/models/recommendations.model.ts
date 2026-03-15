@@ -29,7 +29,8 @@ export const findByUserId = async (
         'university_id', a.university_id,
         'program_name', a.program_name,
         'degree_level', a.degree_level,
-        'status', a.status,
+        'status', a.verification_status,
+        'verification_status', a.verification_status,
         'deadline', a.deadline
       ) as admission
     FROM recommendations r
@@ -37,7 +38,9 @@ export const findByUserId = async (
     WHERE r.user_id = $1
       AND r.score >= $2
       AND r.expires_at > NOW()
-      AND a.status = 'open'
+      AND a.verification_status = 'verified'
+      AND a.deadline > NOW()
+      AND a.is_active = true
     ORDER BY r.score DESC
     LIMIT $3
   `;

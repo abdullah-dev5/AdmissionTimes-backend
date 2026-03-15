@@ -154,6 +154,9 @@ export const update = async (
     timezone: data.timezone,
     is_flexible: data.is_flexible,
     reminder_sent: data.reminder_sent,
+    reminder_sent_7d_at: data.reminder_sent_7d_at,
+    reminder_sent_3d_at: data.reminder_sent_3d_at,
+    reminder_sent_1d_at: data.reminder_sent_1d_at,
   };
 
   // Build SET clause dynamically
@@ -437,6 +440,43 @@ export const findReminderTargets = async (
 
   const result = await query(sql, [now, future]);
   return result.rows;
+};
+
+/**
+ * Mark reminder timestamp for a specific threshold day (7/3/1)
+ *
+ * @param deadlineIds - Deadline IDs that were successfully dispatched
+ * @param thresholdDay - Reminder threshold day (7, 3, or 1)
+ */
+export const markReminderThresholdSent = async (
+  deadlineIds: string[],
+  thresholdDay: number
+): Promise<void> => {
+  if (!deadlineIds.length) {
+    return;
+  }
+
+  const columnByThreshold: Record<number, string> = {
+    7: 'reminder_sent_7d_at',
+    3: 'reminder_sent_3d_at',
+    1: 'reminder_sent_1d_at',
+  };
+
+  const column = columnByThreshold[thresholdDay];
+  if (!column) {
+    return;
+  }
+
+  const sql = `
+    UPDATE deadlines
+    SET
+      ${column} = NOW(),
+      reminder_sent = true,
+      updated_at = NOW()
+    WHERE id = ANY($1::uuid[])
+  `;
+
+  await query(sql, [deadlineIds]);
 };
 
 /**

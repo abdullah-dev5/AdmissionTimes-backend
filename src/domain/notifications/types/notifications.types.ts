@@ -26,6 +26,7 @@ export interface Notification {
   action_url: string | null; // Frontend route
   event_key: string;
   created_at: string; // ISO8601 timestamp
+  university_name?: string | null;
 }
 
 /**

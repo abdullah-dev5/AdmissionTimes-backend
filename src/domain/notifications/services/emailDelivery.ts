@@ -23,6 +23,11 @@ const getTransporter = (): Transporter | null => {
     return null;
   }
 
+  if (!config.email.user || !config.email.pass) {
+    console.error('[EmailDelivery] Email is enabled but SMTP credentials are incomplete (SMTP_USER/SMTP_PASS required)');
+    return null;
+  }
+
   if (!transporter) {
     try {
       transporter = nodemailer.createTransport({
@@ -155,6 +160,8 @@ export const sendNotificationEmail = async (
     // Log but don't throw - email delivery failures shouldn't block notification creation
     console.error('[EmailDelivery] Failed to send email:', {
       error: error instanceof Error ? error.message : String(error),
+      code: (error as any)?.code,
+      response: (error as any)?.response,
       notificationId: notification.id,
       recipient: recipientEmail,
     });

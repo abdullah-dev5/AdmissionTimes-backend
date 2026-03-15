@@ -1191,6 +1191,7 @@ async function createNotificationForVerifiedAdmissionUpdate(admission: Admission
 async function createNotificationForPendingAdmissionUpdate(admission: Admission): Promise<void> {
   try {
     const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
+    const updaterDisplayName = await resolveAdmissionUpdaterDisplayName(admission);
 
     console.log(`📢 [NOTIFICATION] Creating pending admission update notification for admission ${admission.id}`);
     console.log(`   → Title: ${admission.title}`);
@@ -1219,7 +1220,7 @@ async function createNotificationForPendingAdmissionUpdate(admission: Admission)
       notification_type: NOTIFICATION_TYPE.ADMISSION_UPDATED_SAVED,
       priority: NOTIFICATION_PRIORITY.LOW,
       title: `${admission.title} Updated`,
-      message: `A pending admission has been updated by ${admission.university_id}. Review changes in verification panel.`,
+      message: `A pending admission has been updated by ${updaterDisplayName}. Review changes in verification panel.`,
       related_entity_type: 'admission',
       related_entity_id: admission.id,
       action_url: `/admin/verify-admissions/${admission.id}`,
@@ -1227,6 +1228,30 @@ async function createNotificationForPendingAdmissionUpdate(admission: Admission)
     });
 
     console.log(`✅ [NOTIFICATION] Successfully sent pending admission update notification:`, result);
+
+async function resolveAdmissionUpdaterDisplayName(admission: Admission): Promise<string> {
+  try {
+    const result = await query(
+      `SELECT
+         COALESCE(univ.name, user_univ.name, u.display_name, u.email, 'the university') AS updater_name
+       FROM admissions a
+       LEFT JOIN universities univ ON univ.id = a.university_id
+       LEFT JOIN users u ON u.id = a.created_by
+       LEFT JOIN universities user_univ ON user_univ.id = u.university_id
+       WHERE a.id = $1
+       LIMIT 1`,
+      [admission.id]
+    );
+
+    return result.rows[0]?.updater_name || 'the university';
+  } catch (error: any) {
+    console.warn(
+      `⚠️ [NOTIFICATION] Failed to resolve updater display name for admission ${admission.id}:`,
+      error?.message || error
+    );
+    return 'the university';
+  }
+}
   } catch (error: any) {
     console.error(`❌ [NOTIFICATION] Failed to create pending admission update notification for admission ${admission.id}:`);
     console.error(`   → Error: ${error?.message || String(error)}`);

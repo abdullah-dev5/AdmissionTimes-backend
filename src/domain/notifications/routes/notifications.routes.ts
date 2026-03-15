@@ -14,6 +14,8 @@ import {
   uuidParamSchema,
   markReadSchema,
   createNotificationSchema,
+  registerPushTokenSchema,
+  unregisterPushTokenSchema,
 } from '../validators/notifications.validators';
 import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
 
@@ -241,6 +243,20 @@ router.post(
 router.get(
   '/unread-count',
   notificationsController.getUnreadCount
+);
+
+// POST /api/v1/notifications/push-token - Register Expo push token for current user
+router.post(
+  '/push-token',
+  validateBody(registerPushTokenSchema),
+  notificationsController.registerPushToken
+);
+
+// DELETE /api/v1/notifications/push-token - Unregister Expo push token for current user
+router.delete(
+  '/push-token',
+  validateBody(unregisterPushTokenSchema),
+  notificationsController.unregisterPushToken
 );
 
 /**

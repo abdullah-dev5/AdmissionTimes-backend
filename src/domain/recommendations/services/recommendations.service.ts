@@ -126,7 +126,9 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
         ) as factors
       FROM candidate_programs cp
       INNER JOIN admissions a ON cp.admission_id = a.id
-      WHERE a.status = 'open'  -- Only recommend open admissions
+      WHERE a.verification_status = 'verified'
+        AND a.deadline > NOW()
+        AND a.is_active = true
       ORDER BY score DESC
       LIMIT 20  -- Generate top 20 recommendations
     )

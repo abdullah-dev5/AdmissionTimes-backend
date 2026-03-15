@@ -53,6 +53,8 @@ export const publishNotification = async (input: PublishNotificationInput) => {
   
   // Create notifications sequentially with detailed error logging
   const results: any[] = [];
+  let createdCount = 0;
+  let dedupedCount = 0;
   for (const recipient of recipients) {
     try {
       console.log(`   → Creating for ${recipient.role} (${recipient.id.substring(0,8)}...)`);
@@ -69,7 +71,16 @@ export const publishNotification = async (input: PublishNotificationInput) => {
         event_key,
       });
       results.push(result);
-      console.log(`   ✅ Successfully created notification for ${recipient.role} (${recipient.id})`);
+
+      const wasExisting = (result as { __existing?: boolean } | null)?.__existing === true;
+
+      if (wasExisting) {
+        dedupedCount += 1;
+        console.log(`   ⏭️ Deduped existing notification for ${recipient.role} (${recipient.id})`);
+      } else {
+        createdCount += 1;
+        console.log(`   ✅ Created notification for ${recipient.role} (${recipient.id})`);
+      }
     } catch (error: any) {
       console.error(`   ❌ Failed to create notification for ${recipient.role} (${recipient.id}):`, {
         error: error?.message || String(error),
@@ -82,6 +93,6 @@ export const publishNotification = async (input: PublishNotificationInput) => {
   }
 
   const successCount = results.filter(r => r !== null).length;
-  console.log(`📨 [PUBLISHER] Completed. Successfully created ${successCount}/${recipients.length} notifications`);
+  console.log(`📨 [PUBLISHER] Completed. total_success=${successCount}/${recipients.length}, created=${createdCount}, deduped=${dedupedCount}`);
   return results;
 };

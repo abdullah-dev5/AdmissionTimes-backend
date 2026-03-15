@@ -573,9 +573,80 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
         COALESCE((SELECT json_agg(row_to_json(ra)) FROM recent_actions ra), '[]'::json) as recent_actions;
     `;
 
+    const reminderCoverageQuery = `
+      WITH thresholds AS (
+        SELECT 7::int AS threshold_day
+        UNION ALL SELECT 3::int
+        UNION ALL SELECT 1::int
+      ),
+      reminder_targets AS (
+        SELECT DISTINCT
+          d.id::text AS deadline_id,
+          w.user_id::text AS recipient_id,
+          CEIL(EXTRACT(EPOCH FROM (d.deadline_date - NOW())) / 86400.0)::int AS days_remaining
+        FROM deadlines d
+        JOIN admissions a ON a.id = d.admission_id
+        JOIN watchlists w ON w.admission_id = a.id
+        WHERE a.is_active = true
+          AND a.verification_status = 'verified'
+          AND w.alert_opt_in = true
+          AND d.deadline_date >= NOW()
+          AND d.deadline_date <= NOW() + INTERVAL '7 days'
+      ),
+      threshold_coverage AS (
+        SELECT
+          th.threshold_day,
+          COUNT(rt.*)::int AS due_targets,
+          COUNT(rt.*) FILTER (
+            WHERE EXISTS (
+              SELECT 1
+              FROM notifications n
+              WHERE n.recipient_id = rt.recipient_id::uuid
+                AND n.role_type = 'student'
+                AND n.notification_type = 'deadline_near'
+                AND n.related_entity_type = 'deadline'
+                AND n.related_entity_id::text = rt.deadline_id
+                AND n.event_key LIKE (
+                  'deadline_near:' || rt.deadline_id || ':' || rt.recipient_id || ':d' || th.threshold_day::text || '%'
+                )
+            )
+          )::int AS sent_targets
+        FROM thresholds th
+        LEFT JOIN reminder_targets rt
+          ON rt.days_remaining = th.threshold_day
+        GROUP BY th.threshold_day
+      )
+      SELECT
+        tc.threshold_day,
+        tc.due_targets,
+        tc.sent_targets,
+        GREATEST(tc.due_targets - tc.sent_targets, 0)::int AS missing_targets,
+        (
+          SELECT COUNT(*)::int FROM reminder_targets
+        ) AS total_targets_next_7_days
+      FROM threshold_coverage tc
+      ORDER BY tc.threshold_day DESC;
+    `;
+
     console.log('🔍 [getAdminDashboard] Executing dashboard query...');
-    const result = await query(dashboardQuery, []);
+    const [result, coverageResult] = await Promise.all([
+      query(dashboardQuery, []),
+      query(reminderCoverageQuery, []),
+    ]);
     const row = result.rows[0];
+    const coverageRows = coverageResult.rows || [];
+
+    const byThreshold = coverageRows.map((coverage: any) => ({
+      threshold_day: parseInt(coverage.threshold_day, 10) as 7 | 3 | 1,
+      due_targets: parseInt(coverage.due_targets || 0, 10),
+      sent_targets: parseInt(coverage.sent_targets || 0, 10),
+      missing_targets: parseInt(coverage.missing_targets || 0, 10),
+    }));
+
+    const totalTargetsNext7Days = parseInt(coverageRows[0]?.total_targets_next_7_days || 0, 10);
+    const totalDueNow = byThreshold.reduce((sum, item) => sum + item.due_targets, 0);
+    const totalSentNow = byThreshold.reduce((sum, item) => sum + item.sent_targets, 0);
+    const totalMissingNow = byThreshold.reduce((sum, item) => sum + item.missing_targets, 0);
 
     console.log('🔍 [getAdminDashboard] Raw pending_verifications:', JSON.stringify(row.pending_verifications, null, 2));
 
@@ -593,6 +664,15 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
       pending_verifications: row.pending_verifications || [],
       recent_actions: row.recent_actions || [],
       scraper_activity: [], // TODO: Implement scraper activity
+      reminder_coverage: {
+        look_ahead_days: 7,
+        total_targets_next_7_days: totalTargetsNext7Days,
+        total_due_now: totalDueNow,
+        total_sent_now: totalSentNow,
+        total_missing_now: totalMissingNow,
+        by_threshold: byThreshold,
+        generated_at: new Date().toISOString(),
+      },
     };
 
     return dashboardData;

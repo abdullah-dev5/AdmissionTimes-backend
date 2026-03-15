@@ -224,3 +224,52 @@ export const deleteNotification = async (
     next(error);
   }
 };
+
+export const registerPushToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userContext = req.user as UserContext | undefined;
+    const data = req.validated as {
+      expo_push_token: string;
+      platform?: 'ios' | 'android' | 'web' | 'unknown';
+      device_id?: string | null;
+      app_version?: string | null;
+    };
+
+    const record = await notificationsService.registerPushToken(userContext, data);
+
+    sendSuccess(
+      res,
+      {
+        id: record.id,
+        expo_push_token: record.expo_push_token,
+        platform: record.platform,
+        is_active: record.is_active,
+      },
+      'Push token registered successfully',
+      201
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const unregisterPushToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userContext = req.user as UserContext | undefined;
+    const data = req.validated as { expo_push_token: string };
+
+    const updated = await notificationsService.unregisterPushToken(userContext, data);
+
+    sendSuccess(res, { count: updated }, 'Push token unregistered successfully');
+  } catch (error) {
+    next(error);
+  }
+};
