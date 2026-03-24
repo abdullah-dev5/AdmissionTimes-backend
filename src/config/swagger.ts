@@ -158,7 +158,7 @@ const options: swaggerJsdoc.Options = {
             },
             notification_type: {
               type: 'string',
-              enum: ['admission_submitted', 'admission_resubmitted', 'admission_verified', 'admission_rejected', 'admission_revision_required', 'admission_updated_saved', 'deadline_near', 'system_broadcast', 'dispute_raised', 'system_error'],
+              enum: ['admission_submitted', 'admission_resubmitted', 'admission_verified', 'admission_rejected', 'admission_revision_required', 'admission_updated_saved', 'deadline_near', 'system_broadcast', 'system_error'],
               example: 'admission_verified',
             },
             priority: {
@@ -299,7 +299,7 @@ const options: swaggerJsdoc.Options = {
             },
             verification_status: {
               type: 'string',
-              enum: ['draft', 'pending', 'verified', 'rejected', 'disputed'],
+              enum: ['draft', 'pending', 'verified', 'rejected'],
               example: 'verified',
             },
             verified_at: {
@@ -313,10 +313,6 @@ const options: swaggerJsdoc.Options = {
               nullable: true,
             },
             rejection_reason: {
-              type: 'string',
-              nullable: true,
-            },
-            dispute_reason: {
               type: 'string',
               nullable: true,
             },
@@ -470,7 +466,7 @@ const options: swaggerJsdoc.Options = {
             },
             action_type: {
               type: 'string',
-              enum: ['created', 'updated', 'verified', 'rejected', 'disputed', 'status_changed'],
+              enum: ['created', 'updated', 'verified', 'rejected', 'status_changed'],
               example: 'verified',
             },
             field_name: {

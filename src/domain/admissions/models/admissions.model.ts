@@ -159,7 +159,6 @@ export const update = async (
     verified_at: data.verified_at,
     verified_by: data.verified_by,
     rejection_reason: data.rejection_reason,
-    dispute_reason: data.dispute_reason,
     is_active: data.is_active,
   };
 

@@ -11,8 +11,39 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { config } from '@config/config';
 import type { Notification } from '@domain/notifications/types/notifications.types';
+import { createEmailDeliveryLog } from '@domain/notifications/models/notifications.model';
 
 let transporter: Transporter | null = null;
+const MAX_EMAIL_SEND_ATTEMPTS = 3;
+const EMAIL_RETRY_BASE_DELAY_MS = 1000;
+
+const sleep = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const safeWriteEmailLog = async (input: {
+  notificationId: string;
+  recipientEmail: string;
+  subject: string;
+  status: 'sent' | 'failed';
+  attemptNumber: number;
+  errorMessage?: string | null;
+  providerMessageId?: string | null;
+}): Promise<void> => {
+  try {
+    await createEmailDeliveryLog({
+      notification_id: input.notificationId,
+      recipient_email: input.recipientEmail,
+      subject: input.subject,
+      status: input.status,
+      error_message: input.errorMessage || null,
+      attempt_number: input.attemptNumber,
+      provider_message_id: input.providerMessageId || null,
+    });
+  } catch (logError) {
+    console.error('[EmailDelivery] Failed to write email delivery log (non-blocking):', logError);
+  }
+};
 
 /**
  * Initialize email transporter on first use (lazy init)
@@ -61,7 +92,6 @@ const formatEmailContent = (notification: Notification): { subject: string; html
     admission_rejected: 'Admission Rejected',
     admission_updated_saved: 'Admission Updated',
     deadline_near: 'Deadline Reminder',
-    dispute_raised: 'New Dispute',
     admission_submitted: 'New Admission Submitted',
     system_broadcast: 'System Announcement',
   };
@@ -123,48 +153,93 @@ export const sendNotificationEmail = async (
   notification: Notification,
   recipientEmail: string
 ): Promise<void> => {
+  const { subject, html, text } = formatEmailContent(notification);
   const transport = getTransporter();
 
   if (!transport) {
     console.log('[EmailDelivery] Skipping email send - transport not available');
+    await safeWriteEmailLog({
+      notificationId: notification.id,
+      recipientEmail: recipientEmail || 'unknown',
+      subject,
+      status: 'failed',
+      attemptNumber: 1,
+      errorMessage: 'SMTP transport unavailable',
+    });
     return;
   }
 
   if (!recipientEmail) {
     console.warn('[EmailDelivery] Skipping email send - no recipient email provided');
+    await safeWriteEmailLog({
+      notificationId: notification.id,
+      recipientEmail: 'unknown',
+      subject,
+      status: 'failed',
+      attemptNumber: 1,
+      errorMessage: 'Missing recipient email',
+    });
     return;
   }
 
-  try {
-    const { subject, html, text } = formatEmailContent(notification);
+  for (let attempt = 1; attempt <= MAX_EMAIL_SEND_ATTEMPTS; attempt += 1) {
+    try {
+      const info = await transport.sendMail({
+        from: config.email.from,
+        to: recipientEmail,
+        subject,
+        text,
+        html,
+        headers: {
+          'X-Notification-ID': notification.id,
+          'X-Notification-Type': notification.notification_type,
+        },
+      });
 
-    const info = await transport.sendMail({
-      from: config.email.from,
-      to: recipientEmail,
-      subject,
-      text,
-      html,
-      headers: {
-        'X-Notification-ID': notification.id,
-        'X-Notification-Type': notification.notification_type,
-      },
-    });
+      await safeWriteEmailLog({
+        notificationId: notification.id,
+        recipientEmail,
+        subject,
+        status: 'sent',
+        attemptNumber: attempt,
+        providerMessageId: info.messageId || null,
+      });
 
-    console.log('[EmailDelivery] Email sent successfully:', {
-      messageId: info.messageId,
-      notificationId: notification.id,
-      recipient: recipientEmail,
-      type: notification.notification_type,
-    });
-  } catch (error) {
-    // Log but don't throw - email delivery failures shouldn't block notification creation
-    console.error('[EmailDelivery] Failed to send email:', {
-      error: error instanceof Error ? error.message : String(error),
-      code: (error as any)?.code,
-      response: (error as any)?.response,
-      notificationId: notification.id,
-      recipient: recipientEmail,
-    });
+      console.log('[EmailDelivery] Email sent successfully:', {
+        messageId: info.messageId,
+        notificationId: notification.id,
+        recipient: recipientEmail,
+        type: notification.notification_type,
+        attempt,
+      });
+      return;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      await safeWriteEmailLog({
+        notificationId: notification.id,
+        recipientEmail,
+        subject,
+        status: 'failed',
+        attemptNumber: attempt,
+        errorMessage,
+      });
+
+      console.error('[EmailDelivery] Failed to send email:', {
+        error: errorMessage,
+        code: (error as any)?.code,
+        response: (error as any)?.response,
+        notificationId: notification.id,
+        recipient: recipientEmail,
+        attempt,
+        maxAttempts: MAX_EMAIL_SEND_ATTEMPTS,
+      });
+
+      if (attempt < MAX_EMAIL_SEND_ATTEMPTS) {
+        const backoffMs = EMAIL_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        await sleep(backoffMs);
+      }
+    }
   }
 };
 

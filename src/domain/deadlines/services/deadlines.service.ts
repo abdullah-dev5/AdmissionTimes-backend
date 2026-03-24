@@ -28,6 +28,8 @@ import { NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE } from '@config/con
 import { enqueueNotificationJob } from '@domain/notifications/services/notificationJobQueue';
 import * as notificationsModel from '@domain/notifications/models/notifications.model';
 
+const RETRY_BACKOFF_MS = [1000, 2000, 4000];
+
 /**
  * Calculate days remaining until deadline
  * 
@@ -331,26 +333,36 @@ export const triggerDeadlineReminderNotifications = async (
   };
 
   for (const target of targets) {
-    const daysRemaining = calculateDaysRemaining(target.deadline_date);
-    if (!normalizedThresholds.includes(daysRemaining)) {
+    const daysRemainingRaw = Number(target.days_remaining_precise);
+    const daysRemaining = Number.isFinite(daysRemainingRaw)
+      ? daysRemainingRaw
+      : calculateDaysRemaining(target.deadline_date);
+
+    // Threshold windows prevent misses from hourly scheduling jitter.
+    // Example: threshold 7 matches when daysRemaining is in (6, 7].
+    const matchedThreshold = normalizedThresholds.find(
+      (threshold) => daysRemaining > threshold - 1 && daysRemaining <= threshold
+    );
+
+    if (!matchedThreshold) {
       continue;
     }
 
-    const priority = daysRemaining <= 2 ? NOTIFICATION_PRIORITY.HIGH : NOTIFICATION_PRIORITY.MEDIUM;
+    const priority = matchedThreshold <= 2 ? NOTIFICATION_PRIORITY.HIGH : NOTIFICATION_PRIORITY.MEDIUM;
 
     attempted += 1;
 
     try {
       const eventKey = forceRunKey
-        ? `deadline_near:${target.deadline_id}:${target.recipient_id}:d${daysRemaining}:${forceRunKey}`
-        : `deadline_near:${target.deadline_id}:${target.recipient_id}:d${daysRemaining}`;
+        ? `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}:${forceRunKey}`
+        : `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}`;
 
-      const result = await enqueueNotificationJob({
+      const result = await publishWithRetry({
         recipients: [{ id: target.recipient_id, role: USER_TYPE.STUDENT }],
         notification_type: NOTIFICATION_TYPE.DEADLINE_NEAR,
         priority,
         title: `Deadline Approaching: ${target.admission_title}`,
-        message: `Your saved program has an upcoming ${target.deadline_type} deadline in ${daysRemaining} day(s).`,
+        message: `Your saved program has an upcoming ${target.deadline_type} deadline in ${matchedThreshold} day(s).`,
         related_entity_type: 'deadline',
         related_entity_id: target.deadline_id,
         action_url: `/admissions/${target.admission_id}`,
@@ -369,17 +381,50 @@ export const triggerDeadlineReminderNotifications = async (
 
       if (createdCount > 0) {
         succeeded += createdCount;
+        await deadlinesModel.createReminderDeliveryLog({
+          deadline_id: target.deadline_id,
+          recipient_id: target.recipient_id,
+          threshold_day: matchedThreshold,
+          status: 'sent',
+          notification_id: publishedNotifications[0]?.id || null,
+          event_key: eventKey,
+        });
       }
 
-      if ((createdCount > 0 || dedupedCount > 0) && sentByThreshold[daysRemaining]) {
-        sentByThreshold[daysRemaining].add(target.deadline_id);
+      if (dedupedCount > 0) {
+        await deadlinesModel.createReminderDeliveryLog({
+          deadline_id: target.deadline_id,
+          recipient_id: target.recipient_id,
+          threshold_day: matchedThreshold,
+          status: 'deduped',
+          notification_id: publishedNotifications[0]?.id || null,
+          event_key: eventKey,
+        });
+      }
+
+      if ((createdCount > 0 || dedupedCount > 0) && sentByThreshold[matchedThreshold]) {
+        sentByThreshold[matchedThreshold].add(target.deadline_id);
       }
     } catch (error) {
       failed += 1;
+      const eventKey = forceRunKey
+        ? `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}:${forceRunKey}`
+        : `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}`;
+
       console.error('❌ [DEADLINE-REMINDER] Failed to publish deadline reminder:', {
         deadline_id: target.deadline_id,
         recipient_id: target.recipient_id,
         error: error instanceof Error ? error.message : String(error),
+      });
+
+      await deadlinesModel.createReminderDeliveryLog({
+        deadline_id: target.deadline_id,
+        recipient_id: target.recipient_id,
+        threshold_day: matchedThreshold,
+        status: 'failed',
+        notification_id: null,
+        event_key: eventKey,
+        error_message: error instanceof Error ? error.message : String(error),
       });
     }
   }
@@ -400,3 +445,35 @@ export const triggerDeadlineReminderNotifications = async (
     deduped,
   };
 };
+
+/**
+ * Fetch recent reminder delivery logs for monitoring.
+ */
+export const getReminderDeliveryLogs = async (
+  filters?: { status?: 'sent' | 'failed' | 'deduped'; limit?: number }
+): Promise<any[]> => {
+  return deadlinesModel.getReminderDeliveryLogs(filters || {});
+};
+
+async function publishWithRetry(input: any): Promise<any> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt += 1) {
+    try {
+      return await enqueueNotificationJob(input);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === RETRY_BACKOFF_MS.length) {
+        break;
+      }
+
+      const delayMs = RETRY_BACKOFF_MS[attempt];
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Failed to publish notification after retries');
+}

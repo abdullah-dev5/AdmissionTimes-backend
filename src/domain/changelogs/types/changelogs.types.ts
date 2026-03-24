@@ -14,7 +14,7 @@ export interface Changelog {
   admission_id: string;
   actor_type: 'admin' | 'university' | 'system';
   changed_by: string | null;
-  action_type: 'created' | 'updated' | 'verified' | 'rejected' | 'disputed' | 'status_changed';
+  action_type: 'created' | 'updated' | 'verified' | 'rejected' | 'status_changed';
   field_name: string | null;
   old_value: Record<string, any> | null;
   new_value: Record<string, any> | null;
@@ -30,7 +30,7 @@ export interface Changelog {
 export interface ChangelogFilters {
   admission_id?: string;
   actor_type?: 'admin' | 'university' | 'system' | Array<'admin' | 'university' | 'system'>;
-  action_type?: 'created' | 'updated' | 'verified' | 'rejected' | 'disputed' | 'status_changed' | Array<string>;
+  action_type?: 'created' | 'updated' | 'verified' | 'rejected' | 'status_changed' | Array<string>;
   changed_by?: string;
   date_from?: string; // ISO8601 date
   date_to?: string; // ISO8601 date

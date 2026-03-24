@@ -11,7 +11,6 @@
 export const ADMIN_ACTIONS = {
   VERIFY: 'verify',
   REJECT: 'reject',
-  DISPUTE: 'dispute',
   BULK_VERIFY: 'bulk_verify',
   NOTES_UPDATE: 'notes_update',
   COMMENT_UPDATE: 'comment_update',
@@ -27,7 +26,6 @@ export const ADMISSION_STATUSES = {
   PENDING: 'pending',
   VERIFIED: 'verified',
   REJECTED: 'rejected',
-  DISPUTED: 'disputed',
 } as const;
 
 /**
@@ -36,7 +34,6 @@ export const ADMISSION_STATUSES = {
 export const VERIFICATION_STATUSES = {
   VERIFIED: 'verified',
   REJECTED: 'rejected',
-  DISPUTED: 'disputed',
 } as const;
 
 /**
@@ -45,7 +42,6 @@ export const VERIFICATION_STATUSES = {
 export const ADMIN_MESSAGES = {
   VERIFY_SUCCESS: 'Admission verified successfully',
   REJECT_SUCCESS: 'Admission rejected successfully',
-  DISPUTE_SUCCESS: 'Admission marked as disputed successfully',
   BULK_VERIFY_SUCCESS: 'Bulk verification completed successfully',
   DASHBOARD_RETRIEVED: 'Admin dashboard retrieved successfully',
   PENDING_RETRIEVED: 'Pending admissions retrieved successfully',
@@ -101,7 +97,6 @@ export const VALIDATION_CONSTRAINTS = {
 export const AUDIT_LOG_DESCRIPTIONS = {
   [ADMIN_ACTIONS.VERIFY]: 'Verified admission application',
   [ADMIN_ACTIONS.REJECT]: 'Rejected admission application',
-  [ADMIN_ACTIONS.DISPUTE]: 'Marked admission as disputed',
   [ADMIN_ACTIONS.BULK_VERIFY]: 'Performed bulk verification',
   [ADMIN_ACTIONS.NOTES_UPDATE]: 'Updated admin notes',
   [ADMIN_ACTIONS.COMMENT_UPDATE]: 'Updated verification comments',

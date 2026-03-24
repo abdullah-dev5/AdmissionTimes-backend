@@ -42,12 +42,19 @@ export const signUpSchema = Joi.object({
       'string.max': 'Display name must not exceed 255 characters',
     }),
 
-  university_id: Joi.string()
-    .uuid()
-    .optional()
-    .messages({
-      'string.guid': 'University ID must be a valid UUID',
+  university_id: Joi.when('user_type', {
+    is: USER_TYPE.UNIVERSITY,
+    then: Joi.string()
+      .uuid()
+      .required()
+      .messages({
+        'string.guid': 'University ID must be a valid UUID',
+        'any.required': 'University ID is required for university accounts',
+      }),
+    otherwise: Joi.forbidden().messages({
+      'any.unknown': 'University ID can only be provided for university accounts',
     }),
+  }),
 
   auth_user_id: Joi.string()
     .uuid()

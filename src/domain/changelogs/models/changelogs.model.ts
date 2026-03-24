@@ -18,15 +18,62 @@ import { Changelog, ChangelogFilters } from '../types/changelogs.types';
 import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/changelogs.constants';
 
+type ViewerScope = { role: 'admin' | 'university'; universityId?: string };
+
+const addUniversityScopeCondition = (
+  conditions: string[],
+  params: any[],
+  paramIndex: number,
+  scope?: ViewerScope,
+  changelogAlias: string = 'c'
+): number => {
+  if (scope?.role === 'university' && scope.universityId) {
+    conditions.push(`
+      EXISTS (
+        SELECT 1
+        FROM admissions a
+        WHERE a.id = ${changelogAlias}.admission_id
+          AND (
+            a.university_id::text = $${paramIndex}
+            OR (
+              a.university_id IS NULL
+              AND EXISTS (
+                SELECT 1
+                FROM users uo
+                WHERE uo.id = a.created_by
+                  AND uo.university_id::text = $${paramIndex}
+              )
+            )
+          )
+      )
+    `);
+    params.push(scope.universityId);
+    return paramIndex + 1;
+  }
+  return paramIndex;
+};
+
 /**
  * Find changelog by ID
  * 
  * @param id - Changelog UUID
  * @returns Changelog record or null if not found
  */
-export const findById = async (id: string): Promise<Changelog | null> => {
-  const sql = 'SELECT * FROM changelogs WHERE id = $1';
-  const result = await query(sql, [id]);
+export const findById = async (id: string, scope?: ViewerScope): Promise<Changelog | null> => {
+  const conditions: string[] = ['c.id = $1'];
+  const params: any[] = [id];
+  let paramIndex = 2;
+
+  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'c');
+
+  const sql = `
+    SELECT c.*
+    FROM changelogs c
+    WHERE ${conditions.join(' AND ')}
+    LIMIT 1
+  `;
+
+  const result = await query(sql, params);
   return result.rows[0] || null;
 };
 
@@ -45,11 +92,17 @@ export const findByAdmissionId = async (
   page: number,
   limit: number,
   sort: string = 'created_at',
-  order: 'asc' | 'desc' = 'desc'
+  order: 'asc' | 'desc' = 'desc',
+  scope?: ViewerScope
 ): Promise<(Changelog & { program_title?: string })[]> => {
   const offset = calculateOffset(page, limit);
   const sortField = SORTABLE_FIELDS.includes(sort as any) ? sort : 'created_at';
   const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+  const conditions: string[] = ['c.admission_id = $1'];
+  const params: any[] = [admissionId];
+  let paramIndex = 2;
+  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'c');
 
   const sql = `
     SELECT 
@@ -59,12 +112,13 @@ export const findByAdmissionId = async (
     FROM changelogs c
     LEFT JOIN admissions a ON c.admission_id = a.id
     LEFT JOIN users u ON c.changed_by = u.id
-    WHERE c.admission_id = $1
+    WHERE ${conditions.join(' AND ')}
     ORDER BY c.${sortField} ${sortOrder}
-    LIMIT $2 OFFSET $3
+    LIMIT $${paramIndex++} OFFSET $${paramIndex}
   `;
 
-  const result = await query(sql, [admissionId, limit, offset]);
+  params.push(limit, offset);
+  const result = await query(sql, params);
   return result.rows;
 };
 
@@ -74,9 +128,14 @@ export const findByAdmissionId = async (
  * @param admissionId - Admission UUID
  * @returns Total count
  */
-export const countByAdmissionId = async (admissionId: string): Promise<number> => {
-  const sql = 'SELECT COUNT(*) as count FROM changelogs WHERE admission_id = $1';
-  const result = await query(sql, [admissionId]);
+export const countByAdmissionId = async (admissionId: string, scope?: ViewerScope): Promise<number> => {
+  const conditions: string[] = ['c.admission_id = $1'];
+  const params: any[] = [admissionId];
+  let paramIndex = 2;
+  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'c');
+
+  const sql = `SELECT COUNT(*) as count FROM changelogs c WHERE ${conditions.join(' AND ')}`;
+  const result = await query(sql, params);
   return parseInt(result.rows[0].count, 10);
 };
 
@@ -86,8 +145,8 @@ export const countByAdmissionId = async (admissionId: string): Promise<number> =
  * @param filters - Filter criteria
  * @returns Total count of matching changelogs
  */
-export const count = async (filters: ChangelogFilters): Promise<number> => {
-  const { sql, params } = buildCountQuery(filters);
+export const count = async (filters: ChangelogFilters, scope?: ViewerScope): Promise<number> => {
+  const { sql, params } = buildCountQuery(filters, scope);
   const result = await query(sql, params);
   return parseInt(result.rows[0].count, 10);
 };
@@ -107,10 +166,11 @@ export const findMany = async (
   page: number,
   limit: number,
   sort: string = 'created_at',
-  order: 'asc' | 'desc' = 'desc'
+  order: 'asc' | 'desc' = 'desc',
+  scope?: ViewerScope
 ): Promise<(Changelog & { program_title?: string })[]> => {
   const offset = calculateOffset(page, limit);
-  const { sql, params } = buildFindManyQuery(filters, sort, order, limit, offset);
+  const { sql, params } = buildFindManyQuery(filters, sort, order, limit, offset, scope);
   const result = await query(sql, params);
   return result.rows;
 };
@@ -121,7 +181,7 @@ export const findMany = async (
  * @param filters - Filter criteria
  * @returns SQL query and parameters
  */
-function buildCountQuery(filters: ChangelogFilters): { sql: string; params: any[] } {
+function buildCountQuery(filters: ChangelogFilters, scope?: ViewerScope): { sql: string; params: any[] } {
   const conditions: string[] = [];
   const params: any[] = [];
   let paramIndex = 1;
@@ -179,6 +239,8 @@ function buildCountQuery(filters: ChangelogFilters): { sql: string; params: any[
     params.push(`%${filters.search}%`);
   }
 
+  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'changelogs');
+
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const sql = `SELECT COUNT(*) as count FROM changelogs ${whereClause}`;
 
@@ -200,7 +262,8 @@ function buildFindManyQuery(
   sort: string,
   order: 'asc' | 'desc',
   limit: number,
-  offset: number
+  offset: number,
+  scope?: ViewerScope
 ): { sql: string; params: any[] } {
   const conditions: string[] = [];
   const params: any[] = [];
@@ -258,6 +321,8 @@ function buildFindManyQuery(
     conditions.push(`LOWER(diff_summary) LIKE LOWER($${paramIndex++})`);
     params.push(`%${filters.search}%`);
   }
+
+  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'c');
 
   // Validate sort field
   const sortField = SORTABLE_FIELDS.includes(sort as any) ? sort : 'created_at';

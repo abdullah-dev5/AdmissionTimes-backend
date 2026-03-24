@@ -13,7 +13,6 @@ export const VERIFICATION_STATUS = {
   PENDING: 'pending',
   VERIFIED: 'verified',
   REJECTED: 'rejected',
-  DISPUTED: 'disputed',
 } as const;
 
 export type VerificationStatus = typeof VERIFICATION_STATUS[keyof typeof VERIFICATION_STATUS];
@@ -42,7 +41,6 @@ export const NOTIFICATION_TYPE = {
   ADMISSION_UPDATED_SAVED: 'admission_updated_saved',
   DEADLINE_NEAR: 'deadline_near',
   SYSTEM_BROADCAST: 'system_broadcast',
-  DISPUTE_RAISED: 'dispute_raised',
   SYSTEM_ERROR: 'system_error',
 } as const;
 
@@ -68,7 +66,6 @@ export const CHANGE_TYPE = {
   UPDATED: 'updated',
   VERIFIED: 'verified',
   REJECTED: 'rejected',
-  DISPUTED: 'disputed',
   STATUS_CHANGED: 'status_changed',
 } as const;
 
@@ -107,16 +104,17 @@ export type AnalyticsEventType = typeof ANALYTICS_EVENT_TYPE[keyof typeof ANALYT
 
 /**
  * User activity types
+ * 
+ * CANONICAL FORMS - Use these constants throughout the codebase.
+ * Do not use string literals like 'view' or 'search'; use constants instead.
  */
 export const ACTIVITY_TYPE = {
   VIEWED: 'viewed',
   SEARCHED: 'searched',
   COMPARED: 'compared',
-  WATCHLISTED: 'watchlisted',
-  VIEW: 'view',
-  SEARCH: 'search',
-  SAVED: 'saved',
   ALERT: 'alert',
+  SAVED: 'saved',
+  WATCHLISTED: 'watchlisted',
   DEADLINE: 'deadline',
   NOTIFICATION: 'notification',
 } as const;

@@ -156,6 +156,16 @@ const server = app.listen(PORT, HOST, async () => {
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
 
+  if (config.ai.enabled) {
+    if (config.ai.geminiApiKey) {
+      console.log(`🤖 AI enabled: provider=${config.ai.provider}, model=${config.ai.geminiModel}`);
+    } else {
+      console.warn('⚠️  AI is enabled but GEMINI_API_KEY is missing. /api/v1/ai/* routes will fail.');
+    }
+  } else {
+    console.log('🤖 AI is disabled (set AI_ENABLED=true and GEMINI_API_KEY to enable).');
+  }
+
   const lanUrls = getLanUrls();
   if (lanUrls.length > 0) {
     console.log('📱 LAN Health URLs (for mobile API_BASE_URL host):');

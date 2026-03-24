@@ -13,15 +13,18 @@
  */
 
 import { AppError } from '@shared/middleware/errorHandler';
-import { query } from '@db/connection';
+import { getClient, query } from '@db/connection';
 import * as adminModel from '../models/admin.model';
 import {
   AdminVerifyAdmissionDTO,
   AdminBulkVerifyDTO,
+  AdminCreateUniversityRepDTO,
+  AdminCreateUniversityRepResponse,
   UserContext,
   AdminAdmission,
   AdminDashboard,
 } from '../types/admin.types';
+import { config } from '@config/config';
 import {
   CHANGE_TYPE,
   NOTIFICATION_PRIORITY,
@@ -30,6 +33,8 @@ import {
   VerificationStatus,
   type UserType,
 } from '@config/constants';
+import { createClient } from '@supabase/supabase-js';
+import { randomInt } from 'crypto';
 import { publishNotification } from '@domain/notifications/services/notificationPublisher';
 
 /**
@@ -38,10 +43,93 @@ import { publishNotification } from '@domain/notifications/services/notification
  */
 const VALID_TRANSITIONS: Record<VerificationStatus, VerificationStatus[]> = {
   draft: ['pending', 'rejected'],
-  pending: ['verified', 'rejected', 'disputed'],
-  verified: ['disputed'], // Can't unverify
-  rejected: ['pending', 'disputed'],
-  disputed: ['verified', 'rejected', 'pending'],
+  pending: ['verified', 'rejected'],
+  verified: ['rejected'],
+  rejected: ['pending'],
+};
+
+const normalizeVerificationStatus = (status: string): 'verified' | 'rejected' =>
+  status === 'verified' ? 'verified' : 'rejected';
+
+const buildTemporaryPassword = (): string => {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%^&*';
+  const all = upper + lower + digits + symbols;
+
+  const chars = [
+    upper[randomInt(upper.length)],
+    lower[randomInt(lower.length)],
+    digits[randomInt(digits.length)],
+    symbols[randomInt(symbols.length)],
+  ];
+
+  while (chars.length < 12) {
+    chars.push(all[randomInt(all.length)]);
+  }
+
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+
+  return chars.join('');
+};
+
+const redactSensitiveKeys = new Set([
+  'email',
+  'password',
+  'token',
+  'access_token',
+  'refresh_token',
+  'ip_address',
+  'user_agent',
+  'phone',
+  'contact_email',
+  'contact_phone',
+]);
+
+const redactValue = (input: any): any => {
+  if (Array.isArray(input)) {
+    return input.map((item) => redactValue(item));
+  }
+
+  if (input && typeof input === 'object') {
+    const next: Record<string, any> = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (redactSensitiveKeys.has(key.toLowerCase())) {
+        next[key] = '[REDACTED]';
+      } else {
+        next[key] = redactValue(value);
+      }
+    }
+    return next;
+  }
+
+  return input;
+};
+
+const sanitizeAuditLogForDashboard = (log: any): any => ({
+  ...log,
+  ip_address: null,
+  user_agent: null,
+  created_by: log?.created_by ? 'admin' : null,
+  old_values: redactValue(log?.old_values || null),
+  new_values: redactValue(log?.new_values || null),
+});
+
+const getSupabaseAdminClient = () => {
+  if (!config.supabase.url || !config.supabase.serviceRoleKey) {
+    throw new AppError('Supabase service role configuration is missing', 500);
+  }
+
+  return createClient(config.supabase.url, config.supabase.serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 };
 
 /**
@@ -68,37 +156,37 @@ export const verifyAdmission = async (
   adminContext: UserContext
 ): Promise<AdminAdmission> => {
   try {
+    const targetStatus = normalizeVerificationStatus(data.verification_status);
+
     // Get current admission
     const admission = await adminModel.getAdmissionById(admissionId);
 
     // Validate status transition
-    validateStatusTransition(admission.verification_status, data.verification_status);
+    validateStatusTransition(admission.verification_status, targetStatus);
 
     // If rejecting, rejection_reason is required
-    if (data.verification_status === 'rejected' && !data.rejection_reason) {
+    if (targetStatus === 'rejected' && !data.rejection_reason) {
       throw new AppError('Rejection reason is required', 400);
     }
 
     // Update admission
     const updated = await adminModel.updateAdmissionVerification(admissionId, {
-      verification_status: data.verification_status,
+      verification_status: targetStatus,
       verified_by: adminContext.id,
       rejection_reason:
-        data.verification_status === 'rejected' ? data.rejection_reason : null,
+        targetStatus === 'rejected' ? data.rejection_reason : null,
       admin_notes: data.admin_notes || null,
       verification_comments: data.verification_comments || null,
-      dispute_reason:
-        data.verification_status === 'disputed' ? data.admin_notes || data.dispute_reason : null,
     });
 
     // Create audit log
     await adminModel.createAuditLog({
       admin_id: adminContext.id,
-      action_type: data.verification_status === 'rejected' ? 'reject' : 'verify',
+      action_type: targetStatus === 'rejected' ? 'reject' : 'verify',
       entity_type: 'admission',
       entity_id: admissionId,
       old_values: { verification_status: admission.verification_status },
-      new_values: { verification_status: data.verification_status },
+      new_values: { verification_status: targetStatus },
       reason: data.rejection_reason || data.admin_notes || data.verification_comments || null,
       ip_address: null, // Passed from controller
       user_agent: null, // Passed from controller
@@ -106,11 +194,9 @@ export const verifyAdmission = async (
     });
 
     // Create changelog entry (keeps admin flow aligned with admissions service)
-    const actionType = data.verification_status === 'verified'
+    const actionType = targetStatus === 'verified'
       ? CHANGE_TYPE.VERIFIED
-      : data.verification_status === 'rejected'
-        ? CHANGE_TYPE.REJECTED
-        : CHANGE_TYPE.DISPUTED;
+      : CHANGE_TYPE.REJECTED;
 
     await createChangelogEntry({
       admission_id: admissionId,
@@ -119,8 +205,8 @@ export const verifyAdmission = async (
       action_type: actionType,
       field_name: 'verification_status',
       old_value: admission.verification_status,
-      new_value: data.verification_status,
-      diff_summary: `Admission ${data.verification_status} by admin`,
+      new_value: targetStatus,
+      diff_summary: `Admission ${targetStatus} by admin`,
       metadata: {
         rejection_reason: data.rejection_reason || null,
         admin_notes: data.admin_notes || null,
@@ -129,12 +215,12 @@ export const verifyAdmission = async (
     });
 
     // Notify university on verify/reject
-    if (data.verification_status === 'verified' || data.verification_status === 'rejected') {
-      await notifyUniversityForVerificationStatus(updated, data.verification_status, data.rejection_reason);
+    if (targetStatus === 'verified' || targetStatus === 'rejected') {
+      await notifyUniversityForVerificationStatus(updated, targetStatus, data.rejection_reason);
     }
 
     // Notify students watching this admission when it's verified (for re-verification too)
-    if (data.verification_status === 'verified') {
+    if (targetStatus === 'verified') {
       await notifyStudentsForVerifiedAdmissionUpdate(updated);
     }
 
@@ -159,7 +245,7 @@ export const requestRevision = async (
   try {
     const admission = await adminModel.getAdmissionById(admissionId);
 
-    if (!['pending', 'rejected', 'disputed'].includes(admission.verification_status)) {
+    if (!['pending', 'rejected'].includes(admission.verification_status)) {
       throw new AppError(
         `Cannot request revision for admission with status: ${admission.verification_status}`,
         400
@@ -172,7 +258,6 @@ export const requestRevision = async (
       rejection_reason: null,
       admin_notes: reason,
       verification_comments: reason,
-      dispute_reason: null,
     });
 
     await adminModel.createAuditLog({
@@ -487,10 +572,14 @@ export const getAdminDashboard = async (): Promise<AdminDashboard> => {
       adminModel.getRecentActions(10), // Last 10 actions
     ]);
 
+    const sanitizedRecentActions = recentActions.map((log) =>
+      sanitizeAuditLogForDashboard(log)
+    ) as typeof recentActions;
+
     return {
       stats,
       pending_verifications: pendingAdmissions,
-      recent_actions: recentActions,
+      recent_actions: sanitizedRecentActions,
     };
   } catch (error) {
     throw new AppError('Failed to fetch admin dashboard', 500);
@@ -508,5 +597,123 @@ export const getAdmissionDetails = async (
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw new AppError('Failed to fetch admission details', 500);
+  }
+};
+
+/**
+ * Create university representative from admin panel (Flow C)
+ */
+export const createUniversityRep = async (
+  data: AdminCreateUniversityRepDTO,
+  adminContext: UserContext
+): Promise<AdminCreateUniversityRepResponse> => {
+  const email = data.email.trim().toLowerCase();
+  const displayName = data.display_name.trim();
+  const universityName = data.university_name.trim();
+  const city = data.city?.trim() || null;
+  const country = data.country?.trim() || null;
+  const website = data.website?.trim() || null;
+
+  const existingUserCheck = await query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+  if (existingUserCheck.rows.length > 0) {
+    throw new AppError('Email already exists in users table', 409);
+  }
+
+  const temporaryPassword = buildTemporaryPassword();
+  const supabaseAdmin = getSupabaseAdminClient();
+
+  let authUserId: string | null = null;
+
+  try {
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: temporaryPassword,
+      email_confirm: true,
+      user_metadata: {
+        role: USER_TYPE.UNIVERSITY,
+        display_name: displayName,
+      },
+    });
+
+    if (authError || !authData.user?.id) {
+      throw new AppError(authError?.message || 'Failed to create auth user', 400);
+    }
+
+    authUserId = authData.user.id;
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const universityResult = await client.query(
+        `INSERT INTO universities (name, city, country, website, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, true, NOW(), NOW())
+         RETURNING id, name`,
+        [universityName, city, country, website]
+      );
+
+      const university = universityResult.rows[0];
+
+      const userResult = await client.query(
+        `INSERT INTO users (auth_user_id, email, password, role, display_name, university_id, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW(), NOW())
+         RETURNING id, email, role, display_name, university_id`,
+        [authUserId, email, temporaryPassword, USER_TYPE.UNIVERSITY, displayName, university.id]
+      );
+
+      const user = userResult.rows[0];
+
+      await client.query(
+        `INSERT INTO admin_audit_logs
+          (admin_id, action_type, entity_type, entity_id, old_values, new_values, reason, ip_address, user_agent, created_by, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, NOW())`,
+        [
+          adminContext.id,
+          'update_notes',
+          'user',
+          user.id,
+          null,
+          JSON.stringify({ email: user.email, role: user.role, university_id: user.university_id }),
+          'Admin created university representative (Flow C)',
+          adminContext.email || 'admin',
+        ]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          role: USER_TYPE.UNIVERSITY,
+          university_id: user.university_id,
+          display_name: user.display_name,
+        },
+        university: {
+          id: university.id,
+          name: university.name,
+        },
+        credentials: {
+          temporary_password: temporaryPassword,
+          show_once: true,
+        },
+      };
+    } catch (dbError: any) {
+      await client.query('ROLLBACK');
+
+      if (authUserId) {
+        await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => null);
+      }
+
+      throw new AppError(dbError?.message || 'Failed to create university representative', 500);
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    throw new AppError(error?.message || 'Failed to create university representative', 500);
   }
 };

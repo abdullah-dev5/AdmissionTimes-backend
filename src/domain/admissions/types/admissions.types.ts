@@ -32,7 +32,6 @@ export interface Admission {
   verified_at: string | null; // ISO8601 timestamp
   verified_by: string | null;
   rejection_reason: string | null;
-  dispute_reason: string | null;
   created_by: string | null;
   created_at: string; // ISO8601 timestamp
   updated_at: string; // ISO8601 timestamp
@@ -58,7 +57,7 @@ export interface CreateAdmissionDTO {
   location?: string;
   delivery_mode?: string;
   requirements?: Record<string, any>;
-  verification_status?: 'draft' | 'pending' | 'verified' | 'rejected' | 'disputed';
+  verification_status?: 'draft' | 'pending' | 'verified' | 'rejected';
   university_id?: string;
 }
 
@@ -131,14 +130,6 @@ export interface SubmitAdmissionDTO {
 }
 
 /**
- * Dispute admission request DTO (Rejected → Disputed)
- */
-export interface DisputeAdmissionDTO {
-  dispute_reason: string;
-  disputed_by?: string;
-}
-
-/**
  * Changelog entry interface
  * Used for creating changelog entries
  */
@@ -146,7 +137,7 @@ export interface ChangelogEntry {
   admission_id: string;
   actor_type: 'admin' | 'university' | 'system';
   changed_by: string | null;
-  action_type: 'created' | 'updated' | 'verified' | 'rejected' | 'disputed' | 'status_changed';
+  action_type: 'created' | 'updated' | 'verified' | 'rejected' | 'status_changed';
   field_name: string | null;
   old_value: any;
   new_value: any;

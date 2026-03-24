@@ -23,7 +23,6 @@ import {
   VerifyAdmissionDTO,
   RejectAdmissionDTO,
   SubmitAdmissionDTO,
-  DisputeAdmissionDTO,
   UserContext,
 } from '../types/admissions.types';
 import { query } from '@db/connection';
@@ -161,7 +160,6 @@ export const create = async (
     verified_at: null,
     verified_by: null,
     rejection_reason: null,
-    dispute_reason: null,
     created_by: null, // Will be set by model from second parameter
     is_active: true,
   };
@@ -329,11 +327,8 @@ export const verify = async (
     console.log(`✅ [VERIFY] Admission ${id} has created_by: ${existing.created_by}`);
   }
 
-  // Only pending or disputed admissions can be verified
-  if (
-    existing.verification_status !== VERIFICATION_STATUS.PENDING &&
-    existing.verification_status !== VERIFICATION_STATUS.DISPUTED
-  ) {
+  // Only pending admissions can be verified
+  if (existing.verification_status !== VERIFICATION_STATUS.PENDING) {
     throw new AppError(
       `Cannot verify admission with status: ${existing.verification_status}`,
       400
@@ -346,7 +341,6 @@ export const verify = async (
     verified_at: new Date().toISOString(),
     verified_by: data.verified_by || userContext?.id || null,
     rejection_reason: null, // Clear rejection reason if present
-    dispute_reason: null, // Clear dispute reason if present
   });
 
   if (!updated) {
@@ -515,71 +509,6 @@ export const submit = async (
 };
 
 /**
- * Dispute a rejected admission (university - moves rejected to disputed)
- * 
- * @param id - Admission UUID
- * @param data - Dispute data
- * @param userContext - User context
- * @returns Disputed admission
- * @throws AppError if cannot be disputed
- */
-export const dispute = async (
-  id: string,
-  data: DisputeAdmissionDTO,
-  userContext?: UserContext
-): Promise<Admission> => {
-  const existing = await admissionsModel.findById(id, true);
-
-  if (!existing) {
-    throw new AppError('Admission not found', 404);
-  }
-
-  // Only rejected admissions can be disputed
-  if (existing.verification_status !== VERIFICATION_STATUS.REJECTED) {
-    throw new AppError(
-      `Cannot dispute admission with status: ${existing.verification_status}. Only rejected admissions can be disputed.`,
-      400
-    );
-  }
-
-  // Update admission to disputed
-  const updated = await admissionsModel.update(id, {
-    verification_status: VERIFICATION_STATUS.DISPUTED,
-    dispute_reason: data.dispute_reason,
-  });
-
-  if (!updated) {
-    throw new AppError('Failed to dispute admission', 500);
-  }
-
-  // Create changelog entry
-  await createChangelogEntry({
-    admission_id: updated.id,
-    actor_type: 'university',
-    changed_by: data.disputed_by || userContext?.id || null,
-    action_type: CHANGE_TYPE.DISPUTED as any,
-    field_name: 'verification_status',
-    old_value: VERIFICATION_STATUS.REJECTED,
-    new_value: VERIFICATION_STATUS.DISPUTED,
-    diff_summary: `Admission disputed: ${data.dispute_reason}`,
-    metadata: {
-      dispute_reason: data.dispute_reason,
-      original_rejection_reason: existing.rejection_reason,
-    },
-  });
-
-  // Create notification for admin (when admission is disputed)
-  console.log(`📢 [DISPUTE] Calling createNotificationForDispute for admission ${updated.id}`);
-  createNotificationForDispute(updated, data.dispute_reason).catch((error) => {
-    console.error('❌ [DISPUTE] Failed to create dispute notification:', error?.message || error);
-    if (error?.constraint) console.error('   Constraint violation:', error.constraint);
-    if (error?.code) console.error('   Error code:', error.code);
-  });
-
-  return updated;
-};
-
-/**
  * Delete an admission (soft delete)
  * 
  * @param id - Admission UUID
@@ -640,18 +569,52 @@ export const remove = async (
 export const getChangelogs = async (
   admissionId: string,
   page: number,
-  limit: number
+  limit: number,
+  userContext?: UserContext
 ): Promise<{ changelogs: any[]; total: number }> => {
+  if (!userContext || userContext.role === 'guest' || userContext.role === 'student') {
+    throw new AppError('Forbidden: changelog access is restricted', 403);
+  }
+
   // Verify admission exists
   const admission = await admissionsModel.findById(admissionId);
   if (!admission) {
     throw new AppError('Admission not found', 404);
   }
 
+  if (userContext.role === 'university') {
+    let universityScopeId = userContext.university_id || null;
+    if (!universityScopeId) {
+      const scopedUser = await query(
+        'SELECT university_id::text as university_id FROM users WHERE id = $1 LIMIT 1',
+        [userContext.id]
+      );
+      universityScopeId = scopedUser.rows[0]?.university_id || null;
+    }
+
+    if (!universityScopeId) {
+      throw new AppError('Forbidden: university scope is missing', 403);
+    }
+
+    const ownerMatches =
+      admission.university_id === universityScopeId ||
+      (!admission.university_id &&
+        !!admission.created_by &&
+        !!(
+          await query(
+            'SELECT 1 FROM users WHERE id = $1 AND university_id = $2 LIMIT 1',
+            [admission.created_by, universityScopeId]
+          )
+        ).rows.length);
+
+    if (!ownerMatches) {
+      throw new AppError('Forbidden: this admission does not belong to your university', 403);
+    }
+  }
+
   // Get changelogs (delegate to changelogs service/model)
   // For now, we'll implement a simple query here
   // In Phase 4, this should use changelogs service
-  const { query } = await import('@db/connection');
   const offset = (page - 1) * limit;
 
   const [changelogsResult, countResult] = await Promise.all([
@@ -1013,57 +976,6 @@ async function createNotificationForRejection(
   } catch (error: any) {
     // Silently fail - notification should not break the request
     console.error(`❌ [NOTIFICATION] Failed to create rejection notification for admission ${admission.id}:`);
-    console.error(`   → Error: ${error?.message || String(error)}`);
-    if (error?.code) console.error(`   → Code: ${error.code}`);
-    if (error?.constraint) console.error(`   → Constraint: ${error.constraint}`);
-  }
-}
-
-/**
- * Helper function to create notification when admission is disputed
- * 
- * @param admission - Disputed admission
- * @param disputeReason - Dispute reason
- */
-async function createNotificationForDispute(
-  admission: Admission,
-  disputeReason: string
-): Promise<void> {
-  try {
-    const { publishNotification } = await import('@domain/notifications/services/notificationPublisher');
-
-    console.log(`📢 [NOTIFICATION] Creating dispute notification for admission ${admission.id}`);
-    console.log(`   → Title: ${admission.title}`);
-    console.log(`   → Reason: ${disputeReason}`);
-    console.log(`   → Fetching admin recipients...`);
-
-    const adminRecipients = await getAdminRecipients();
-    console.log(`   → Found ${adminRecipients.length} admins to notify:`, adminRecipients.map(a => a.id));
-
-    if (!adminRecipients.length) {
-      console.warn(`⚠️ [NOTIFICATION] No admins found to notify for dispute!`);
-      return;
-    }
-
-    const eventKey = `dispute_raised:${admission.id}:${admission.created_by || admission.id}:${Date.now()}`;
-    console.log(`   → Event key: ${eventKey}`);
-
-    const result = await publishNotification({
-      recipients: adminRecipients,
-      notification_type: NOTIFICATION_TYPE.DISPUTE_RAISED,
-      priority: NOTIFICATION_PRIORITY.HIGH,
-      title: 'Admission Disputed',
-      message: `Admission "${admission.title}" has been disputed by university. Reason: ${disputeReason}`,
-      related_entity_type: 'admission',
-      related_entity_id: admission.id,
-      action_url: `/admissions/${admission.id}`,
-      event_key: eventKey,
-    });
-
-    console.log(`✅ [NOTIFICATION] Successfully sent dispute notification:`, result);
-  } catch (error: any) {
-    // Silently fail - notification should not break the request
-    console.error(`❌ [NOTIFICATION] Failed to create dispute notification for admission ${admission.id}:`);
     console.error(`   → Error: ${error?.message || String(error)}`);
     if (error?.code) console.error(`   → Code: ${error.code}`);
     if (error?.constraint) console.error(`   → Constraint: ${error.constraint}`);

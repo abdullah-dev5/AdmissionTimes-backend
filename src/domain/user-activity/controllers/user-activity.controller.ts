@@ -19,9 +19,43 @@ import { AppError } from '@shared/middleware/errorHandler';
 import * as userActivityService from '../services/user-activity.service';
 import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import {
+  CreateUserActivityDTO,
   UserActivityQueryParams,
   UserContext,
 } from '../types/user-activity.types';
+
+/**
+ * Track user activity event
+ *
+ * POST /api/v1/activity
+ */
+export const trackActivity = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userContext = req.user as UserContext | undefined;
+
+    if (!userContext || !userContext.id) {
+      throw new AppError('Authentication required', 401);
+    }
+
+    const body = req.validated as CreateUserActivityDTO;
+
+    // Enforce user identity from auth context to prevent spoofing.
+    const data: CreateUserActivityDTO = {
+      ...body,
+      user_id: userContext.id,
+      user_type: userContext.role as any,
+    };
+
+    const activity = await userActivityService.create(data);
+    sendSuccess(res, activity, 'Activity tracked successfully', 201);
+  } catch (error) {
+    next(error);
+  }
+};
 
 /**
  * Get single activity by ID

@@ -30,6 +30,11 @@ import {
   sendPushNotificationToUser,
 } from './pushDelivery';
 
+interface EmailLogFilters {
+  status?: 'sent' | 'failed';
+  limit?: number;
+}
+
 /**
  * Get notification by ID
  * 
@@ -222,6 +227,80 @@ export const unregisterPushToken = async (
   }
 
   return unregisterUserPushToken(userContext.id, input.expo_push_token);
+};
+
+export const getEmailDeliveryLogs = async (filters: EmailLogFilters = {}): Promise<any[]> => {
+  return notificationsModel.findEmailDeliveryLogs(filters);
+};
+
+export const replayEmailFromLog = async (
+  logId: string,
+  userContext?: UserContext
+): Promise<{ log_id: string; notification_id: string; recipient_email: string; replayed: boolean }> => {
+  if (!userContext || userContext.role !== 'admin') {
+    throw new AppError('Admin access required', 403);
+  }
+
+  const log = await notificationsModel.findEmailDeliveryLogById(logId);
+  if (!log) {
+    throw new AppError('Email delivery log not found', 404);
+  }
+
+  const notification = await notificationsModel.findById(log.notification_id);
+  if (!notification) {
+    throw new AppError('Notification not found for email log', 404);
+  }
+
+  await sendNotificationEmail(notification, log.recipient_email);
+
+  return {
+    log_id: log.id,
+    notification_id: log.notification_id,
+    recipient_email: log.recipient_email,
+    replayed: true,
+  };
+};
+
+export const replayEmailByNotificationId = async (
+  notificationId: string,
+  userContext?: UserContext
+): Promise<{ notification_id: string; recipient_email: string; replayed: boolean }> => {
+  if (!userContext || userContext.role !== 'admin') {
+    throw new AppError('Admin access required', 403);
+  }
+
+  const notification = await notificationsModel.findById(notificationId);
+  if (!notification) {
+    throw new AppError('Notification not found', 404);
+  }
+
+  if (!notification.recipient_id) {
+    throw new AppError('Notification has no recipient', 400);
+  }
+
+  const preferences = await getUserNotificationPreferences(notification.recipient_id);
+  if (!preferences.email) {
+    throw new AppError('Recipient email not available', 400);
+  }
+
+  await sendNotificationEmail(notification, preferences.email);
+
+  return {
+    notification_id: notification.id,
+    recipient_email: preferences.email,
+    replayed: true,
+  };
+};
+
+export const cleanupManualReminderTestNotifications = async (
+  userContext?: UserContext
+): Promise<{ deleted_count: number }> => {
+  if (!userContext || userContext.role !== 'admin') {
+    throw new AppError('Admin access required', 403);
+  }
+
+  const deletedCount = await notificationsModel.deleteManualTestDeadlineNotifications();
+  return { deleted_count: deletedCount };
 };
 
 const inferNotificationCategory = (notificationType: string): 'verification' | 'deadline' | 'system' | 'update' => {

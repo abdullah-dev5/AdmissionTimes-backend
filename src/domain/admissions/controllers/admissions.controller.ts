@@ -24,7 +24,6 @@ import {
   VerifyAdmissionDTO,
   RejectAdmissionDTO,
   SubmitAdmissionDTO,
-  DisputeAdmissionDTO,
   AdminVerifyAdmissionDTO,
   AdmissionQueryParams,
   UserContext,
@@ -222,29 +221,6 @@ export const submitAdmission = async (
 };
 
 /**
- * Dispute a rejected admission (university only)
- *
- * PATCH /api/v1/admissions/:id/dispute
- */
-export const disputeAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as DisputeAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.dispute(id, data, userContext);
-
-    sendSuccess(res, admission, 'Admission disputed successfully');
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
  * Admin verify/reject admission (alias endpoint)
  * 
  * POST /api/v1/admin/admissions/:id/verify
@@ -319,6 +295,7 @@ export const getChangelogs = async (
   try {
     const { id } = req.params;
     const queryParams = req.query as { page?: number; limit?: number };
+    const userContext = req.user as UserContext | undefined;
 
     // Parse pagination
     const { page, limit } = parsePagination({
@@ -327,7 +304,7 @@ export const getChangelogs = async (
     });
 
     // Get changelogs
-    const { changelogs, total } = await admissionsService.getChangelogs(id, page, limit);
+    const { changelogs, total } = await admissionsService.getChangelogs(id, page, limit, userContext);
 
     // Calculate pagination metadata
     const pagination = calculatePagination(total, page, limit);

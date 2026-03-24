@@ -367,7 +367,25 @@ export const getUniversityDashboard = async (
           COUNT(DISTINCT CASE 
             WHEN a.verification_status = 'pending'
             THEN a.id 
-          END) as pending_audits
+          END) as pending_audits,
+          (
+            SELECT COUNT(DISTINCT n2.id)::int
+            FROM notifications n2
+            INNER JOIN deadlines d2 ON d2.id::text = n2.related_entity_id::text
+            INNER JOIN admissions a2 ON a2.id = d2.admission_id
+            WHERE (a2.created_by::text = ANY($2::text[]) OR a2.university_id::text = ANY($3::text[]))
+              AND a2.is_active = true
+              AND n2.notification_type = 'deadline_near'
+              AND n2.related_entity_type = 'deadline'
+              AND n2.role_type = 'student'
+          ) as reminder_notifications,
+          (
+            SELECT COUNT(DISTINCT w.id)::int
+            FROM watchlists w
+            INNER JOIN admissions a3 ON a3.id = w.admission_id
+            WHERE (a3.created_by::text = ANY($2::text[]) OR a3.university_id::text = ANY($3::text[]))
+              AND a3.is_active = true
+          ) as saved_admissions,
         FROM admissions a
         LEFT JOIN notifications n ON n.recipient_id = $1 AND n.role_type = 'university'
         WHERE (a.created_by::text = ANY($2::text[]) OR a.university_id::text = ANY($3::text[]))
@@ -394,7 +412,6 @@ export const getUniversityDashboard = async (
           verified_by::text,
           verified_at::text,
           rejection_reason,
-          dispute_reason,
           verification_comments,
           admin_notes,
           created_at::text,
@@ -462,6 +479,100 @@ export const getUniversityDashboard = async (
     const result = await query(dashboardQuery, [userId, combinedUserIds, combinedUniversityIds]);
     const row = result.rows[0];
 
+    const engagementTrendsQuery = `
+      WITH weeks AS (
+        SELECT generate_series(
+          date_trunc('week', NOW()) - INTERVAL '4 weeks',
+          date_trunc('week', NOW()),
+          INTERVAL '1 week'
+        ) as week_start
+      ),
+      owned_admissions AS (
+        SELECT id::text as admission_id
+        FROM admissions
+        WHERE (created_by::text = ANY($1::text[]) OR university_id::text = ANY($2::text[]))
+          AND is_active = true
+      ),
+      first_views AS (
+        SELECT
+          ua.entity_id::text as admission_id,
+          ua.user_id::text as person_id,
+          MIN(ua.created_at) as first_at
+        FROM user_activity ua
+        INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
+        WHERE ua.entity_type = 'admission'
+          AND ua.user_type::text = 'student'
+          AND ua.activity_type::text = 'viewed'
+          AND ua.user_id IS NOT NULL
+        GROUP BY ua.entity_id::text, ua.user_id::text
+      ),
+      first_clicks AS (
+        SELECT
+          ua.entity_id::text as admission_id,
+          ua.user_id::text as person_id,
+          MIN(ua.created_at) as first_at
+        FROM user_activity ua
+        INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
+        WHERE ua.entity_type = 'admission'
+          AND ua.user_type::text = 'student'
+          AND ua.activity_type::text IN ('searched', 'compared', 'alert')
+          AND ua.user_id IS NOT NULL
+        GROUP BY ua.entity_id::text, ua.user_id::text
+      ),
+      views_data AS (
+        SELECT date_trunc('week', fv.first_at) as week_start, COUNT(*)::int as count
+        FROM first_views fv
+        GROUP BY 1
+      ),
+      clicks_data AS (
+        SELECT date_trunc('week', fc.first_at) as week_start, COUNT(*)::int as count
+        FROM first_clicks fc
+        GROUP BY 1
+      ),
+      reminders_data AS (
+        SELECT date_trunc('week', n.created_at) as week_start, COUNT(DISTINCT n.id)::int as count
+        FROM notifications n
+        INNER JOIN deadlines d
+          ON n.related_entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         AND d.id = n.related_entity_id::uuid
+        INNER JOIN owned_admissions oa ON oa.admission_id = d.admission_id::text
+        WHERE n.notification_type = 'deadline_near'
+          AND n.related_entity_type = 'deadline'
+          AND n.role_type = 'student'
+          AND n.created_at IS NOT NULL
+          AND n.related_entity_id IS NOT NULL
+          AND n.user_id IS NOT NULL
+        GROUP BY 1
+      ),
+      saves_data AS (
+        SELECT date_trunc('week', ua.created_at) as week_start,
+               COUNT(DISTINCT (ua.user_id::text || ':' || ua.entity_id::text))::int as count
+        FROM user_activity ua
+        INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
+        WHERE ua.entity_type = 'admission'
+          AND ua.user_type::text = 'student'
+          AND ua.activity_type::text IN ('saved', 'watchlisted')
+          AND ua.user_id IS NOT NULL
+          AND ua.created_at IS NOT NULL
+        GROUP BY 1
+      ),
+      SELECT
+        to_char(w.week_start, 'Mon DD') as label,
+        COALESCE(v.count, 0)::int as views,
+        COALESCE(c.count, 0)::int as clicks,
+        COALESCE(r.count, 0)::int as reminders,
+        COALESCE(s.count, 0)::int as saves
+      FROM weeks w
+      LEFT JOIN views_data v ON v.week_start = w.week_start
+      LEFT JOIN clicks_data c ON c.week_start = w.week_start
+      LEFT JOIN reminders_data r ON r.week_start = w.week_start
+      LEFT JOIN saves_data s ON s.week_start = w.week_start
+      ORDER BY w.week_start ASC;
+    `;
+
+    const trendsResult = await query(engagementTrendsQuery, [combinedUserIds, combinedUniversityIds]);
+    const trendRows = trendsResult.rows || [];
+
     // Transform the result to match the expected structure
     // Ensure all fields use snake_case and proper types
     const dashboardData: UniversityDashboardData = {
@@ -472,6 +583,8 @@ export const getUniversityDashboard = async (
         recent_updates: parseInt(row.stats?.recent_updates || 0, 10),
         unread_notifications: parseInt(row.stats?.unread_notifications || 0, 10),
         pending_audits: parseInt(row.stats?.pending_audits || 0, 10),
+        reminder_notifications: parseInt(row.stats?.reminder_notifications || 0, 10),
+        saved_admissions: parseInt(row.stats?.saved_admissions || 0, 10),
       },
       recent_admissions: (row.recent_admissions || []).map((admission: any) => ({
         ...admission,
@@ -483,6 +596,13 @@ export const getUniversityDashboard = async (
         ...notif,
         is_read: Boolean(notif.is_read),
       })),
+      engagement_trends: {
+        labels: trendRows.map((item: any) => item.label as string),
+        views: trendRows.map((item: any) => parseInt(item.views || 0, 10)),
+        clicks: trendRows.map((item: any) => parseInt(item.clicks || 0, 10)),
+        reminders: trendRows.map((item: any) => parseInt(item.reminders || 0, 10)),
+        saves: trendRows.map((item: any) => parseInt(item.saves || 0, 10)),
+      },
     };
 
     return dashboardData;

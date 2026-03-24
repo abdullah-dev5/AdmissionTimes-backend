@@ -8,7 +8,7 @@ This folder contains seed scripts to populate the database with test data for de
 Seeds 10 diverse admission records with different:
 - Program types (undergraduate, graduate)
 - Degree levels (bachelor, master, phd)
-- Verification statuses (draft, pending, verified, rejected, disputed)
+- Verification statuses (draft, pending, verified, rejected, Rejected)
 - Fields of study (Computer Science, Business, Physics, Engineering, etc.)
 - Realistic deadlines, fees, and requirements
 
@@ -52,7 +52,7 @@ The `seed_admissions.sql` creates **10 admission records**:
 | 2 | Executive MBA Program | Graduate | Master | Business Administration | Verified | $75,000 |
 | 3 | MS Data Science | Graduate | Master | Data Science | Rejected | $60,000 |
 | 4 | PhD Physics | Graduate | PhD | Physics | Pending | Free (Funded) |
-| 5 | BBA Honors Program | Undergraduate | Bachelor | Business Administration | Disputed | $45,000 |
+| 5 | BBA Honors Program | Undergraduate | Bachelor | Business Administration | Rejected | $45,000 |
 | 6 | MS Artificial Intelligence | Graduate | Master | AI | Draft | $65,000 |
 | 7 | MBA Digital Marketing | Graduate | Master | Marketing | Verified | $55,000 |
 | 8 | BSc Mechanical Engineering | Undergraduate | Bachelor | Mech Engineering | Pending | $48,000 |
@@ -63,7 +63,7 @@ The `seed_admissions.sql` creates **10 admission records**:
 - **Pending:** 4 records
 - **Verified:** 3 records
 - **Rejected:** 1 record
-- **Disputed:** 1 record
+- **Rejected:** 1 record
 - **Draft:** 1 record
 
 ## ✅ Verification
@@ -155,3 +155,4 @@ DELETE FROM admissions WHERE created_by = '16c7989e-3408-4ab3-b9bf-b2bcf7e1ab42'
 ---
 
 **Happy Testing! 🚀**
+

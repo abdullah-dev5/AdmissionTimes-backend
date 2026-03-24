@@ -23,7 +23,6 @@ export interface UserContext {
 export type AdminActionType =
   | 'verify'
   | 'reject'
-  | 'dispute'
   | 'update_notes'
   | 'bulk_verify';
 
@@ -63,7 +62,6 @@ export interface AdminAdmission {
   rejection_reason: string | null;
   admin_notes: string | null;
   verification_comments: string | null;
-  dispute_reason: string | null;
   created_at: string;
   updated_at: string;
   is_active: boolean;
@@ -73,11 +71,10 @@ export interface AdminAdmission {
  * DTO for verifying admission
  */
 export interface AdminVerifyAdmissionDTO {
-  verification_status: 'verified' | 'rejected' | 'disputed';
+  verification_status: 'verified' | 'rejected';
   rejection_reason?: string; // Required if status = 'rejected'
   admin_notes?: string;
   verification_comments?: string;
-  dispute_reason?: string; // Dispute explanation/reason
 }
 
 /**
@@ -92,7 +89,7 @@ export interface AdminRevisionRequestDTO {
  */
 export interface AdminBulkVerifyDTO {
   admission_ids: string[];
-  verification_status: 'verified' | 'rejected' | 'disputed';
+  verification_status: 'verified' | 'rejected';
   rejection_reason?: string;
   admin_notes?: string;
 }
@@ -105,7 +102,6 @@ export interface AdminDashboardStats {
   pending_count: number;
   verified_count: number;
   rejected_count: number;
-  disputed_count: number;
   universities_active: number;
   students_registered: number;
   verification_rate: number; // percentage
@@ -134,6 +130,39 @@ export interface AdminFilterParams {
   search?: string;
   sort?: string;
   order?: 'asc' | 'desc';
+}
+
+/**
+ * DTO for creating university representative via admin panel (Flow C)
+ */
+export interface AdminCreateUniversityRepDTO {
+  email: string;
+  display_name: string;
+  university_name: string;
+  city?: string | null;
+  country?: string | null;
+  website?: string | null;
+}
+
+/**
+ * Response payload for create university representative
+ */
+export interface AdminCreateUniversityRepResponse {
+  user: {
+    id: string;
+    email: string;
+    role: 'university';
+    university_id: string;
+    display_name: string;
+  };
+  university: {
+    id: string;
+    name: string;
+  };
+  credentials: {
+    temporary_password: string;
+    show_once: true;
+  };
 }
 
 /**

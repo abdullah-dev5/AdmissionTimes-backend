@@ -14,7 +14,6 @@ import {
   verifyAdmissionSchema,
   rejectAdmissionSchema,
   submitAdmissionSchema,
-  disputeAdmissionSchema,
   admissionQuerySchema,
   uuidParamSchema,
 } from '../validators/admissions.validators';
@@ -86,7 +85,7 @@ const router: Router = Router();
  *         name: verification_status
  *         schema:
  *           type: string
- *           enum: [draft, pending, verified, rejected, disputed]
+ *           enum: [draft, pending, verified, rejected]
  *         description: Filter by verification status (admin/university only)
  *       - in: query
  *         name: sort
@@ -447,73 +446,6 @@ router.patch(
 );
 
 /**
- * @swagger
- * /api/v1/admissions/{id}/dispute:
- *   patch:
- *     summary: Dispute rejected admission
- *     tags: [Admissions]
- *     description: Dispute a rejected admission. Changes status from 'rejected' to 'disputed'. Only universities can dispute their own rejected admissions.
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Admission UUID
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - dispute_reason
- *             properties:
- *               dispute_reason:
- *                 type: string
- *                 minLength: 10
- *                 maxLength: 1000
- *                 example: 'I believe the rejection was incorrect because...'
- *               disputed_by:
- *                 type: string
- *                 format: uuid
- *     responses:
- *       200:
- *         description: Admission disputed successfully
- *         content:
- *           application/json:
- *             schema:
- *               allOf:
- *                 - $ref: '#/components/schemas/SuccessResponse'
- *                 - type: object
- *                   properties:
- *                     data:
- *                       $ref: '#/components/schemas/Admission'
- *       400:
- *         description: Invalid status transition or validation error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       404:
- *         description: Admission not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-// PATCH /api/v1/admissions/:id/dispute - Dispute rejected admission (university - rejected to disputed)
-router.patch(
-  '/:id/dispute',
-  validateParams(uuidParamSchema),
-  validateBody(disputeAdmissionSchema),
-  admissionsController.disputeAdmission
-);
-
-/**
  * Admin Endpoints
  */
 
@@ -523,7 +455,7 @@ router.patch(
  *   patch:
  *     summary: Verify admission
  *     tags: [Admissions]
- *     description: Verify an admission. Changes status from 'pending' or 'disputed' to 'verified'. Only admins can verify admissions.
+ *     description: Verify an admission. Changes status from 'pending' to 'verified'. Only admins can verify admissions.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -589,7 +521,7 @@ router.patch(
  *   patch:
  *     summary: Reject admission
  *     tags: [Admissions]
- *     description: Reject an admission. Changes status from 'pending' or 'disputed' to 'rejected'. Only admins can reject admissions.
+ *     description: Reject an admission. Changes status from 'pending' to 'rejected'. Only admins can reject admissions.
  *     security:
  *       - bearerAuth: []
  *     parameters:

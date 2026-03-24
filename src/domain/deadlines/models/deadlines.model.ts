@@ -23,9 +23,27 @@ export interface DeadlineReminderTarget {
   deadline_id: string;
   deadline_type: string;
   deadline_date: string;
+  timezone: string;
+  effective_timezone: string;
+  days_remaining_precise: number;
   admission_id: string;
   admission_title: string;
   recipient_id: string;
+}
+
+export interface ReminderDeliveryLogEntry {
+  deadline_id: string;
+  recipient_id: string;
+  threshold_day: number;
+  status: 'sent' | 'failed' | 'deduped';
+  notification_id?: string | null;
+  event_key: string;
+  error_message?: string | null;
+}
+
+export interface ReminderDeliveryLogFilters {
+  status?: 'sent' | 'failed' | 'deduped';
+  limit?: number;
 }
 
 /**
@@ -424,15 +442,27 @@ export const findReminderTargets = async (
       d.id::text AS deadline_id,
       d.deadline_type,
       d.deadline_date,
+      COALESCE(NULLIF(d.timezone, ''), 'UTC') AS timezone,
+      COALESCE(NULLIF(up.timezone, ''), NULLIF(d.timezone, ''), 'UTC') AS effective_timezone,
+      EXTRACT(
+        EPOCH FROM (
+          (d.deadline_date AT TIME ZONE COALESCE(NULLIF(up.timezone, ''), NULLIF(d.timezone, ''), 'UTC'))
+          -
+          (NOW() AT TIME ZONE COALESCE(NULLIF(up.timezone, ''), NULLIF(d.timezone, ''), 'UTC'))
+        )
+      ) / 86400.0 AS days_remaining_precise,
       a.id::text AS admission_id,
       a.title AS admission_title,
       w.user_id::text AS recipient_id
     FROM deadlines d
     JOIN admissions a ON a.id = d.admission_id
     JOIN watchlists w ON w.admission_id = a.id
+    LEFT JOIN user_preferences up ON up.user_id = w.user_id
     WHERE a.is_active = true
       AND a.verification_status = 'verified'
       AND w.alert_opt_in = true
+      AND COALESCE(up.email_notifications_enabled, true) = true
+      AND COALESCE((up.notification_categories ->> 'deadline')::boolean, true) = true
       AND d.deadline_date >= $1
       AND d.deadline_date <= $2
     ORDER BY d.deadline_date ASC
@@ -477,6 +507,86 @@ export const markReminderThresholdSent = async (
   `;
 
   await query(sql, [deadlineIds]);
+};
+
+/**
+ * Persist delivery outcomes for deadline reminder runs.
+ */
+export const createReminderDeliveryLog = async (
+  data: ReminderDeliveryLogEntry
+): Promise<void> => {
+  const sql = `
+    INSERT INTO reminder_delivery_logs (
+      deadline_id,
+      recipient_id,
+      threshold_day,
+      notification_id,
+      status,
+      event_key,
+      error_message,
+      sent_at
+    )
+    VALUES (
+      $1::uuid,
+      $2::uuid,
+      $3,
+      $4::uuid,
+      $5::varchar(20),
+      $6,
+      $7,
+      CASE WHEN $5::text = 'sent' THEN NOW() ELSE NULL END
+    )
+    ON CONFLICT (event_key, status) DO NOTHING
+  `;
+
+  const params = [
+    data.deadline_id,
+    data.recipient_id,
+    data.threshold_day,
+    data.notification_id || null,
+    data.status,
+    data.event_key,
+    data.error_message || null,
+  ];
+
+  await query(sql, params);
+};
+
+/**
+ * Read recent reminder delivery logs for operations monitoring.
+ */
+export const getReminderDeliveryLogs = async (
+  filters: ReminderDeliveryLogFilters = {}
+): Promise<any[]> => {
+  const status = filters.status;
+  const limit = Math.min(200, Math.max(1, filters.limit || 50));
+
+  const sql = `
+    SELECT
+      l.id::text,
+      l.deadline_id::text,
+      l.recipient_id::text,
+      l.threshold_day,
+      l.notification_id::text,
+      l.status,
+      l.event_key,
+      l.error_message,
+      l.created_at,
+      l.sent_at,
+      d.deadline_type,
+      d.deadline_date,
+      a.id::text AS admission_id,
+      a.title AS admission_title
+    FROM reminder_delivery_logs l
+    LEFT JOIN deadlines d ON d.id = l.deadline_id
+    LEFT JOIN admissions a ON a.id = d.admission_id
+    WHERE ($1::text IS NULL OR l.status = $1::text)
+    ORDER BY l.created_at DESC
+    LIMIT $2
+  `;
+
+  const result = await query(sql, [status || null, limit]);
+  return result.rows;
 };
 
 /**

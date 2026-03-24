@@ -52,7 +52,7 @@ async function runMigration() {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         admin_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         action_type VARCHAR(50) NOT NULL CHECK (action_type IN (
-          'verify', 'reject', 'dispute', 'update_notes', 'bulk_verify'
+          'verify', 'reject', 'update_notes', 'bulk_verify'
         )),
         entity_type VARCHAR(50) NOT NULL CHECK (entity_type IN (
           'admission', 'user', 'university', 'settings'
