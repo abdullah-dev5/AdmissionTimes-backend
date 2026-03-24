@@ -2,15 +2,17 @@
  * Scheduled Tasks Module
  * 
  * Manages periodic background jobs for the application.
+ * Uses node-cron for production-grade scheduling.
  * 
  * Jobs:
  * - Generate recommendations (daily at 2 AM)
  * - Clean up expired recommendations (daily at 3 AM)
- * - Send deadline reminders (every hour)
+ * - Send deadline reminders (every hour at minute 5)
  */
 
 import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
 import * as deadlinesService from '@domain/deadlines/services/deadlines.service';
+import * as cron from 'node-cron';
 
 /**
  * Runtime metrics for scheduler health monitoring
@@ -172,88 +174,73 @@ export const runDeadlineReminderDispatch = async (): Promise<void> => {
 };
 
 /**
- * Initialize all scheduled tasks
+ * Initialize all scheduled tasks using node-cron
  * Call this on application startup
  */
 export const initializeScheduler = (): void => {
-  console.log('[Scheduler] Initializing scheduled tasks...');
-  
-  // For MVP: Simple setInterval approach (24 hours = 86400000ms)
-  
-  // Generate recommendations daily at 2 AM
-  const scheduleRecommendationGeneration = () => {
-    const now = new Date();
-    const scheduledTime = new Date();
-    scheduledTime.setHours(2, 0, 0, 0);
-    
-    // If 2 AM already passed today, schedule for tomorrow
-    if (now > scheduledTime) {
-      scheduledTime.setDate(scheduledTime.getDate() + 1);
+  console.log('[Scheduler] Initializing scheduled tasks with node-cron...');
+
+  // ✅ Run deadline reminders every hour at minute 5
+  // Spreads load if multiple servers; gives job 55-minute SLA
+  const deadlineReminderTask = cron.schedule('5 * * * *', async () => {
+    console.log('[Scheduler] Deadline reminder job triggered...');
+    try {
+      await runDeadlineReminderDispatch();
+    } catch (error) {
+      console.error('[Scheduler] ❌ Deadline reminder failed:', error);
     }
-    
-    const msUntilRun = scheduledTime.getTime() - now.getTime();
-    
-    setTimeout(() => {
-      runRecommendationGeneration();
-      // Schedule next run (every 24 hours)
-      setInterval(runRecommendationGeneration, 24 * 60 * 60 * 1000);
-    }, msUntilRun);
-    
-    console.log(`[Scheduler] Recommendation generation scheduled for ${scheduledTime.toLocaleString()}`);
-  };
-  
-  // Clean up expired recommendations daily at 3 AM
-  const scheduleCleanup = () => {
-    const now = new Date();
-    const scheduledTime = new Date();
-    scheduledTime.setHours(3, 0, 0, 0);
-    
-    if (now > scheduledTime) {
-      scheduledTime.setDate(scheduledTime.getDate() + 1);
+  });
+
+  // ✅ Run recommendations generation daily at 2 AM
+  const recommendationTask = cron.schedule('0 2 * * *', async () => {
+    console.log('[Scheduler] Recommendation generation job triggered...');
+    try {
+      await runRecommendationGeneration();
+    } catch (error) {
+      console.error('[Scheduler] ❌ Recommendation generation failed:', error);
     }
-    
-    const msUntilRun = scheduledTime.getTime() - now.getTime();
-    
-    setTimeout(() => {
-      runRecommendationCleanup();
-      setInterval(runRecommendationCleanup, 24 * 60 * 60 * 1000);
-    }, msUntilRun);
-    
-    console.log(`[Scheduler] Cleanup scheduled for ${scheduledTime.toLocaleString()}`);
-  };
+  });
 
-  // Run deadline reminders hourly at the start of the hour
-  const scheduleDeadlineReminders = () => {
-    const now = new Date();
-    const scheduledTime = new Date();
-    scheduledTime.setMinutes(0, 0, 0);
-    scheduledTime.setHours(scheduledTime.getHours() + 1);
+  // ✅ Clean up expired recommendations daily at 3 AM
+  const cleanupTask = cron.schedule('0 3 * * *', async () => {
+    console.log('[Scheduler] Cleanup job triggered...');
+    try {
+      await runRecommendationCleanup();
+    } catch (error) {
+      console.error('[Scheduler] ❌ Cleanup failed:', error);
+    }
+  });
 
-    const msUntilRun = scheduledTime.getTime() - now.getTime();
+  // ✅ Run initial deadline reminder check on startup (15 seconds delay)
+  // Ensures reminders fire even if server starts just after hourly window
+  setTimeout(() => {
+    console.log('[Scheduler] Running initial deadline reminder on startup...');
+    runDeadlineReminderDispatch().catch((error) => {
+      console.error('[Scheduler] ❌ Initial deadline reminder failed:', error);
+    });
+  }, 15000);
 
-    // Run once shortly after startup so we don't wait until the top of next hour
-    setTimeout(() => {
-      console.log('[Scheduler] Running initial deadline reminder dispatch on startup...');
-      runDeadlineReminderDispatch().catch((error) => {
-        console.error('[Scheduler] ❌ Initial deadline reminder dispatch failed:', error);
-      });
-    }, 15000);
-
-    setTimeout(() => {
-      runDeadlineReminderDispatch();
-      // Schedule next runs every hour
-      setInterval(runDeadlineReminderDispatch, 60 * 60 * 1000);
-    }, msUntilRun);
-
-    console.log(`[Scheduler] Deadline reminders scheduled for ${scheduledTime.toLocaleString()} (hourly)`);
-  };
-  
-  scheduleRecommendationGeneration();
-  scheduleCleanup();
-  scheduleDeadlineReminders();
-  
-  console.log('[Scheduler] ✅ All scheduled tasks initialized');
+  console.log('[Scheduler] ✅ All scheduled tasks initialized (using node-cron)');
+  console.log('[Scheduler] 💡 Cron patterns:');
+  console.log('[Scheduler]   - Deadline reminders: "5 * * * *" (every hour at minute 5)');
+  console.log('[Scheduler]   - Recommendations: "0 2 * * *" (daily at 2 AM)');
+  console.log('[Scheduler]   - Cleanup: "0 3 * * *" (daily at 3 AM)');
   console.log('[Scheduler] 💡 Tips: Use POST /api/v1/recommendations/generate-all and POST /api/v1/scheduler/reminder for manual triggers');
+
+  // Graceful shutdown: stop all cron jobs
+  process.on('SIGTERM', () => {
+    console.log('[Scheduler] Stopping cron tasks...');
+    deadlineReminderTask.stop();
+    recommendationTask.stop();
+    cleanupTask.stop();
+  });
+
+  process.on('SIGINT', () => {
+    console.log('[Scheduler] Stopping cron tasks (SIGINT)...');
+    deadlineReminderTask.stop();
+    recommendationTask.stop();
+    cleanupTask.stop();
+  });
 };
 
 /**

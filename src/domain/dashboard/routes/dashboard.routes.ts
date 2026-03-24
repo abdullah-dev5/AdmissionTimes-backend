@@ -132,6 +132,25 @@ router.get('/student/dashboard', dashboardController.getStudentDashboard);
  *                           type: array
  *                           items:
  *                             type: object
+ *                         engagement_trends:
+ *                           type: object
+ *                           properties:
+ *                             labels:
+ *                               type: array
+ *                               items:
+ *                                 type: string
+ *                             views:
+ *                               type: array
+ *                               items:
+ *                                 type: number
+ *                             clicks:
+ *                               type: array
+ *                               items:
+ *                                 type: number
+ *                             reminders:
+ *                               type: array
+ *                               items:
+ *                                 type: number
  *       401:
  *         description: Unauthorized
  *         content:

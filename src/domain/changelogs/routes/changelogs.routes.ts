@@ -61,7 +61,7 @@ const router: Router = Router();
  *         name: action_type
  *         schema:
  *           type: string
- *           enum: [created, updated, verified, rejected, disputed, status_changed]
+ *           enum: [created, updated, verified, rejected, status_changed]
  *         description: Filter by action type
  *       - in: query
  *         name: changed_by

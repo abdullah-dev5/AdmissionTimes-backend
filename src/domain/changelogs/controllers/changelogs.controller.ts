@@ -21,6 +21,12 @@ import {
   ChangelogQueryParams,
 } from '../types/changelogs.types';
 
+interface UserContextLike {
+  id: string;
+  role: 'admin' | 'student' | 'university' | 'guest';
+  university_id?: string | null;
+}
+
 /**
  * Get changelog by ID
  * 
@@ -33,8 +39,9 @@ export const getChangelog = async (
 ): Promise<void> => {
   try {
     const { id } = req.params;
+    const userContext = req.user as UserContextLike | undefined;
 
-    const changelog = await changelogsService.getById(id);
+    const changelog = await changelogsService.getById(id, userContext);
 
     sendSuccess(res, changelog, 'Changelog retrieved successfully');
   } catch (error) {
@@ -55,6 +62,7 @@ export const getChangelogsByAdmission = async (
   try {
     const { admissionId } = req.params;
     const queryParams = req.query as any;
+    const userContext = req.user as UserContextLike | undefined;
 
     // Parse pagination
     const { page, limit } = parsePagination({
@@ -72,7 +80,8 @@ export const getChangelogsByAdmission = async (
       page,
       limit,
       sort,
-      order
+      order,
+      userContext
     );
 
     // Calculate pagination metadata
@@ -96,6 +105,7 @@ export const getChangelogs = async (
 ): Promise<void> => {
   try {
     const queryParams = req.validated as ChangelogQueryParams;
+    const userContext = req.user as UserContextLike | undefined;
 
     // Parse pagination
     const { page, limit } = parsePagination({
@@ -124,7 +134,8 @@ export const getChangelogs = async (
       page,
       limit,
       sort,
-      order
+      order,
+      userContext
     );
 
     // Calculate pagination metadata

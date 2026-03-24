@@ -123,7 +123,7 @@ export const createAdmissionSchema = Joi.object({
     }),
 
   verification_status: Joi.string()
-    .valid('draft', 'pending', 'verified', 'rejected', 'disputed')
+    .valid('draft', 'pending', 'verified', 'rejected')
     .optional()
     .default('draft'),
 
@@ -280,8 +280,8 @@ export const admissionQuerySchema = Joi.object({
 
   verification_status: Joi.alternatives()
     .try(
-      Joi.string().valid('draft', 'pending', 'verified', 'rejected', 'disputed'),
-      Joi.array().items(Joi.string().valid('draft', 'pending', 'verified', 'rejected', 'disputed'))
+      Joi.string().valid('draft', 'pending', 'verified', 'rejected'),
+      Joi.array().items(Joi.string().valid('draft', 'pending', 'verified', 'rejected'))
     )
     .optional(),
 
@@ -318,30 +318,6 @@ export const submitAdmissionSchema = Joi.object({
     .optional()
     .messages({
       'string.guid': 'submitted_by must be a valid UUID',
-    }),
-});
-
-/**
- * Dispute admission validation schema
- */
-export const disputeAdmissionSchema = Joi.object({
-  dispute_reason: Joi.string()
-    .min(10)
-    .max(1000)
-    .required()
-    .messages({
-      'string.empty': 'Dispute reason is required',
-      'string.min': 'Dispute reason must be at least 10 characters',
-      'string.max': 'Dispute reason must not exceed 1000 characters',
-      'any.required': 'Dispute reason is required',
-    }),
-
-  disputed_by: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'disputed_by must be a valid UUID',
     }),
 });
 

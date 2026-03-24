@@ -11,9 +11,14 @@
  */
 
 import { AppError } from '@shared/middleware/errorHandler';
+import { summarizeAdmissionTextWithFallback } from '@domain/ai/services/ai.service';
 
-// Dynamic import for pdf-parse (CommonJS module)
-const pdfParse = require('pdf-parse');
+// Support both legacy function export and v2 class export from pdf-parse.
+const pdfParseModule = require('pdf-parse');
+const pdfParseFn = typeof pdfParseModule === 'function'
+  ? pdfParseModule
+  : pdfParseModule?.default;
+const PDFParseClass = pdfParseModule?.PDFParse;
 
 /**
  * Extracted data from PDF
@@ -25,6 +30,12 @@ export interface ExtractedPDFData {
   application_fee: number;
   location: string;
   description: string;
+  eligibility?: string | null;
+  summary_text?: string;
+  highlights?: string[];
+  provider?: 'gemini' | 'regex';
+  model?: string;
+  method?: 'ai' | 'fallback';
   confidence: number; // 0-100 extraction confidence score
   extracted_fields: string[]; // List of fields successfully extracted
 }
@@ -38,8 +49,23 @@ export interface ExtractedPDFData {
  */
 export const parsePDF = async (buffer: Buffer): Promise<string> => {
   try {
-    const data = await pdfParse(buffer);
-    return data.text;
+    // pdf-parse v2.x exposes a class API: new PDFParse({ data }).getText()
+    if (typeof PDFParseClass === 'function') {
+      const parser = new PDFParseClass({ data: buffer });
+      const result = await parser.getText();
+      if (typeof parser.destroy === 'function') {
+        await parser.destroy();
+      }
+      return result?.text || '';
+    }
+
+    // Older pdf-parse versions expose a callable function.
+    if (typeof pdfParseFn === 'function') {
+      const data = await pdfParseFn(buffer);
+      return data?.text || '';
+    }
+
+    throw new Error('Unsupported pdf-parse module shape');
   } catch (error: any) {
     throw new AppError(`Failed to parse PDF: ${error.message}`, 400);
   }
@@ -217,5 +243,22 @@ export const parsePDFAndExtract = async (buffer: Buffer): Promise<ExtractedPDFDa
   // Extract fields
   const extractedData = await extractFields(text);
 
-  return extractedData;
+  const aiSummary = await summarizeAdmissionTextWithFallback(text, extractedData);
+
+  return {
+    title: aiSummary.title || extractedData.title,
+    degree_level: aiSummary.degree_level || extractedData.degree_level,
+    deadline: aiSummary.deadline || extractedData.deadline,
+    application_fee: aiSummary.application_fee ?? extractedData.application_fee,
+    location: aiSummary.location || extractedData.location,
+    description: aiSummary.description || extractedData.description,
+    eligibility: aiSummary.eligibility || null,
+    summary_text: aiSummary.summary_text,
+    highlights: aiSummary.highlights,
+    provider: aiSummary.provider,
+    model: aiSummary.model,
+    method: aiSummary.method,
+    confidence: Math.max(extractedData.confidence, aiSummary.confidence),
+    extracted_fields: Array.from(new Set([...(extractedData.extracted_fields || []), ...(aiSummary.extracted_fields || [])])),
+  };
 };

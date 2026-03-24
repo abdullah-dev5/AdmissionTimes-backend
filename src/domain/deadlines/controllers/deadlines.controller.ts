@@ -15,6 +15,8 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { sendSuccess, sendPaginated } from '@shared/utils/response';
+import { AppError } from '@shared/middleware/errorHandler';
+import { config } from '@config/config';
 import * as deadlinesService from '../services/deadlines.service';
 import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import {
@@ -230,7 +232,12 @@ export const triggerDeadlineReminders = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    if (req.user?.role && req.user.role !== 'admin') {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    if (req.user.role !== 'admin') {
       res.status(403).json({ success: false, message: 'Forbidden' });
       return;
     }
@@ -246,6 +253,10 @@ export const triggerDeadlineReminders = async (
 
     const thresholds = parsedThresholds.length > 0 ? parsedThresholds : [7, 3, 1];
     const forceRun = req.body?.force_run === true;
+
+    if (forceRun && config.env === 'production') {
+      throw new AppError('force_run is disabled in production', 403);
+    }
 
     const result = await deadlinesService.triggerDeadlineReminderNotifications(thresholds, { forceRun });
 

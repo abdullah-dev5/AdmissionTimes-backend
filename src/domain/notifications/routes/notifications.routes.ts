@@ -18,6 +18,7 @@ import {
   unregisterPushTokenSchema,
 } from '../validators/notifications.validators';
 import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
+import { requireRole } from '@shared/middleware/jwtAuth';
 
 const router: Router = Router();
 
@@ -54,7 +55,7 @@ const router: Router = Router();
  *         name: notification_type
  *         schema:
  *           type: string
- *           enum: [admission_submitted, admission_resubmitted, admission_verified, admission_rejected, admission_revision_required, admission_updated_saved, deadline_near, system_broadcast, dispute_raised, system_error]
+ *           enum: [admission_submitted, admission_resubmitted, admission_verified, admission_rejected, admission_revision_required, admission_updated_saved, deadline_near, system_broadcast, system_error]
  *         description: Filter by notification type
  *       - in: query
  *         name: priority
@@ -146,7 +147,7 @@ router.get(
  *                 description: Recipient role type
  *               notification_type:
  *                 type: string
- *                 enum: [admission_submitted, admission_resubmitted, admission_verified, admission_rejected, admission_revision_required, admission_updated_saved, deadline_near, system_broadcast, dispute_raised, system_error]
+ *                 enum: [admission_submitted, admission_resubmitted, admission_verified, admission_rejected, admission_revision_required, admission_updated_saved, deadline_near, system_broadcast, system_error]
  *                 description: Notification type
  *               priority:
  *                 type: string
@@ -257,6 +258,36 @@ router.delete(
   '/push-token',
   validateBody(unregisterPushTokenSchema),
   notificationsController.unregisterPushToken
+);
+
+// GET /api/v1/notifications/admin/email-logs - List email delivery logs (admin only)
+router.get(
+  '/admin/email-logs',
+  requireRole(['admin']),
+  notificationsController.getEmailDeliveryLogs
+);
+
+// POST /api/v1/notifications/admin/email-logs/:id/replay - Replay email by log id (admin only)
+router.post(
+  '/admin/email-logs/:id/replay',
+  requireRole(['admin']),
+  validateParams(uuidParamSchema),
+  notificationsController.replayEmailFromLog
+);
+
+// POST /api/v1/notifications/admin/notifications/:id/replay-email - Replay email by notification id (admin only)
+router.post(
+  '/admin/notifications/:id/replay-email',
+  requireRole(['admin']),
+  validateParams(uuidParamSchema),
+  notificationsController.replayEmailByNotificationId
+);
+
+// DELETE /api/v1/notifications/admin/manual-test-cleanup - Cleanup manual reminder test notifications (admin only)
+router.delete(
+  '/admin/manual-test-cleanup',
+  requireRole(['admin']),
+  notificationsController.cleanupManualReminderTestNotifications
 );
 
 /**

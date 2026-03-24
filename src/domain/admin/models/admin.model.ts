@@ -127,7 +127,6 @@ export const updateAdmissionVerification = async (
     rejection_reason?: string | null;
     admin_notes?: string | null;
     verification_comments?: string | null;
-    dispute_reason?: string | null;
   }
 ): Promise<AdminAdmission> => {
   try {
@@ -138,8 +137,7 @@ export const updateAdmissionVerification = async (
            rejection_reason = $3,
            admin_notes = $4,
            verification_comments = $6,
-           dispute_reason = $7,
-           verified_at = CASE WHEN $1::text IN ('verified', 'rejected', 'disputed') 
+           verified_at = CASE WHEN $1::text IN ('verified', 'rejected') 
                               THEN NOW() 
                               ELSE verified_at END,
            updated_at = NOW()
@@ -152,7 +150,6 @@ export const updateAdmissionVerification = async (
         data.admin_notes || null,
         id,
         data.verification_comments || null,
-        data.dispute_reason || null,
       ]
     );
 
@@ -224,7 +221,6 @@ export const getDashboardStats = async (): Promise<AdminDashboardStats> => {
          COUNT(CASE WHEN verification_status = 'pending' THEN 1 END) as pending_count,
          COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as verified_count,
          COUNT(CASE WHEN verification_status = 'rejected' THEN 1 END) as rejected_count,
-         COUNT(CASE WHEN verification_status = 'disputed' THEN 1 END) as disputed_count,
          (SELECT COUNT(DISTINCT id) FROM universities WHERE is_active = true) as universities_active,
          (SELECT COUNT(DISTINCT id) FROM users WHERE role = 'student') as students_registered
        FROM admissions`
@@ -239,7 +235,6 @@ export const getDashboardStats = async (): Promise<AdminDashboardStats> => {
       pending_count: parseInt(row.pending_count) || 0,
       verified_count: parseInt(row.verified_count) || 0,
       rejected_count: parseInt(row.rejected_count) || 0,
-      disputed_count: parseInt(row.disputed_count) || 0,
       universities_active: parseInt(row.universities_active) || 0,
       students_registered: parseInt(row.students_registered) || 0,
       verification_rate: total > 0 ? Math.round((verified / total) * 100) : 0,

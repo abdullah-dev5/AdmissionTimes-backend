@@ -33,6 +33,18 @@ export const emailExists = async (email: string): Promise<boolean> => {
 };
 
 /**
+ * Check if university exists
+ *
+ * @param universityId - University UUID
+ * @returns True if university exists, false otherwise
+ */
+export const universityExists = async (universityId: string): Promise<boolean> => {
+  const sql = 'SELECT COUNT(*) as count FROM universities WHERE id = $1';
+  const result = await query(sql, [universityId]);
+  return parseInt(result.rows[0].count, 10) > 0;
+};
+
+/**
  * Create a new user (sign up)
  * 
  * @param data - Sign up data

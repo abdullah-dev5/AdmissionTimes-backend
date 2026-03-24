@@ -67,7 +67,7 @@ export interface UpcomingDeadline {
  */
 export interface RecentNotification {
   id: string;
-  notification_type: 'admission_submitted' | 'admission_resubmitted' | 'admission_verified' | 'admission_rejected' | 'admission_revision_required' | 'admission_updated_saved' | 'deadline_near' | 'system_broadcast' | 'dispute_raised' | 'system_error';
+  notification_type: 'admission_submitted' | 'admission_resubmitted' | 'admission_verified' | 'admission_rejected' | 'admission_revision_required' | 'admission_updated_saved' | 'deadline_near' | 'system_broadcast' | 'system_error';
   priority: 'low' | 'medium' | 'high' | 'urgent';
   title: string;
   message: string;
@@ -108,6 +108,16 @@ export interface UniversityDashboardStats {
   recent_updates: number;
   unread_notifications: number;
   pending_audits: number;
+  reminder_notifications: number;
+  saved_admissions: number;
+}
+
+export interface UniversityEngagementTrends {
+  labels: string[];
+  views: number[];
+  clicks: number[];
+  reminders: number[];
+  saves: number[];
 }
 
 /**
@@ -117,14 +127,13 @@ export interface RecentAdmission {
   id: string;
   title: string;
   degree_level: string;
-  verification_status: 'verified' | 'pending' | 'rejected' | 'disputed' | 'draft';
+  verification_status: 'verified' | 'pending' | 'rejected' | 'draft';
   deadline: string;
   created_at: string;
   updated_at: string;
   verified_by?: string | null;
   verified_at?: string | null;
   rejection_reason?: string | null;
-  dispute_reason?: string | null;
   verification_comments?: string | null;
   admin_notes?: string | null;
 }
@@ -164,6 +173,7 @@ export interface UniversityDashboardData {
   pending_verifications: PendingVerification[];
   recent_changes: RecentChange[];
   recent_notifications: RecentNotification[];
+  engagement_trends: UniversityEngagementTrends;
 }
 
 /**

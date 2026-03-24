@@ -85,6 +85,17 @@ export const config = {
       process.env.REALTIME_ENABLED === 'true' ||
       (process.env.REALTIME_ENABLED !== 'false' && !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY),
   },
+
+  // AI configuration (Gemini)
+  ai: {
+    enabled: process.env.AI_ENABLED === 'true' || (!!process.env.GEMINI_API_KEY && process.env.AI_ENABLED !== 'false'),
+    provider: process.env.AI_PROVIDER || 'gemini',
+    geminiApiKey: process.env.GEMINI_API_KEY || '',
+    geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite',
+    geminiBaseUrl: process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta',
+    timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || '12000', 10),
+    maxInputChars: parseInt(process.env.AI_MAX_INPUT_CHARS || '16000', 10),
+  },
 };
 
 /**

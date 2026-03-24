@@ -8,16 +8,56 @@
 import { Router } from 'express';
 import * as userActivityController from '../controllers/user-activity.controller';
 import {
+  createUserActivitySchema,
   userActivityQuerySchema,
   uuidParamSchema,
 } from '../validators/user-activity.validators';
-import { validateQuery, validateParams } from '@shared/middleware/validation';
+import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
 
 const router: Router = Router();
 
 /**
  * Public/User Endpoints
  */
+
+/**
+ * @swagger
+ * /api/v1/activity:
+ *   post:
+ *     summary: Track user activity
+ *     tags: [Activity]
+ *     description: Track a user activity event for analytics and engagement trends.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - activity_type
+ *               - entity_type
+ *               - entity_id
+ *             properties:
+ *               activity_type:
+ *                 type: string
+ *               entity_type:
+ *                 type: string
+ *               entity_id:
+ *                 type: string
+ *                 format: uuid
+ *               metadata:
+ *                 type: object
+ *     responses:
+ *       201:
+ *         description: Activity tracked successfully
+ */
+router.post(
+  '/',
+  validateBody(createUserActivitySchema),
+  userActivityController.trackActivity
+);
 
 /**
  * @swagger

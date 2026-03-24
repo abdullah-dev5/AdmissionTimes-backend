@@ -273,3 +273,83 @@ export const unregisterPushToken = async (
     next(error);
   }
 };
+
+export const getEmailDeliveryLogs = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const statusParam = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const status = statusParam === 'sent' || statusParam === 'failed' ? statusParam : undefined;
+
+    const limitParam = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
+    const limit = Number.isFinite(limitParam) ? limitParam : 50;
+
+    const logs = await notificationsService.getEmailDeliveryLogs({ status, limit });
+
+    sendSuccess(
+      res,
+      {
+        logs,
+        meta: {
+          status: status || null,
+          limit: Math.min(200, Math.max(1, limit)),
+          count: logs.length,
+        },
+      },
+      'Email delivery logs retrieved successfully'
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const replayEmailFromLog = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const userContext = req.user as UserContext | undefined;
+
+    const result = await notificationsService.replayEmailFromLog(id, userContext);
+
+    sendSuccess(res, result, 'Email replay triggered from log successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const replayEmailByNotificationId = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const userContext = req.user as UserContext | undefined;
+
+    const result = await notificationsService.replayEmailByNotificationId(id, userContext);
+
+    sendSuccess(res, result, 'Email replay triggered from notification successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const cleanupManualReminderTestNotifications = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userContext = req.user as UserContext | undefined;
+    const result = await notificationsService.cleanupManualReminderTestNotifications(userContext);
+
+    sendSuccess(res, result, 'Manual reminder test notifications cleaned up successfully');
+  } catch (error) {
+    next(error);
+  }
+};

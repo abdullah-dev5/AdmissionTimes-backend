@@ -67,6 +67,8 @@ export const signUp = async (req: Request, res: Response): Promise<void> => {
         errors.email = 'Email already exists';
       } else if (error.message.includes('University ID is required')) {
         errors.university_id = 'University ID is required';
+      } else if (error.message.includes('Invalid university ID')) {
+        errors.university_id = 'Invalid university ID';
       }
       sendError(res, error.message, error.statusCode, Object.keys(errors).length > 0 ? { errors } : null);
       return;

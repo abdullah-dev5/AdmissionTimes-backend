@@ -14,6 +14,7 @@ import {
   verifyAdmissionSchema,
   revisionRequiredSchema,
   bulkVerifySchema,
+  createUniversityRepSchema,
   adminFilterSchema,
   uuidParamSchema,
 } from '../validators/admin.validators';
@@ -26,6 +27,13 @@ const router: Router = Router();
  */
 router.use(adminOnly);
 
+// POST /api/v1/admin/university-reps - Create university representative (Flow C)
+router.post(
+  '/university-reps',
+  validateBody(createUniversityRepSchema),
+  adminController.createUniversityRep
+);
+
 /**
  * @swagger
  * /api/v1/admin/dashboard:
@@ -35,7 +43,7 @@ router.use(adminOnly);
  *     description: |
  *       Get dashboard overview with statistics and recent activity. Admin only.
  *       Returns:
- *       - Total statistics (total, pending, verified, rejected, disputed)
+ *       - Total statistics (total, pending, verified, rejected)
  *       - Recent admin actions (last 10)
  *       - Pending admissions list (up to 5)
  *     security:
@@ -63,8 +71,6 @@ router.use(adminOnly);
  *                             verified:
  *                               type: number
  *                             rejected:
- *                               type: number
- *                             disputed:
  *                               type: number
  *                         recent_actions:
  *                           type: array
@@ -114,7 +120,7 @@ router.use(adminOnly);
  *         name: status
  *         schema:
  *           type: string
- *           enum: [draft, pending, verified, rejected, disputed]
+ *           enum: [draft, pending, verified, rejected]
  *         description: Filter by status
  *       - in: query
  *         name: university_id
@@ -251,7 +257,7 @@ router.get(
  *                 description: Array of admission UUIDs to verify
  *               verification_status:
  *                 type: string
- *                 enum: [verified, rejected, disputed]
+ *                 enum: [verified, rejected]
  *                 description: Status to apply to all admissions
  *               rejection_reason:
  *                 type: string
@@ -312,10 +318,9 @@ router.post(
  *       
  *       Valid status transitions:
  *       - draft → [pending, rejected]
- *       - pending → [verified, rejected, disputed]
- *       - verified → [disputed]
- *       - rejected → [pending, disputed]
- *       - disputed → [verified, rejected, pending]
+ *       - pending → [verified, rejected]
+ *       - verified → [rejected]
+ *       - rejected → [pending]
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -337,7 +342,7 @@ router.post(
  *             properties:
  *               verification_status:
  *                 type: string
- *                 enum: [verified, rejected, disputed]
+ *                 enum: [verified, rejected]
  *                 description: New verification status
  *               rejection_reason:
  *                 type: string

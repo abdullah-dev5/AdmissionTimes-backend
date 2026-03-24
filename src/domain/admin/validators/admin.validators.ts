@@ -12,10 +12,10 @@ import Joi from 'joi';
  */
 export const verifyAdmissionSchema = Joi.object({
   verification_status: Joi.string()
-    .valid('verified', 'rejected', 'disputed')
+    .valid('verified', 'rejected')
     .required()
     .messages({
-      'any.only': 'Status must be verified, rejected, or disputed',
+      'any.only': 'Status must be verified or rejected',
       'any.required': 'Verification status is required',
     }),
 
@@ -34,14 +34,8 @@ export const verifyAdmissionSchema = Joi.object({
   admin_notes: Joi.string()
     .min(10)
     .max(1000)
-    .when('verification_status', {
-      is: 'disputed',
-      then: Joi.required().messages({
-        'any.required': 'Reason is required when disputing',
-        'string.min': 'Reason must be at least 10 characters',
-      }),
-      otherwise: Joi.optional().allow(null, ''),
-    }),
+    .optional()
+    .allow(null, ''),
 
   verification_comments: Joi.string()
     .max(1000)
@@ -80,10 +74,10 @@ export const bulkVerifySchema = Joi.object({
     }),
 
   verification_status: Joi.string()
-    .valid('verified', 'rejected', 'disputed')
+    .valid('verified', 'rejected')
     .required()
     .messages({
-      'any.only': 'Status must be verified, rejected, or disputed',
+      'any.only': 'Status must be verified or rejected',
       'any.required': 'Verification status is required',
     }),
 
@@ -118,7 +112,7 @@ export const adminFilterSchema = Joi.object({
     .default(20),
 
   status: Joi.string()
-    .valid('draft', 'pending', 'verified', 'rejected', 'disputed')
+    .valid('draft', 'pending', 'verified', 'rejected')
     .optional(),
 
   university_id: Joi.string()
@@ -147,6 +141,43 @@ export const adminFilterSchema = Joi.object({
   order: Joi.string()
     .valid('asc', 'desc')
     .default('desc'),
+});
+
+/**
+ * Create university representative (Flow C)
+ */
+export const createUniversityRepSchema = Joi.object({
+  email: Joi.string()
+    .email({ tlds: { allow: false } })
+    .required()
+    .messages({
+      'string.email': 'Invalid email format',
+      'any.required': 'Email is required',
+    }),
+
+  display_name: Joi.string()
+    .min(2)
+    .max(255)
+    .required()
+    .messages({
+      'string.min': 'Display name must be at least 2 characters',
+      'string.max': 'Display name must not exceed 255 characters',
+      'any.required': 'Display name is required',
+    }),
+
+  university_name: Joi.string()
+    .min(2)
+    .max(255)
+    .required()
+    .messages({
+      'string.min': 'University name must be at least 2 characters',
+      'string.max': 'University name must not exceed 255 characters',
+      'any.required': 'University name is required',
+    }),
+
+  city: Joi.string().max(100).optional().allow(null, ''),
+  country: Joi.string().max(100).optional().allow(null, ''),
+  website: Joi.string().uri().max(255).optional().allow(null, ''),
 });
 
 /**

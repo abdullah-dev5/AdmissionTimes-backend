@@ -13,6 +13,7 @@
  */
 
 import { AppError } from '@shared/middleware/errorHandler';
+import { query } from '@db/connection';
 import * as authModel from '../models/auth.model';
 import { SignUpDTO, SignInDTO, SignUpResponse, SignInResponse, AuthUser } from '../types/auth.types';
 
@@ -30,29 +31,49 @@ export const signUp = async (data: SignUpDTO): Promise<SignUpResponse> => {
     throw new AppError('Email already exists', 400);
   }
 
-  // TODO: Enable university_id validation later
-  // Validate university_id for university users
-  // if (data.user_type === 'university') {
-  //   if (!data.university_id) {
-  //     throw new AppError('University ID is required for university accounts', 400);
-  //   }
+  // Phase 2 enforcement: university accounts must be linked to an existing university.
+  if (data.user_type === 'university') {
+    if (!data.university_id) {
+      throw new AppError('University ID is required for university accounts', 400);
+    }
 
-  //   // Verify university exists (check if organization_id exists in users table or create universities table check)
-  //   // For now, we'll just validate the UUID format - actual university validation can be added later
-  //   // when universities table is created
-  // }
-
-  // TEMPORARY: Auto-generate university_id for university users if not provided
-  // This allows them to create admissions without manual university_id entry
-  if (data.user_type === 'university' && !data.university_id) {
-    // Generate a UUID v4 for the university
-    const { randomUUID } = require('crypto');
-    data.university_id = randomUUID();
-    console.log(`[Auth Service] Auto-generated university_id for ${data.email}: ${data.university_id}`);
+    const exists = await authModel.universityExists(data.university_id);
+    if (!exists) {
+      throw new AppError('Invalid university ID', 400);
+    }
   }
 
   // Create user
   const user = await authModel.createUser(data);
+
+  // Initialize email preferences for new user
+  try {
+    const defaultCategories = {
+      verification: true,
+      deadline: true,
+      system: true,
+      update: true,
+    };
+
+    await query(
+      `INSERT INTO user_preferences (
+         user_id,
+         email_notifications_enabled,
+         push_notifications_enabled,
+         notification_categories
+       )
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [user.id, true, true, JSON.stringify(defaultCategories)]
+    );
+
+    console.log(`✅ [Auth] Email preferences initialized for user ${user.id}`);
+  } catch (preferencesError: any) {
+    console.error(`⚠️ [Auth] Failed to initialize email preferences for user ${user.id}:`, {
+      error: preferencesError?.message || String(preferencesError),
+    });
+    // Don't throw - preferences initialization failure shouldn't block signup
+  }
 
   return {
     user,

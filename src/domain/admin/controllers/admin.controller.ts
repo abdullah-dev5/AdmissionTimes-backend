@@ -21,6 +21,7 @@ import {
   AdminVerifyAdmissionDTO,
   AdminRevisionRequestDTO,
   AdminBulkVerifyDTO,
+  AdminCreateUniversityRepDTO,
   AdminFilterParams,
   UserContext,
 } from '../types/admin.types';
@@ -208,6 +209,28 @@ export const getAdminDashboard = async (
     const dashboard = await adminService.getAdminDashboard();
 
     sendSuccess(res, dashboard, 'Admin dashboard retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Create university representative (Flow C)
+ *
+ * POST /api/v1/admin/university-reps
+ */
+export const createUniversityRep = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const data = req.validated as AdminCreateUniversityRepDTO;
+    const userContext = (req.user as UserContext | undefined)!;
+
+    const result = await adminService.createUniversityRep(data, userContext);
+
+    sendSuccess(res, result, 'University representative created successfully', 201);
   } catch (error) {
     next(error);
   }

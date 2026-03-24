@@ -51,11 +51,11 @@ export const changelogQuerySchema = Joi.object({
     }),
 
   action_type: Joi.string()
-    .valid('created', 'updated', 'verified', 'rejected', 'disputed', 'status_changed')
+    .valid('created', 'updated', 'verified', 'rejected', 'status_changed')
     .allow('')
     .optional()
     .messages({
-      'any.only': 'action_type must be one of: created, updated, verified, rejected, disputed, status_changed',
+      'any.only': 'action_type must be one of: created, updated, verified, rejected, status_changed',
     }),
 
   changed_by: Joi.string()
