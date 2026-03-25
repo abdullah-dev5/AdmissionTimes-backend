@@ -385,7 +385,7 @@ export const getUniversityDashboard = async (
             INNER JOIN admissions a3 ON a3.id = w.admission_id
             WHERE (a3.created_by::text = ANY($2::text[]) OR a3.university_id::text = ANY($3::text[]))
               AND a3.is_active = true
-          ) as saved_admissions,
+          ) as saved_admissions
         FROM admissions a
         LEFT JOIN notifications n ON n.recipient_id = $1 AND n.role_type = 'university'
         WHERE (a.created_by::text = ANY($2::text[]) OR a.university_id::text = ANY($3::text[]))
@@ -533,15 +533,14 @@ export const getUniversityDashboard = async (
         SELECT date_trunc('week', n.created_at) as week_start, COUNT(DISTINCT n.id)::int as count
         FROM notifications n
         INNER JOIN deadlines d
-          ON n.related_entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-         AND d.id = n.related_entity_id::uuid
+          ON d.id::text = n.related_entity_id::text
         INNER JOIN owned_admissions oa ON oa.admission_id = d.admission_id::text
         WHERE n.notification_type = 'deadline_near'
           AND n.related_entity_type = 'deadline'
           AND n.role_type = 'student'
           AND n.created_at IS NOT NULL
           AND n.related_entity_id IS NOT NULL
-          AND n.user_id IS NOT NULL
+          AND n.recipient_id IS NOT NULL
         GROUP BY 1
       ),
       saves_data AS (
@@ -555,7 +554,7 @@ export const getUniversityDashboard = async (
           AND ua.user_id IS NOT NULL
           AND ua.created_at IS NOT NULL
         GROUP BY 1
-      ),
+      )
       SELECT
         to_char(w.week_start, 'Mon DD') as label,
         COALESCE(v.count, 0)::int as views,
