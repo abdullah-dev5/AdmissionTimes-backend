@@ -15,6 +15,10 @@ import { generateJson, generateText, getGeminiUsageMetadata, isGeminiConfigured 
 
 const MAX_RESULTS = 8;
 const SENSITIVE_QUERY_PATTERN = /(password|email list|all users|admin data|internal analytics|service role|token|secret)/i;
+const STOP_WORDS = new Set([
+  'is', 'any', 'the', 'a', 'an', 'for', 'in', 'on', 'at', 'to', 'of', 'and', 'or', 'with', 'this', 'that',
+  'show', 'find', 'program', 'programs', 'admission', 'admissions', 'announced', 'please', 'me', 'my', 'all',
+]);
 
 type LocalIntentResult = {
   intent: 'guidance' | 'search_admissions' | 'unknown';
@@ -94,6 +98,15 @@ const buildLocalGuidance = (message: string, isUniversity: boolean): string => {
     ].join('\n');
   }
 
+  if (lower.includes('deadline') || lower.includes('urgent') || lower.includes('this week') || lower.includes('closing')) {
+    return [
+      'For urgent deadlines this week:',
+      '- Open Deadlines and sort by nearest date first.',
+      '- Enable watchlist alerts to get reminders before due dates.',
+      '- Use Search with a degree/program keyword to narrow active options.',
+    ].join('\n');
+  }
+
   if (lower.includes('status') || lower.includes('application')) {
     return [
       'Status quick guide:',
@@ -109,6 +122,60 @@ const buildLocalGuidance = (message: string, isUniversity: boolean): string => {
     '- Compare options and explain differences',
     '- Explain statuses and suggest next actions',
   ].join('\n');
+};
+
+const buildRelaxedSearchQueries = (search: string): string[] => {
+  const raw = String(search || '').toLowerCase();
+  if (!raw.trim()) return [];
+
+  const tokens = raw
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
+
+  const uniqueTokens = Array.from(new Set(tokens));
+  const prioritized = uniqueTokens
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 3);
+
+  return prioritized;
+};
+
+const tryRelaxedSearch = async (
+  filters: AdmissionChatFilters,
+  executionContext: ChatExecutionContext
+): Promise<AdmissionChatResultItem[]> => {
+  if (!filters.search) {
+    return [];
+  }
+
+  const candidates = buildRelaxedSearchQueries(filters.search);
+  for (const candidate of candidates) {
+    const { admissions } = await admissionsService.getMany(
+      {
+        search: candidate,
+        degree_level: filters.degree_level,
+        field_of_study: filters.field_of_study,
+        location: filters.location,
+        program_type: filters.program_type,
+        delivery_mode: filters.delivery_mode,
+      },
+      1,
+      MAX_RESULTS,
+      'deadline',
+      'asc',
+      executionContext.userContext
+    );
+
+    const filteredAdmissions = filterByDeadlineWindow(admissions, filters.deadline_within_days);
+    const results = filteredAdmissions.slice(0, MAX_RESULTS).map(mapResult);
+    if (results.length > 0) {
+      return results;
+    }
+  }
+
+  return [];
 };
 
 const detectLocalIntent = (message: string, isUniversity: boolean): LocalIntentResult => {
@@ -210,7 +277,18 @@ const formatAdmissionLine = (admission: AdmissionChatResultItem, index: number):
 
 const formatSearchAnswer = (results: AdmissionChatResultItem[], filters: AdmissionChatFilters): string => {
   if (results.length === 0) {
-    return 'No matching admissions were found for that query. Try broadening the program, location, or deadline filters.';
+    const quickSuggestions = [
+      '- Try: "Show BBA programs"',
+      '- Try: "Show deadlines this week"',
+      '- Try: "Show verified programs in Lahore"',
+      '- Try: "Compare saved programs"',
+    ];
+
+    return [
+      'No matching admissions were found for that query.',
+      'You can try these quick suggestions:',
+      ...quickSuggestions,
+    ].join('\n');
   }
 
   const appliedFilters = [filters.search, filters.degree_level, filters.field_of_study, filters.location]
@@ -416,7 +494,13 @@ export const chatWithAdmissionsAssistant = async (
       executionContext.userContext
     );
 
-    const results = admissions.slice(0, MAX_RESULTS).map(mapResult);
+    let results = admissions.slice(0, MAX_RESULTS).map(mapResult);
+    if (results.length === 0) {
+      const relaxedResults = await tryRelaxedSearch(localIntent.filters || {}, executionContext);
+      if (relaxedResults.length > 0) {
+        results = relaxedResults;
+      }
+    }
     return {
       intent: 'search_admissions',
       extracted_filters: localIntent.filters || {},
@@ -498,7 +582,13 @@ export const chatWithAdmissionsAssistant = async (
   );
 
   const filteredAdmissions = filterByDeadlineWindow(admissions, filters.deadline_within_days);
-  const results = filteredAdmissions.slice(0, MAX_RESULTS).map(mapResult);
+  let results = filteredAdmissions.slice(0, MAX_RESULTS).map(mapResult);
+  if (results.length === 0) {
+    const relaxedResults = await tryRelaxedSearch(filters, executionContext);
+    if (relaxedResults.length > 0) {
+      results = relaxedResults;
+    }
+  }
 
   return {
     intent: 'search_admissions',
