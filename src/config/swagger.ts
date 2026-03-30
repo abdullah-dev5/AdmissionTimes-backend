@@ -606,9 +606,9 @@ const options: swaggerJsdoc.Options = {
             },
             email_frequency: {
               type: 'string',
-              enum: ['immediate', 'daily', 'weekly', 'never'],
-              example: 'daily',
-              description: 'How often to send email notifications',
+              enum: ['immediate'],
+              example: 'immediate',
+              description: 'Email delivery mode. Channel on/off is controlled by email_notifications_enabled.',
             },
             push_notifications_enabled: {
               type: 'boolean',

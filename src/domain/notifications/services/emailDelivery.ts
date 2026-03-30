@@ -12,10 +12,25 @@ import nodemailer, { Transporter } from 'nodemailer';
 import { config } from '@config/config';
 import type { Notification } from '@domain/notifications/types/notifications.types';
 import { createEmailDeliveryLog } from '@domain/notifications/models/notifications.model';
+import { emailTemplates } from '@shared/email/emailTemplates';
 
 let transporter: Transporter | null = null;
 const MAX_EMAIL_SEND_ATTEMPTS = 3;
 const EMAIL_RETRY_BASE_DELAY_MS = 1000;
+
+interface EmailReadinessState {
+  enabled: boolean;
+  ready: boolean;
+  lastVerifyAt: string | null;
+  lastVerifyError: string | null;
+}
+
+const emailReadiness: EmailReadinessState = {
+  enabled: config.email.enabled,
+  ready: false,
+  lastVerifyAt: null,
+  lastVerifyError: null,
+};
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -51,11 +66,17 @@ const safeWriteEmailLog = async (input: {
 const getTransporter = (): Transporter | null => {
   if (!config.email.enabled) {
     console.log('[EmailDelivery] Email disabled, skipping transport initialization');
+    emailReadiness.enabled = false;
+    emailReadiness.ready = false;
+    emailReadiness.lastVerifyError = 'Email disabled by configuration';
     return null;
   }
 
   if (!config.email.user || !config.email.pass) {
     console.error('[EmailDelivery] Email is enabled but SMTP credentials are incomplete (SMTP_USER/SMTP_PASS required)');
+    emailReadiness.enabled = true;
+    emailReadiness.ready = false;
+    emailReadiness.lastVerifyError = 'SMTP credentials incomplete';
     return null;
   }
 
@@ -76,11 +97,46 @@ const getTransporter = (): Transporter | null => {
       console.log('[EmailDelivery] SMTP transport initialized:', config.email.host);
     } catch (error) {
       console.error('[EmailDelivery] Failed to initialize SMTP transport:', error);
+      emailReadiness.enabled = true;
+      emailReadiness.ready = false;
+      emailReadiness.lastVerifyError = error instanceof Error ? error.message : String(error);
       return null;
     }
   }
 
+  emailReadiness.enabled = true;
   return transporter;
+};
+
+export const verifyEmailTransport = async (): Promise<EmailReadinessState> => {
+  emailReadiness.enabled = config.email.enabled;
+  emailReadiness.lastVerifyAt = new Date().toISOString();
+
+  const transport = getTransporter();
+  if (!transport) {
+    emailReadiness.ready = false;
+    if (!emailReadiness.lastVerifyError) {
+      emailReadiness.lastVerifyError = 'SMTP transport unavailable';
+    }
+    return { ...emailReadiness };
+  }
+
+  try {
+    await transport.verify();
+    emailReadiness.ready = true;
+    emailReadiness.lastVerifyError = null;
+    console.log('[EmailDelivery] SMTP transport verified successfully');
+  } catch (error) {
+    emailReadiness.ready = false;
+    emailReadiness.lastVerifyError = error instanceof Error ? error.message : String(error);
+    console.error('[EmailDelivery] SMTP transport verification failed:', error);
+  }
+
+  return { ...emailReadiness };
+};
+
+export const getEmailDeliveryReadiness = (): EmailReadinessState => {
+  return { ...emailReadiness };
 };
 
 /**
@@ -98,48 +154,35 @@ const formatEmailContent = (notification: Notification): { subject: string; html
 
   const subject = typeLabels[notification.notification_type] || 'New Notification';
 
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #4F46E5; color: white; padding: 20px; text-align: center; }
-          .content { background: #f9fafb; padding: 20px; margin: 20px 0; }
-          .footer { text-align: center; font-size: 12px; color: #6b7280; margin-top: 20px; }
-          .btn { display: inline-block; padding: 12px 24px; background: #4F46E5; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>${subject}</h1>
-          </div>
-          <div class="content">
-            <p>${notification.message}</p>
-            ${notification.action_url ? `<a href="${notification.action_url}" class="btn">View Details</a>` : ''}
-          </div>
-          <div class="footer">
-            <p>You received this email because you have notifications enabled for Admission Times.</p>
-            <p>To unsubscribe, please update your preferences in your account settings.</p>
-          </div>
-        </div>
-      </body>
-    </html>
-  `;
+  // Use branded template for deadline reminders
+  if (notification.notification_type === 'deadline_near') {
+    // Extract deadline info from notification title/message or use defaults
+    const programName = notification.title || 'Application';
+    const universityName = notification.university_name || 'University';
+    
+    const { html, text } = emailTemplates.deadlineReminder({
+      user_name: 'Student',
+      program_name: programName,
+      university_name: universityName,
+      deadline_date: 'upcoming',
+      days_left: '7', // Default, can be updated if stored in message parsing
+      portal_url: notification.action_url || 'https://admissiontimes.local',
+    });
+    
+    return {
+      subject: `Admission Times | Deadline reminder: ${programName}`,
+      html,
+      text,
+    };
+  }
 
-  const text = `
-${subject}
-
-${notification.message}
-
-${notification.action_url ? `View details: ${notification.action_url}` : ''}
-
----
-You received this email because you have notifications enabled for Admission Times.
-To unsubscribe, please update your preferences in your account settings.
-  `.trim();
+  // Generic branded template for other notifications
+  const { html, text } = emailTemplates.notification(
+    subject,
+    notification.message,
+    notification.action_url ? 'View Details' : undefined,
+    notification.action_url || undefined
+  );
 
   return { subject, html, text };
 };
@@ -215,6 +258,15 @@ export const sendNotificationEmail = async (
       return;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorCode = (error as any)?.code ? String((error as any).code) : null;
+      const providerResponse = (error as any)?.response ? String((error as any).response) : null;
+      const composedErrorMessage = [
+        errorCode ? `code=${errorCode}` : null,
+        providerResponse ? `response=${providerResponse}` : null,
+        `message=${errorMessage}`,
+      ]
+        .filter(Boolean)
+        .join(' | ');
 
       await safeWriteEmailLog({
         notificationId: notification.id,
@@ -222,13 +274,13 @@ export const sendNotificationEmail = async (
         subject,
         status: 'failed',
         attemptNumber: attempt,
-        errorMessage,
+        errorMessage: composedErrorMessage,
       });
 
       console.error('[EmailDelivery] Failed to send email:', {
         error: errorMessage,
-        code: (error as any)?.code,
-        response: (error as any)?.response,
+        code: errorCode,
+        response: providerResponse,
         notificationId: notification.id,
         recipient: recipientEmail,
         attempt,

@@ -353,3 +353,68 @@ export const cleanupManualReminderTestNotifications = async (
     next(error);
   }
 };
+
+export const getEmailReadiness = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const readiness = await notificationsService.getEmailReadiness();
+    sendSuccess(res, readiness, 'Email readiness retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyEmailReadiness = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const readiness = await notificationsService.verifyEmailReadiness();
+    sendSuccess(res, readiness, 'Email readiness verified successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const processEmailRetries = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const limit = Number.isFinite(Number(req.body?.limit)) ? Number(req.body.limit) : 50;
+    const maxFailedAttempts = Number.isFinite(Number(req.body?.max_failed_attempts))
+      ? Number(req.body.max_failed_attempts)
+      : 6;
+    const minAgeSeconds = Number.isFinite(Number(req.body?.min_age_seconds))
+      ? Number(req.body.min_age_seconds)
+      : 60;
+
+    const result = await notificationsService.processEmailRetries({
+      limit,
+      maxFailedAttempts,
+      minAgeSeconds,
+    });
+
+    sendSuccess(res, result, 'Email retry processing completed successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getEmailMetrics = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const metrics = await notificationsService.getEmailMetricsSummary();
+    sendSuccess(res, metrics, 'Email metrics retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};

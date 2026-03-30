@@ -77,7 +77,7 @@
 #### Core Domain Implementation
 - ✅ Admissions domain complete
 - ✅ CRUD operations (Create, Read, Update, Delete)
-- ✅ Status transition workflow (draft → pending → verified/rejected/disputed)
+- ✅ Status transition workflow (draft → pending → verified/rejected/Rejected)
 - ✅ Changelog integration for audit trails
 - ✅ Search and filtering capabilities
 - ✅ Pagination support
@@ -345,7 +345,7 @@ Development:
 
 1. **Architecture:** Domain-driven structure with Clean Architecture principles
 2. **Database:** PostgreSQL with Supabase compatibility and RLS policies
-3. **Verification Flow:** 5-state system (draft, pending, verified, rejected, disputed)
+3. **Verification Flow:** 5-state system (draft, pending, verified, rejected, Rejected)
 4. **Audit Trail:** Immutable changelogs for compliance
 5. **Notifications:** PostgreSQL-only (no Redis dependency)
 6. **API Design:** RESTful, versioned (`/api/v1`), fully documented

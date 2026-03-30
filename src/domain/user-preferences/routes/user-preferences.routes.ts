@@ -54,9 +54,9 @@ router.get(
  * @swagger
  * /api/v1/users/me/preferences:
  *   put:
- *     summary: Update user preferences (full update)
+ *     summary: Update user preferences
  *     tags: [User Preferences]
- *     description: Update user preferences. Creates preferences if they don't exist (upsert).
+ *     description: Update user preferences (upsert). Unspecified fields keep existing/default values.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -72,9 +72,9 @@ router.get(
  *                 example: true
  *               email_frequency:
  *                 type: string
- *                 enum: [immediate, daily, weekly, never]
- *                 description: How often to send email notifications
- *                 example: 'daily'
+ *                 enum: [immediate]
+ *                 description: Supported value is immediate only. Use email_notifications_enabled to disable email delivery.
+ *                 example: 'immediate'
  *               push_notifications_enabled:
  *                 type: boolean
  *                 description: Enable/disable push notifications
@@ -159,9 +159,9 @@ router.put(
  *             properties:
  *               email_frequency:
  *                 type: string
- *                 enum: [immediate, daily, weekly, never]
- *                 description: How often to send email notifications
- *                 example: 'weekly'
+ *                 enum: [immediate]
+ *                 description: Supported value is immediate only.
+ *                 example: 'immediate'
  *               language:
  *                 type: string
  *                 enum: [en, ar, fr, es]

@@ -12,6 +12,97 @@ This document provides a comprehensive backend architecture blueprint for the Ad
 
 ---
 
+## As-Built Architecture (Verified 2026-03-24)
+
+The diagram below reflects the current implementation in code (not the original planning-only view).
+
+```mermaid
+flowchart LR
+   U[Students | Universities | Admin]
+
+   subgraph FE[Frontend Layer]
+      W[Web App React]
+      M[Mobile App React Native]
+   end
+
+   subgraph BE[Backend Layer Node.js + Express]
+      API[REST API Routes]
+      AUTH[JWT Auth Middleware]
+      DOM[Domain Modules
+Admissions | Admin | Deadlines | Notifications | Dashboard | AI | Scheduler]
+      Q[In-Memory Notification Queue]
+      SCH[Scheduler node-cron]
+   end
+
+   subgraph DB[Database Layer]
+      PG[(PostgreSQL Supabase)]
+      N[(notifications)]
+      P[(user_preferences)]
+      R[(reminder_delivery_logs)]
+   end
+
+   subgraph EXT[External Services]
+      SMTP[SMTP Provider via Nodemailer]
+      RT[Supabase Realtime]
+      GEM[Gemini API]
+      PUSH[Expo Push Service]
+      JWKS[Supabase Auth JWKS]
+   end
+
+   U --> W
+   U --> M
+   W --> API
+   M --> API
+   API --> AUTH
+   AUTH --> DOM
+
+   DOM --> PG
+   PG --> N
+   PG --> P
+   PG --> R
+
+   DOM --> Q
+   SCH --> DOM
+
+   DOM --> SMTP
+   DOM --> RT
+   DOM --> GEM
+   DOM --> PUSH
+   AUTH --> JWKS
+```
+
+### Diagram Corrections vs Older Version
+
+- External services are not only email. The backend also depends on Supabase Auth JWKS, Supabase Realtime, Gemini API, and Expo push delivery.
+- JWT is middleware in front of most API routes, with only selected public routes (for example auth signin/signup and health).
+- Notification fan-out is multi-channel: database record first, then email/push/realtime as non-blocking side effects.
+- Scheduler is now node-cron based for reminders and periodic jobs.
+- Reminder observability now exists via reminder_delivery_logs.
+
+### Email Service Reality Check (Current State)
+
+Implemented and working:
+
+- SMTP transport uses Nodemailer with connection pooling.
+- Email sending is preference-aware (user preference and category checks).
+- Notification creation is decoupled from email delivery failures (non-blocking behavior).
+
+Current risks to track:
+
+- SMTP send retries are limited at publish layer, not a durable dedicated email worker.
+- Queue is in-memory, so there is no durable broker for notification fan-out.
+- There is no dedicated email_delivery_logs table for full delivery audit and replays.
+- action_url in email content may be relative unless explicitly converted to absolute frontend URLs.
+
+Recommended next hardening steps:
+
+- Add absolute frontend base URL handling for email action links.
+- Add dedicated email delivery logs (message id, provider response, status, retry count).
+- Add dead-letter handling for repeated email failures.
+- For scale-out, move from in-process queue to durable queue/worker architecture.
+
+---
+
 ## 1. BACKEND ARCHITECTURE & FOLDER STRUCTURE
 
 ### Proposed Structure
@@ -148,7 +239,7 @@ src/
 - `location` (string/city)
 - `delivery_mode` (enum: on-campus, online, hybrid)
 - `requirements` (JSONB - flexible structure)
-- `verification_status` (enum: draft, pending, verified, rejected, disputed)
+- `verification_status` (enum: draft, pending, verified, rejected, Rejected)
 - `verified_at` (timestamp, nullable)
 - `verified_by` (UUID, nullable - admin user)
 - `rejection_reason` (text, nullable)
@@ -179,7 +270,7 @@ src/
 - `id` (UUID, primary key)
 - `admission_id` (UUID, foreign key)
 - `changed_by` (UUID - user who made change, future)
-- `change_type` (enum: created, updated, verified, rejected, disputed, status_changed)
+- `change_type` (enum: created, updated, verified, rejected, Rejected, status_changed)
 - `field_name` (string - which field changed, null for status changes)
 - `old_value` (text/JSONB - previous value)
 - `new_value` (text/JSONB - new value)
@@ -324,14 +415,14 @@ src/
 2. **pending** - Submitted for verification, awaiting admin review
 3. **verified** - Approved by admin, visible to students
 4. **rejected** - Admin rejected (with reason)
-5. **disputed** - University disputed rejection
+5. **Rejected** - University Rejected rejection
 
 **State Transitions:**
 - `draft` → `pending` (university submits)
 - `pending` → `verified` (admin approves)
 - `pending` → `rejected` (admin rejects)
-- `rejected` → `disputed` (university disputes)
-- `disputed` → `pending` (admin re-opens for review)
+- `rejected` → `Rejected` (university disputes)
+- `Rejected` → `pending` (admin re-opens for review)
 - `verified` → `pending` (if university edits after verification)
 
 **Re-verification Trigger:**
@@ -361,14 +452,14 @@ src/
 **Disputing Rejection:**
 1. University views rejection reason
 2. Can submit dispute with `dispute_reason`
-3. Status changes to `disputed`
+3. Status changes to `Rejected`
 4. Notification sent to admin
 5. Admin reviews and either approves (`verified`) or maintains rejection (`rejected`)
 
 ### Admin Workflow
 
 **Verification Center:**
-- Lists all `pending` and `disputed` admissions
+- Lists all `pending` and `Rejected` admissions
 - Shows admission details + changelog history
 - Can approve → status `verified`, `verified_at` set, `verified_by` set
 - Can reject → status `rejected`, `rejection_reason` set
@@ -503,7 +594,7 @@ diff_summary: "Tuition fee increased from $5,000 to $5,500"
 - `system` - General system messages
 
 **University Notifications:**
-- `verification` - Admission verified/rejected/disputed
+- `verification` - Admission verified/rejected/Rejected
 - `update` - Admin made changes to their admission
 - `system` - System messages
 
@@ -824,7 +915,7 @@ ORDER BY date DESC;
 - `DELETE /api/v1/admissions/:id` - Soft delete
 
 **Verification Center:**
-- `GET /api/v1/admissions?verification_status=pending,disputed` - Pending/disputed admissions
+- `GET /api/v1/admissions?verification_status=pending,Rejected` - Pending/Rejected admissions
 - `GET /api/v1/admissions/:id/changelogs` - Get changelog for admission
 - `PATCH /api/v1/admissions/:id/dispute` - Submit dispute
 
@@ -848,7 +939,7 @@ ORDER BY date DESC;
 - `GET /api/v1/admissions/stats` - Admission statistics
 
 **Verification Center:**
-- `GET /api/v1/admissions?verification_status=pending,disputed` - Pending/disputed
+- `GET /api/v1/admissions?verification_status=pending,Rejected` - Pending/Rejected
 - `GET /api/v1/admissions/:id` - Admission details
 - `GET /api/v1/admissions/:id/changelogs` - Changelog history
 - `PATCH /api/v1/admissions/:id/verify` - Approve (pending → verified)
@@ -975,7 +1066,7 @@ ORDER BY date DESC;
 1. **Database:** PostgreSQL (Supabase compatible)
 2. **Framework:** Express.js + TypeScript
 3. **Architecture:** Domain-driven structure
-4. **Verification Flow:** 5-state system (draft, pending, verified, rejected, disputed)
+4. **Verification Flow:** 5-state system (draft, pending, verified, rejected, Rejected)
 5. **Audit Trail:** Immutable changelogs
 6. **Notifications:** PostgreSQL-only, no Redis
 7. **Analytics:** Minimal event tracking
@@ -1082,3 +1173,4 @@ This blueprint provides a complete foundation for the AdmissionTimes backend. Th
 - **Future-Proof:** Ready for auth, AI, and other features
 
 The design avoids over-engineering while ensuring the system can grow without major refactors.
+

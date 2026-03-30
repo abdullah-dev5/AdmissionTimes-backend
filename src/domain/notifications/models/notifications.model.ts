@@ -350,6 +350,253 @@ export const findEmailDeliveryLogById = async (id: string): Promise<any | null> 
   return result.rows[0] || null;
 };
 
+export interface EmailRetryCandidate {
+  id: string;
+  recipient_id: string | null;
+  role_type: string;
+  notification_type: string;
+  priority: string;
+  title: string;
+  message: string;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  action_url: string | null;
+  is_read: boolean;
+  read_at: string | null;
+  event_key: string;
+  created_at: string;
+  updated_at: string;
+  recipient_email: string;
+  failed_count: number;
+  last_failed_at: string;
+  last_failed_error_message: string | null;
+  last_failed_attempt_number: number;
+}
+
+export const findEmailRetryCandidates = async (input?: {
+  limit?: number;
+  maxFailedAttempts?: number;
+  minAgeSeconds?: number;
+}): Promise<EmailRetryCandidate[]> => {
+  const limit = Math.min(200, Math.max(1, input?.limit || 50));
+  const maxFailedAttempts = Math.max(1, input?.maxFailedAttempts || 6);
+  const minAgeSeconds = Math.max(0, input?.minAgeSeconds || 60);
+
+  const sql = `
+    WITH delivery_agg AS (
+      SELECT
+        notification_id,
+        COUNT(*) FILTER (WHERE status = 'failed') AS failed_count,
+        MAX(created_at) FILTER (WHERE status = 'failed') AS last_failed_at,
+        MAX(created_at) FILTER (WHERE status = 'sent') AS last_sent_at
+      FROM email_delivery_logs
+      GROUP BY notification_id
+    )
+    SELECT
+      n.*,
+      lf.recipient_email,
+      lf.error_message AS last_failed_error_message,
+      lf.attempt_number::int AS last_failed_attempt_number,
+      da.failed_count::int,
+      da.last_failed_at
+    FROM delivery_agg da
+    JOIN notifications n ON n.id = da.notification_id
+    JOIN LATERAL (
+      SELECT recipient_email, error_message, attempt_number
+      FROM email_delivery_logs l
+      WHERE l.notification_id = da.notification_id
+        AND l.status = 'failed'
+      ORDER BY l.created_at DESC
+      LIMIT 1
+    ) lf ON true
+    WHERE da.last_sent_at IS NULL
+      AND da.failed_count > 0
+      AND da.failed_count < $1
+      AND da.last_failed_at <= NOW() - ($2::text || ' seconds')::interval
+    ORDER BY da.last_failed_at ASC
+    LIMIT $3
+  `;
+
+  const result = await query(sql, [maxFailedAttempts, minAgeSeconds, limit]);
+  return result.rows;
+};
+
+export const countEmailRetryBacklog = async (input?: {
+  maxFailedAttempts?: number;
+  minAgeSeconds?: number;
+}): Promise<number> => {
+  const maxFailedAttempts = Math.max(1, input?.maxFailedAttempts || 6);
+  const minAgeSeconds = Math.max(0, input?.minAgeSeconds || 60);
+
+  const sql = `
+    WITH delivery_agg AS (
+      SELECT
+        notification_id,
+        COUNT(*) FILTER (WHERE status = 'failed') AS failed_count,
+        MAX(created_at) FILTER (WHERE status = 'failed') AS last_failed_at,
+        MAX(created_at) FILTER (WHERE status = 'sent') AS last_sent_at
+      FROM email_delivery_logs
+      GROUP BY notification_id
+    )
+    SELECT COUNT(*)::int AS count
+    FROM delivery_agg da
+    WHERE da.last_sent_at IS NULL
+      AND da.failed_count > 0
+      AND da.failed_count < $1
+      AND da.last_failed_at <= NOW() - ($2::text || ' seconds')::interval
+  `;
+
+  const result = await query(sql, [maxFailedAttempts, minAgeSeconds]);
+  return result.rows[0]?.count || 0;
+};
+
+export interface EmailUnattemptedCandidate {
+  id: string;
+  recipient_id: string | null;
+  role_type: string;
+  notification_type: string;
+  priority: string;
+  title: string;
+  message: string;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  action_url: string | null;
+  is_read: boolean;
+  read_at: string | null;
+  event_key: string;
+  created_at: string;
+  recipient_email: string;
+}
+
+export const findEmailUnattemptedCandidates = async (input?: {
+  limit?: number;
+  minAgeSeconds?: number;
+  maxAgeHours?: number;
+}): Promise<EmailUnattemptedCandidate[]> => {
+  const limit = Math.min(200, Math.max(1, input?.limit || 50));
+  const minAgeSeconds = Math.max(0, input?.minAgeSeconds || 60);
+  const maxAgeHours = Math.max(1, input?.maxAgeHours || 72);
+
+  const sql = `
+    SELECT
+      n.id::text,
+      n.recipient_id::text,
+      n.role_type::text,
+      n.notification_type::text,
+      n.priority::text,
+      n.title,
+      n.message,
+      n.related_entity_type,
+      n.related_entity_id::text,
+      n.action_url,
+      n.is_read,
+      n.read_at,
+      n.event_key,
+      n.created_at,
+      u.email AS recipient_email
+    FROM notifications n
+    JOIN users u ON u.id = n.recipient_id
+    LEFT JOIN LATERAL (
+      SELECT 1 AS has_log
+      FROM email_delivery_logs l
+      WHERE l.notification_id = n.id
+      LIMIT 1
+    ) log_ref ON TRUE
+    WHERE n.recipient_id IS NOT NULL
+      AND u.email IS NOT NULL
+      AND COALESCE(u.status, 'active') = 'active'
+      AND log_ref.has_log IS NULL
+      AND n.created_at <= NOW() - ($1::text || ' seconds')::interval
+      AND n.created_at >= NOW() - ($2::text || ' hours')::interval
+    ORDER BY n.created_at ASC
+    LIMIT $3
+  `;
+
+  const result = await query(sql, [minAgeSeconds, maxAgeHours, limit]);
+  return result.rows;
+};
+
+export const countEmailUnattemptedBacklog = async (input?: {
+  minAgeSeconds?: number;
+  maxAgeHours?: number;
+}): Promise<number> => {
+  const minAgeSeconds = Math.max(0, input?.minAgeSeconds || 60);
+  const maxAgeHours = Math.max(1, input?.maxAgeHours || 72);
+
+  const sql = `
+    SELECT COUNT(*)::int AS count
+    FROM notifications n
+    JOIN users u ON u.id = n.recipient_id
+    LEFT JOIN LATERAL (
+      SELECT 1 AS has_log
+      FROM email_delivery_logs l
+      WHERE l.notification_id = n.id
+      LIMIT 1
+    ) log_ref ON TRUE
+    WHERE n.recipient_id IS NOT NULL
+      AND u.email IS NOT NULL
+      AND COALESCE(u.status, 'active') = 'active'
+      AND log_ref.has_log IS NULL
+      AND n.created_at <= NOW() - ($1::text || ' seconds')::interval
+      AND n.created_at >= NOW() - ($2::text || ' hours')::interval
+  `;
+
+  const result = await query(sql, [minAgeSeconds, maxAgeHours]);
+  return result.rows[0]?.count || 0;
+};
+
+export interface EmailDeliveryMetrics {
+  sent_1h: number;
+  failed_1h: number;
+  sent_24h: number;
+  failed_24h: number;
+  permanent_skips_24h: number;
+  retry_attempts_24h: number;
+}
+
+export const getEmailDeliveryMetrics = async (): Promise<EmailDeliveryMetrics> => {
+  const sql = `
+    SELECT
+      COUNT(*) FILTER (
+        WHERE status = 'sent'
+          AND created_at >= NOW() - INTERVAL '1 hour'
+      )::int AS sent_1h,
+      COUNT(*) FILTER (
+        WHERE status = 'failed'
+          AND created_at >= NOW() - INTERVAL '1 hour'
+      )::int AS failed_1h,
+      COUNT(*) FILTER (
+        WHERE status = 'sent'
+          AND created_at >= NOW() - INTERVAL '24 hours'
+      )::int AS sent_24h,
+      COUNT(*) FILTER (
+        WHERE status = 'failed'
+          AND created_at >= NOW() - INTERVAL '24 hours'
+      )::int AS failed_24h,
+      COUNT(*) FILTER (
+        WHERE status = 'failed'
+          AND created_at >= NOW() - INTERVAL '24 hours'
+          AND error_message LIKE '[PERMANENT_SKIP]%'
+      )::int AS permanent_skips_24h,
+      COUNT(*) FILTER (
+        WHERE created_at >= NOW() - INTERVAL '24 hours'
+          AND attempt_number > 1
+      )::int AS retry_attempts_24h
+    FROM email_delivery_logs
+  `;
+
+  const result = await query(sql, []);
+  const row = result.rows[0] || {};
+  return {
+    sent_1h: row.sent_1h || 0,
+    failed_1h: row.failed_1h || 0,
+    sent_24h: row.sent_24h || 0,
+    failed_24h: row.failed_24h || 0,
+    permanent_skips_24h: row.permanent_skips_24h || 0,
+    retry_attempts_24h: row.retry_attempts_24h || 0,
+  };
+};
+
 /**
  * Build COUNT query with filters
  * 
