@@ -15,7 +15,7 @@ import { query } from '@db/connection';
 export const getUserEmail = async (userId: string): Promise<string | null> => {
   try {
     const result = await query(
-      'SELECT email FROM users WHERE id = $1 AND is_active = true LIMIT 1',
+      "SELECT email FROM users WHERE id = $1 AND COALESCE(status, 'active') = 'active' LIMIT 1",
       [userId]
     );
 
@@ -41,7 +41,7 @@ export const getUserEmailPreferences = async (
         COALESCE(up.email_notifications_enabled, true) as email_enabled
       FROM users u
       LEFT JOIN user_preferences up ON up.user_id = u.id
-      WHERE u.id = $1 AND u.is_active = true
+      WHERE u.id = $1 AND COALESCE(u.status, 'active') = 'active'
       LIMIT 1`,
       [userId]
     );
@@ -84,7 +84,7 @@ export const getUserNotificationPreferences = async (
         COALESCE(up.notification_categories, '{"verification": true, "deadline": true, "system": true, "update": true}'::jsonb) as categories
       FROM users u
       LEFT JOIN user_preferences up ON up.user_id = u.id
-      WHERE u.id = $1 AND u.is_active = true
+      WHERE u.id = $1 AND COALESCE(u.status, 'active') = 'active'
       LIMIT 1`,
       [userId]
     );

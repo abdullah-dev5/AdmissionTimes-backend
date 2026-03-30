@@ -8,7 +8,6 @@
 import { Router } from 'express';
 import * as notificationsController from '../controllers/notifications.controller';
 import { sendBroadcast } from '../controllers/notifications.broadcast.controller';
-import { testNotificationCreation } from '../controllers/notifications.test.controller';
 import {
   notificationQuerySchema,
   uuidParamSchema,
@@ -290,6 +289,34 @@ router.delete(
   notificationsController.cleanupManualReminderTestNotifications
 );
 
+// GET /api/v1/notifications/admin/email-readiness - Current email readiness state (admin only)
+router.get(
+  '/admin/email-readiness',
+  requireRole(['admin']),
+  notificationsController.getEmailReadiness
+);
+
+// POST /api/v1/notifications/admin/email-readiness/verify - Force SMTP readiness verification (admin only)
+router.post(
+  '/admin/email-readiness/verify',
+  requireRole(['admin']),
+  notificationsController.verifyEmailReadiness
+);
+
+// POST /api/v1/notifications/admin/email-retries/process - Process retry backlog now (admin only)
+router.post(
+  '/admin/email-retries/process',
+  requireRole(['admin']),
+  notificationsController.processEmailRetries
+);
+
+// GET /api/v1/notifications/admin/email-metrics - Email delivery metrics summary (admin only)
+router.get(
+  '/admin/email-metrics',
+  requireRole(['admin']),
+  notificationsController.getEmailMetrics
+);
+
 /**
  * @swagger
  * /api/v1/notifications/{id}:
@@ -566,21 +593,5 @@ router.delete(
  */
 // POST /api/v1/notifications/broadcast - Send broadcast notification (admin only)
 router.post('/broadcast', sendBroadcast);
-
-/**
- * @swagger
- * /api/v1/notifications/test:
- *   post:
- *     summary: Test notification creation (debug endpoint)
- *     tags: [Notifications]
- *     description: Debug endpoint to test notification creation and database connectivity
- *     responses:
- *       200:
- *         description: Test completed successfully
- *       500:
- *         description: Test failed
- */
-// POST /api/v1/notifications/test - Test notification creation (debug)
-router.post('/test', testNotificationCreation);
 
 export default router;

@@ -21,7 +21,7 @@ import {
   UserContext,
 } from '../types/notifications.types';
 import { NOTIFICATION_TYPE } from '@config/constants';
-import { sendNotificationEmail } from './emailDelivery';
+import { sendNotificationEmail, getEmailDeliveryReadiness, verifyEmailTransport } from './emailDelivery';
 import { publishNotificationToChannel } from './realtimePublisher';
 import { getUserNotificationPreferences } from './userUtils';
 import {
@@ -301,6 +301,225 @@ export const cleanupManualReminderTestNotifications = async (
 
   const deletedCount = await notificationsModel.deleteManualTestDeadlineNotifications();
   return { deleted_count: deletedCount };
+};
+
+export const getEmailReadiness = async (): Promise<{
+  enabled: boolean;
+  ready: boolean;
+  lastVerifyAt: string | null;
+  lastVerifyError: string | null;
+}> => {
+  const state = getEmailDeliveryReadiness();
+  if (!state.lastVerifyAt) {
+    return verifyEmailTransport();
+  }
+  return state;
+};
+
+export const verifyEmailReadiness = async (): Promise<{
+  enabled: boolean;
+  ready: boolean;
+  lastVerifyAt: string | null;
+  lastVerifyError: string | null;
+}> => {
+  return verifyEmailTransport();
+};
+
+export const processEmailRetries = async (input?: {
+  limit?: number;
+  maxFailedAttempts?: number;
+  minAgeSeconds?: number;
+  maxAgeHours?: number;
+}): Promise<{
+  backlog: number;
+  backlog_failed: number;
+  backlog_unattempted: number;
+  attempted: number;
+  queued: number;
+  attempted_unattempted: number;
+  attempted_failed: number;
+  skipped_permanent: number;
+  blocked_by_readiness: boolean;
+}> => {
+  const limit = Math.min(200, Math.max(1, input?.limit || 50));
+  const maxFailedAttempts = Math.max(1, input?.maxFailedAttempts || 6);
+  const minAgeSeconds = Math.max(0, input?.minAgeSeconds || 60);
+  const maxAgeHours = Math.max(1, input?.maxAgeHours || 72);
+
+  const [failedBacklog, unattemptedBacklog] = await Promise.all([
+    notificationsModel.countEmailRetryBacklog({
+      maxFailedAttempts,
+      minAgeSeconds,
+    }),
+    notificationsModel.countEmailUnattemptedBacklog({
+      minAgeSeconds,
+      maxAgeHours,
+    }),
+  ]);
+
+  const backlog = failedBacklog + unattemptedBacklog;
+
+  const readiness = await verifyEmailTransport();
+  if (readiness.enabled && !readiness.ready) {
+    return {
+      backlog,
+      backlog_failed: failedBacklog,
+      backlog_unattempted: unattemptedBacklog,
+      attempted: 0,
+      queued: 0,
+      attempted_unattempted: 0,
+      attempted_failed: 0,
+      skipped_permanent: 0,
+      blocked_by_readiness: true,
+    };
+  }
+
+  const unattemptedLimit = Math.max(1, Math.floor(limit * 0.6));
+  const unattemptedCandidates = await notificationsModel.findEmailUnattemptedCandidates({
+    limit: unattemptedLimit,
+    minAgeSeconds,
+    maxAgeHours,
+  });
+
+  let attempted = 0;
+  let attemptedUnattempted = 0;
+  let attemptedFailed = 0;
+  let skippedPermanent = 0;
+
+  for (const candidate of unattemptedCandidates) {
+    attempted += 1;
+    attemptedUnattempted += 1;
+    try {
+      await sendNotificationEmail(candidate as Notification, candidate.recipient_email);
+    } catch (error) {
+      console.error('[NotificationService] Email unattempted catch-up send threw (non-blocking):', {
+        notification_id: candidate.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const remainingSlots = Math.max(0, limit - unattemptedCandidates.length);
+
+  const candidates = remainingSlots > 0
+    ? await notificationsModel.findEmailRetryCandidates({
+        limit: remainingSlots,
+        maxFailedAttempts,
+        minAgeSeconds,
+      })
+    : [];
+
+  for (const candidate of candidates) {
+    const failureClass = classifyRetryFailure(candidate.last_failed_error_message);
+
+    if (failureClass === 'permanent') {
+      skippedPermanent += 1;
+      await notificationsModel.createEmailDeliveryLog({
+        notification_id: candidate.id,
+        recipient_email: candidate.recipient_email,
+        subject: candidate.title,
+        status: 'failed',
+        attempt_number: candidate.failed_count + 1,
+        error_message: `[PERMANENT_SKIP] ${candidate.last_failed_error_message || 'Permanent failure signature detected'}`,
+        provider_message_id: null,
+      });
+      continue;
+    }
+
+    attempted += 1;
+    attemptedFailed += 1;
+    try {
+      await sendNotificationEmail(candidate as Notification, candidate.recipient_email);
+    } catch (error) {
+      console.error('[NotificationService] Email retry send threw (non-blocking):', {
+        notification_id: candidate.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    backlog,
+    backlog_failed: failedBacklog,
+    backlog_unattempted: unattemptedBacklog,
+    attempted,
+    queued: unattemptedCandidates.length + candidates.length,
+    attempted_unattempted: attemptedUnattempted,
+    attempted_failed: attemptedFailed,
+    skipped_permanent: skippedPermanent,
+    blocked_by_readiness: false,
+  };
+};
+
+export const getEmailMetricsSummary = async (): Promise<{
+  readiness: {
+    enabled: boolean;
+    ready: boolean;
+    lastVerifyAt: string | null;
+    lastVerifyError: string | null;
+  };
+  retry_backlog: number;
+  sent_1h: number;
+  failed_1h: number;
+  sent_24h: number;
+  failed_24h: number;
+  failure_rate_1h: number;
+  failure_rate_24h: number;
+  permanent_skips_24h: number;
+  retry_attempts_24h: number;
+}> => {
+  const [readiness, retryBacklog, deliveryMetrics] = await Promise.all([
+    getEmailReadiness(),
+    notificationsModel.countEmailRetryBacklog({ maxFailedAttempts: 6, minAgeSeconds: 60 }),
+    notificationsModel.getEmailDeliveryMetrics(),
+  ]);
+
+  const total1h = deliveryMetrics.sent_1h + deliveryMetrics.failed_1h;
+  const total24h = deliveryMetrics.sent_24h + deliveryMetrics.failed_24h;
+
+  return {
+    readiness,
+    retry_backlog: retryBacklog,
+    sent_1h: deliveryMetrics.sent_1h,
+    failed_1h: deliveryMetrics.failed_1h,
+    sent_24h: deliveryMetrics.sent_24h,
+    failed_24h: deliveryMetrics.failed_24h,
+    failure_rate_1h: total1h > 0 ? Number(((deliveryMetrics.failed_1h / total1h) * 100).toFixed(2)) : 0,
+    failure_rate_24h: total24h > 0 ? Number(((deliveryMetrics.failed_24h / total24h) * 100).toFixed(2)) : 0,
+    permanent_skips_24h: deliveryMetrics.permanent_skips_24h,
+    retry_attempts_24h: deliveryMetrics.retry_attempts_24h,
+  };
+};
+
+type RetryFailureClass = 'retryable' | 'permanent';
+
+const classifyRetryFailure = (errorMessage?: string | null): RetryFailureClass => {
+  const text = (errorMessage || '').toLowerCase();
+
+  const permanentPatterns = [
+    'code=535',
+    'authentication failed',
+    'invalid login',
+    'username and password not accepted',
+    'code=550',
+    'mailbox unavailable',
+    'user unknown',
+    'recipient address rejected',
+    'code=553',
+    'invalid recipient',
+    'address rejected',
+    'spf',
+    'dkim',
+    'dmarc',
+  ];
+
+  for (const pattern of permanentPatterns) {
+    if (text.includes(pattern)) {
+      return 'permanent';
+    }
+  }
+
+  return 'retryable';
 };
 
 const inferNotificationCategory = (notificationType: string): 'verification' | 'deadline' | 'system' | 'update' => {

@@ -12,6 +12,7 @@
 
 import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
 import * as deadlinesService from '@domain/deadlines/services/deadlines.service';
+import * as notificationsService from '@domain/notifications/services/notifications.service';
 import * as cron from 'node-cron';
 
 /**
@@ -30,6 +31,7 @@ interface SchedulerMetrics {
   recommendationGeneration: JobMetrics;
   recommendationCleanup: JobMetrics;
   deadlineReminders: JobMetrics;
+  emailRetryDispatch: JobMetrics;
 }
 
 const schedulerMetrics: SchedulerMetrics = {
@@ -50,6 +52,14 @@ const schedulerMetrics: SchedulerMetrics = {
     lastError: null,
   },
   deadlineReminders: {
+    lastRunAt: null,
+    lastDurationMs: null,
+    lastStatus: null,
+    totalRuns: 0,
+    totalFailures: 0,
+    lastError: null,
+  },
+  emailRetryDispatch: {
     lastRunAt: null,
     lastDurationMs: null,
     lastStatus: null,
@@ -174,6 +184,45 @@ export const runDeadlineReminderDispatch = async (): Promise<void> => {
 };
 
 /**
+ * Process failed email deliveries for retry/catch-up.
+ * Runs every 5 minutes to recover from transient delivery failures.
+ */
+export const runEmailRetryDispatch = async (): Promise<void> => {
+  const startTime = Date.now();
+  console.log('[Scheduler] Starting email retry dispatch...');
+
+  schedulerMetrics.emailRetryDispatch.totalRuns += 1;
+  schedulerMetrics.emailRetryDispatch.lastRunAt = new Date().toISOString();
+
+  try {
+    const result = await notificationsService.processEmailRetries({
+      limit: 50,
+      maxFailedAttempts: 6,
+      minAgeSeconds: 60,
+    });
+    const durationMs = Date.now() - startTime;
+
+    schedulerMetrics.emailRetryDispatch.lastStatus = 'success';
+    schedulerMetrics.emailRetryDispatch.lastDurationMs = durationMs;
+    schedulerMetrics.emailRetryDispatch.lastError = null;
+
+    console.log(
+      `[Scheduler] ✅ Email retry dispatch complete: backlog=${result.backlog}, queued=${result.queued}, attempted=${result.attempted} (${durationMs}ms)`
+    );
+  } catch (error) {
+    const durationMs = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    schedulerMetrics.emailRetryDispatch.lastStatus = 'error';
+    schedulerMetrics.emailRetryDispatch.lastDurationMs = durationMs;
+    schedulerMetrics.emailRetryDispatch.totalFailures += 1;
+    schedulerMetrics.emailRetryDispatch.lastError = errorMessage;
+
+    console.error('[Scheduler] ❌ Email retry dispatch failed:', error);
+  }
+};
+
+/**
  * Initialize all scheduled tasks using node-cron
  * Call this on application startup
  */
@@ -211,6 +260,16 @@ export const initializeScheduler = (): void => {
     }
   });
 
+  // ✅ Retry failed email deliveries every 5 minutes
+  const emailRetryTask = cron.schedule('*/5 * * * *', async () => {
+    console.log('[Scheduler] Email retry job triggered...');
+    try {
+      await runEmailRetryDispatch();
+    } catch (error) {
+      console.error('[Scheduler] ❌ Email retry dispatch failed:', error);
+    }
+  });
+
   // ✅ Run initial deadline reminder check on startup (15 seconds delay)
   // Ensures reminders fire even if server starts just after hourly window
   setTimeout(() => {
@@ -220,9 +279,18 @@ export const initializeScheduler = (): void => {
     });
   }, 15000);
 
+  // ✅ Run initial email retry catch-up on startup (30 seconds delay)
+  setTimeout(() => {
+    console.log('[Scheduler] Running initial email retry catch-up on startup...');
+    runEmailRetryDispatch().catch((error) => {
+      console.error('[Scheduler] ❌ Initial email retry catch-up failed:', error);
+    });
+  }, 30000);
+
   console.log('[Scheduler] ✅ All scheduled tasks initialized (using node-cron)');
   console.log('[Scheduler] 💡 Cron patterns:');
   console.log('[Scheduler]   - Deadline reminders: "5 * * * *" (every hour at minute 5)');
+  console.log('[Scheduler]   - Email retries: "*/5 * * * *" (every 5 minutes)');
   console.log('[Scheduler]   - Recommendations: "0 2 * * *" (daily at 2 AM)');
   console.log('[Scheduler]   - Cleanup: "0 3 * * *" (daily at 3 AM)');
   console.log('[Scheduler] 💡 Tips: Use POST /api/v1/recommendations/generate-all and POST /api/v1/scheduler/reminder for manual triggers');
@@ -231,6 +299,7 @@ export const initializeScheduler = (): void => {
   process.on('SIGTERM', () => {
     console.log('[Scheduler] Stopping cron tasks...');
     deadlineReminderTask.stop();
+    emailRetryTask.stop();
     recommendationTask.stop();
     cleanupTask.stop();
   });
@@ -238,6 +307,7 @@ export const initializeScheduler = (): void => {
   process.on('SIGINT', () => {
     console.log('[Scheduler] Stopping cron tasks (SIGINT)...');
     deadlineReminderTask.stop();
+    emailRetryTask.stop();
     recommendationTask.stop();
     cleanupTask.stop();
   });

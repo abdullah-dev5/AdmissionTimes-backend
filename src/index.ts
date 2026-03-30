@@ -33,6 +33,7 @@ import { registerDomains } from '@domain/index';
 import { swaggerSpec } from '@config/swagger';
 import authRoutes from '@domain/auth/routes/auth.routes';
 import { initializeScheduler } from '@shared/scheduler';
+import { verifyEmailTransport, closeTransport } from '@domain/notifications/services/emailDelivery';
 
 // Initialize Express application
 const app: Application = express();
@@ -177,6 +178,20 @@ const server = app.listen(PORT, HOST, async () => {
   if (!dbConnected) {
     console.error('⚠️  Warning: Database connection test failed. Some features may not work.');
   }
+
+  // Verify SMTP readiness on startup (non-blocking for server boot)
+  try {
+    const emailReadiness = await verifyEmailTransport();
+    if (!emailReadiness.enabled) {
+      console.log('📧 Email delivery disabled by configuration.');
+    } else if (emailReadiness.ready) {
+      console.log('📧 Email transport is ready.');
+    } else {
+      console.warn(`⚠️  Email transport verification failed: ${emailReadiness.lastVerifyError || 'unknown error'}`);
+    }
+  } catch (error) {
+    console.warn('⚠️  Email transport readiness check failed unexpectedly:', error);
+  }
   
   // Initialize scheduled tasks
   initializeScheduler();
@@ -186,6 +201,7 @@ const server = app.listen(PORT, HOST, async () => {
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM received, shutting down gracefully...');
   server.close(async () => {
+    await closeTransport();
     await closePool();
     process.exit(0);
   });
@@ -194,6 +210,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   console.log('🛑 SIGINT received, shutting down gracefully...');
   server.close(async () => {
+    await closeTransport();
     await closePool();
     process.exit(0);
   });
