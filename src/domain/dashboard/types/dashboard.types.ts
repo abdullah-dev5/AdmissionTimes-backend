@@ -127,6 +127,7 @@ export interface RecentAdmission {
   id: string;
   title: string;
   degree_level: string;
+  views?: number;
   verification_status: 'verified' | 'pending' | 'rejected' | 'draft';
   deadline: string;
   created_at: string;

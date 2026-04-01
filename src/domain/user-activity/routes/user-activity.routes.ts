@@ -88,7 +88,7 @@ router.post(
  *         name: activity_type
  *         schema:
  *           type: string
- *           enum: [viewed, searched, compared, watchlisted, view, search, saved, alert, deadline, notification]
+ *           enum: [viewed, searched, compared, watchlisted, saved, alert, deadline, notification]
  *         description: Filter by activity type
  *       - in: query
  *         name: entity_type

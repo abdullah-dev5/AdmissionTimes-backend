@@ -14,6 +14,7 @@
 
 import { AppError } from '@shared/middleware/errorHandler';
 import * as userActivityModel from '../models/user-activity.model';
+import { ACTIVITY_TYPE, USER_TYPE } from '@config/constants';
 import {
   UserActivity,
   CreateUserActivityDTO,
@@ -106,6 +107,33 @@ export const create = async (data: CreateUserActivityDTO): Promise<UserActivity>
   // Ensure metadata is minimal (not too large)
   if (data.metadata && JSON.stringify(data.metadata).length > 1000) {
     throw new AppError('Metadata is too large (max 1000 characters)', 400);
+  }
+
+  // Server-side dedup guard for analytics integrity.
+  // One view and one click-group event per student per admission.
+  const cappedActivityTypes = new Set<string>([
+    ACTIVITY_TYPE.VIEWED,
+    ACTIVITY_TYPE.SEARCHED,
+    ACTIVITY_TYPE.COMPARED,
+    ACTIVITY_TYPE.ALERT,
+  ]);
+
+  const isStudentAdmissionEvent =
+    data.user_type === USER_TYPE.STUDENT &&
+    data.entity_type === 'admission' &&
+    Boolean(data.user_id) &&
+    cappedActivityTypes.has(data.activity_type);
+
+  if (isStudentAdmissionEvent && data.user_id) {
+    const existing = await userActivityModel.findExistingCappedStudentAdmissionActivity(
+      data.user_id,
+      data.entity_id,
+      data.activity_type
+    );
+
+    if (existing) {
+      return existing;
+    }
   }
 
   return await userActivityModel.create(data);

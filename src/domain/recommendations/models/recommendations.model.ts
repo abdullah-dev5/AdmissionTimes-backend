@@ -27,7 +27,7 @@ export const findByUserId = async (
       json_build_object(
         'id', a.id,
         'university_id', a.university_id,
-        'program_name', a.program_name,
+        'program_name', a.title,
         'degree_level', a.degree_level,
         'status', a.verification_status,
         'verification_status', a.verification_status,
@@ -159,8 +159,13 @@ export const deleteByUserId = async (userId: string): Promise<number> => {
 export const countByUserId = async (userId: string): Promise<number> => {
   const sql = `
     SELECT COUNT(*) as count
-    FROM recommendations
-    WHERE user_id = $1 AND expires_at > NOW()
+    FROM recommendations r
+    INNER JOIN admissions a ON r.admission_id = a.id
+    WHERE r.user_id = $1
+      AND r.expires_at > NOW()
+      AND a.verification_status = 'verified'
+      AND a.deadline > NOW()
+      AND a.is_active = true
   `;
   const result = await query(sql, [userId]);
   return parseInt(result.rows[0].count, 10);

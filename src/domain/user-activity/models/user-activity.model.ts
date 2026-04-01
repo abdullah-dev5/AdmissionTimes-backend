@@ -17,6 +17,7 @@ import { query } from '@db/connection';
 import { UserActivity, UserActivityFilters, CreateUserActivityDTO } from '../types/user-activity.types';
 import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/user-activity.constants';
+import { ACTIVITY_TYPE } from '@config/constants';
 
 /**
  * Find user activity by ID
@@ -91,6 +92,40 @@ export const create = async (data: CreateUserActivityDTO): Promise<UserActivity>
 
   const result = await query(sql, params);
   return result.rows[0];
+};
+
+/**
+ * Find existing capped activity for student+admission combinations.
+ *
+ * Cap rules:
+ * - one viewed event per student per admission
+ * - one click-group event (searched|compared|alert) per student per admission
+ */
+export const findExistingCappedStudentAdmissionActivity = async (
+  userId: string,
+  entityId: string,
+  activityType: CreateUserActivityDTO['activity_type']
+): Promise<UserActivity | null> => {
+  const clickGroup = [ACTIVITY_TYPE.SEARCHED, ACTIVITY_TYPE.COMPARED, ACTIVITY_TYPE.ALERT];
+
+  const sql = `
+    SELECT *
+    FROM user_activity
+    WHERE user_id = $1
+      AND user_type = 'student'
+      AND entity_type = 'admission'
+      AND entity_id = $2
+      AND (
+        ($3 = '${ACTIVITY_TYPE.VIEWED}' AND activity_type = '${ACTIVITY_TYPE.VIEWED}')
+        OR
+        ($3 = ANY($4::text[]) AND activity_type = ANY($4::text[]))
+      )
+    ORDER BY created_at ASC
+    LIMIT 1
+  `;
+
+  const result = await query(sql, [userId, entityId, activityType, clickGroup]);
+  return result.rows[0] || null;
 };
 
 /**

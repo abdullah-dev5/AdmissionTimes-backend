@@ -86,6 +86,11 @@ export const config = {
       (process.env.REALTIME_ENABLED !== 'false' && !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY),
   },
 
+  // Push notification delivery configuration
+  push: {
+    enabled: process.env.PUSH_NOTIFICATIONS_ENABLED !== 'false',
+  },
+
   // AI configuration (Gemini)
   ai: {
     enabled: process.env.AI_ENABLED === 'true' || (!!process.env.GEMINI_API_KEY && process.env.AI_ENABLED !== 'false'),

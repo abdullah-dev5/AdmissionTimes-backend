@@ -1,6 +1,8 @@
 import { config } from '@config/config';
 import { NOTIFICATION_TYPE } from '@config/constants';
+import { query } from '@db/connection';
 import type { Notification } from '@domain/notifications/types/notifications.types';
+import crypto from 'crypto';
 import {
   upsertPushToken,
   listActivePushTokensForUser,
@@ -16,6 +18,55 @@ interface RegisterPushTokenInput {
 }
 
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
+
+const hashToken = (token: string): string => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+const logPushDelivery = async (input: {
+  notificationId?: string | null;
+  recipientId?: string | null;
+  token?: string | null;
+  ticketStatus: string;
+  ticketId?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  httpStatus?: number | null;
+  providerResponse?: unknown;
+}) => {
+  try {
+    await query(
+      `
+        INSERT INTO push_delivery_logs (
+          notification_id,
+          recipient_id,
+          token_hash,
+          channel,
+          ticket_status,
+          ticket_id,
+          error_code,
+          error_message,
+          http_status,
+          provider_response
+        )
+        VALUES ($1::uuid, $2::uuid, $3, 'expo', $4, $5, $6, $7, $8, $9::jsonb)
+      `,
+      [
+        input.notificationId || null,
+        input.recipientId || null,
+        input.token ? hashToken(input.token) : null,
+        input.ticketStatus,
+        input.ticketId || null,
+        input.errorCode || null,
+        input.errorMessage || null,
+        input.httpStatus ?? null,
+        input.providerResponse ? JSON.stringify(input.providerResponse) : null,
+      ]
+    );
+  } catch (error) {
+    console.error('[PushDelivery] Failed to persist push delivery log:', error);
+  }
+};
 
 const inferNotificationCategory = (notificationType: string): 'verification' | 'deadline' | 'system' | 'update' => {
   if (notificationType === NOTIFICATION_TYPE.DEADLINE_NEAR) return 'deadline';
@@ -56,11 +107,13 @@ export const sendPushNotificationToUser = async (
     categoryEnabled?: boolean;
   }
 ): Promise<void> => {
+  let tokens: string[] = [];
+
   if (config.env === 'test') {
     return;
   }
 
-  if (config.realtime.enabled === false) {
+  if (config.push.enabled === false) {
     return;
   }
 
@@ -77,7 +130,7 @@ export const sendPushNotificationToUser = async (
   }
 
   try {
-    const tokens = await listActivePushTokensForUser(notification.recipient_id);
+    tokens = await listActivePushTokensForUser(notification.recipient_id);
 
     if (!tokens.length) {
       return;
@@ -108,11 +161,85 @@ export const sendPushNotificationToUser = async (
       body: JSON.stringify(messages),
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const responseText = await response.text();
       console.error('[PushDelivery] Expo push request failed:', response.status, responseText);
+      for (const token of tokens) {
+        await logPushDelivery({
+          notificationId: notification.id,
+          recipientId: notification.recipient_id,
+          token,
+          ticketStatus: 'http_error',
+          errorMessage: responseText?.slice(0, 1000) || 'HTTP error from Expo push endpoint',
+          httpStatus: response.status,
+          providerResponse: { responseText },
+        });
+      }
+      return;
+    }
+
+    let parsed: any = null;
+    try {
+      parsed = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      parsed = null;
+    }
+
+    const tickets = Array.isArray(parsed?.data) ? parsed.data : [];
+
+    if (tickets.length === 0) {
+      for (const token of tokens) {
+        await logPushDelivery({
+          notificationId: notification.id,
+          recipientId: notification.recipient_id,
+          token,
+          ticketStatus: 'unknown',
+          errorMessage: 'Expo response did not include push tickets',
+          httpStatus: response.status,
+          providerResponse: parsed || responseText,
+        });
+      }
+      return;
+    }
+
+    for (let i = 0; i < tickets.length; i += 1) {
+      const ticket = tickets[i];
+      const targetToken = tokens[i];
+      const detailsError = String(ticket?.details?.error || '');
+      const ticketMessage = String(ticket?.message || '');
+
+      await logPushDelivery({
+        notificationId: notification.id,
+        recipientId: notification.recipient_id,
+        token: targetToken,
+        ticketStatus: String(ticket?.status || 'unknown'),
+        ticketId: ticket?.id ? String(ticket.id) : null,
+        errorCode: detailsError || null,
+        errorMessage: ticketMessage || null,
+        httpStatus: response.status,
+        providerResponse: ticket,
+      });
+
+      if (ticket?.status === 'error' && (detailsError === 'DeviceNotRegistered' || ticketMessage.includes('DeviceNotRegistered'))) {
+        try {
+          await deactivatePushTokenForUser(notification.recipient_id, targetToken);
+          console.warn('[PushDelivery] Deactivated invalid Expo token for user:', notification.recipient_id);
+        } catch (deactivateError) {
+          console.error('[PushDelivery] Failed to deactivate invalid token:', deactivateError);
+        }
+      }
     }
   } catch (error) {
     console.error('[PushDelivery] Failed to send push notification:', error);
+    for (const token of tokens) {
+      await logPushDelivery({
+        notificationId: notification.id,
+        recipientId: notification.recipient_id,
+        token,
+        ticketStatus: 'exception',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 };

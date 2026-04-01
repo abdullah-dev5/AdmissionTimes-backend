@@ -15,6 +15,7 @@
     "seed:force": "ts-node -r tsconfig-paths/register scripts/reset-seeds.ts --clear-data",
     "seed:clear": "ts-node -r tsconfig-paths/register scripts/reset-seeds.ts --clear-data",
     "get-user-ids": "ts-node -r tsconfig-paths/register scripts/get-user-ids.ts",
+    "smoke:push": "ts-node -r tsconfig-paths/register scripts/smoke-test-push-delivery.ts",
     "test-api": "ts-node -r tsconfig-paths/register scripts/test-api.ts",
     "test-jwt": "ts-node -r tsconfig-paths/register scripts/test-jwt-auth.ts",
     "convert-mock": "ts-node -r tsconfig-paths/register scripts/convert-mock-to-seed.ts"

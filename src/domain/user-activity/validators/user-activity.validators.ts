@@ -22,10 +22,9 @@ export const createUserActivitySchema = Joi.object({
 
   user_type: Joi.string()
     .valid(...Object.values(USER_TYPE))
-    .required()
+    .optional()
     .messages({
       'any.only': `user_type must be one of: ${Object.values(USER_TYPE).join(', ')}`,
-      'any.required': 'user_type is required',
     }),
 
   activity_type: Joi.string()
