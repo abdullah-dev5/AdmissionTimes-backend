@@ -16,7 +16,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { sendSuccess, sendError } from '@shared/utils/response';
 import * as dashboardService from '../services/dashboard.service';
-import * as recommendationsService from '../services/recommendations.service';
+import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
 import { UserContext } from '../types/dashboard.types';
 
 /**
@@ -140,7 +140,7 @@ export const getStudentRecommendations = async (
 
     // Get query parameters
     const limit = parseInt(req.query.limit as string, 10) || 10;
-    const minScore = parseInt(req.query.min_score as string, 10) || 75;
+    const minScore = parseInt(req.query.min_score as string, 10) || 50;
 
     const recommendations = await recommendationsService.getRecommendations(
       userContext.id,

@@ -15,6 +15,113 @@ import { query } from '@db/connection';
 import * as recommendationsModel from '../models/recommendations.model';
 import { CreateRecommendationDTO, RecommendationWithAdmission } from '../types/recommendations.types';
 
+const RECOMMENDATION_REFRESH_COOLDOWN_MINUTES = 30;
+const RECOMMENDATION_MAX_STALE_HOURS = 24;
+const ACTIVITY_LOOKBACK_DAYS = 7;
+
+type RefreshSignalReason = 'no_cache' | 'stale_cache' | 'activity_invalidated' | 'fresh_cache';
+
+const recommendationMetrics = {
+  started_at: new Date().toISOString(),
+  requests_total: 0,
+  served_from_cache_total: 0,
+  empty_response_total: 0,
+  sync_regeneration_triggered_total: 0,
+  sync_regeneration_created_total: 0,
+  async_refresh_triggered_total: 0,
+  async_refresh_skipped_total: 0,
+  async_refresh_failed_total: 0,
+  manual_refresh_total: 0,
+  batch_generation_runs_total: 0,
+  generation_runs_total: 0,
+  generation_created_total: 0,
+  refresh_reason_counts: {
+    no_cache: 0,
+    stale_cache: 0,
+    activity_invalidated: 0,
+    fresh_cache: 0,
+  } as Record<RefreshSignalReason, number>,
+  generation_mode_counts: {
+    collaborative: 0,
+    fallback: 0,
+    popular: 0,
+  },
+};
+
+const incrementRefreshReason = (reason: RefreshSignalReason): void => {
+  recommendationMetrics.refresh_reason_counts[reason] += 1;
+};
+
+export const getRecommendationObservability = () => {
+  const requests = recommendationMetrics.requests_total;
+  const emptyRate = requests > 0
+    ? Number(((recommendationMetrics.empty_response_total / requests) * 100).toFixed(2))
+    : 0;
+  const cacheHitRate = requests > 0
+    ? Number(((recommendationMetrics.served_from_cache_total / requests) * 100).toFixed(2))
+    : 0;
+
+  return {
+    ...recommendationMetrics,
+    empty_response_rate_percent: emptyRate,
+    cache_hit_rate_percent: cacheHitRate,
+    policy: {
+      refresh_cooldown_minutes: RECOMMENDATION_REFRESH_COOLDOWN_MINUTES,
+      max_stale_hours: RECOMMENDATION_MAX_STALE_HOURS,
+      activity_lookback_days: ACTIVITY_LOOKBACK_DAYS,
+    },
+  };
+};
+
+const shouldRefreshFromRecentActivity = async (
+  userId: string
+): Promise<{ shouldRefresh: boolean; reason: RefreshSignalReason }> => {
+  const sql = `
+    WITH rec AS (
+      SELECT MAX(generated_at) as last_generated_at
+      FROM recommendations
+      WHERE user_id = $1 AND expires_at > NOW()
+    ),
+    activity AS (
+      SELECT MAX(created_at) as last_activity_at
+      FROM user_activity
+      WHERE user_id = $1
+        AND activity_type IN ('saved', 'watchlisted', 'searched', 'compared', 'viewed')
+        AND created_at >= NOW() - INTERVAL '${ACTIVITY_LOOKBACK_DAYS} days'
+    )
+    SELECT
+      rec.last_generated_at,
+      activity.last_activity_at,
+      CASE
+        WHEN rec.last_generated_at IS NULL THEN 'no_cache'
+        WHEN rec.last_generated_at < NOW() - INTERVAL '${RECOMMENDATION_MAX_STALE_HOURS} hours' THEN 'stale_cache'
+        WHEN activity.last_activity_at IS NOT NULL
+          AND activity.last_activity_at > rec.last_generated_at
+          AND rec.last_generated_at < NOW() - INTERVAL '${RECOMMENDATION_REFRESH_COOLDOWN_MINUTES} minutes'
+        THEN 'activity_invalidated'
+        ELSE 'fresh_cache'
+      END as refresh_reason,
+      (
+        rec.last_generated_at IS NULL
+        OR rec.last_generated_at < NOW() - INTERVAL '${RECOMMENDATION_MAX_STALE_HOURS} hours'
+        OR (
+          activity.last_activity_at IS NOT NULL
+          AND activity.last_activity_at > rec.last_generated_at
+          AND rec.last_generated_at < NOW() - INTERVAL '${RECOMMENDATION_REFRESH_COOLDOWN_MINUTES} minutes'
+        )
+      ) as should_refresh
+    FROM rec, activity
+  `;
+
+  const result = await query(sql, [userId]);
+  const row = result.rows[0] || {};
+  const reason = (row.refresh_reason || 'fresh_cache') as RefreshSignalReason;
+  return {
+    shouldRefresh: Boolean(row.should_refresh),
+    reason,
+  };
+};
+
 /**
  * Get recommendations for a user
  * 
@@ -28,13 +135,43 @@ export const getRecommendations = async (
   limit: number = 10,
   minScore: number = 50
 ): Promise<RecommendationWithAdmission[]> => {
+  recommendationMetrics.requests_total += 1;
+
   // Check if user has fresh recommendations
   const recommendations = await recommendationsModel.findByUserId(userId, limit, minScore);
   
   // If no recommendations exist, generate them on-demand
   if (recommendations.length === 0) {
-    await generateRecommendationsForUser(userId);
-    return await recommendationsModel.findByUserId(userId, limit, minScore);
+    recommendationMetrics.sync_regeneration_triggered_total += 1;
+    const created = await generateRecommendationsForUser(userId);
+    recommendationMetrics.sync_regeneration_created_total += created;
+
+    const regenerated = await recommendationsModel.findByUserId(userId, limit, minScore);
+    if (regenerated.length === 0) {
+      recommendationMetrics.empty_response_total += 1;
+    }
+    incrementRefreshReason('no_cache');
+    return regenerated;
+  }
+
+  recommendationMetrics.served_from_cache_total += 1;
+
+  // Keep response fast: refresh asynchronously only when stale or invalidated by recent activity.
+  try {
+    const refreshSignal = await shouldRefreshFromRecentActivity(userId);
+    incrementRefreshReason(refreshSignal.reason);
+    if (refreshSignal.shouldRefresh) {
+      recommendationMetrics.async_refresh_triggered_total += 1;
+      void generateRecommendationsForUser(userId).catch((error) => {
+        recommendationMetrics.async_refresh_failed_total += 1;
+        console.warn(`[Recommendations] Async refresh skipped for user ${userId}:`, error);
+      });
+    } else {
+      recommendationMetrics.async_refresh_skipped_total += 1;
+    }
+  } catch (error) {
+    recommendationMetrics.async_refresh_failed_total += 1;
+    console.warn(`[Recommendations] Failed to evaluate refresh signal for user ${userId}:`, error);
   }
 
   return recommendations;
@@ -56,6 +193,8 @@ export const getRecommendations = async (
  * @returns Number of recommendations created
  */
 export const generateRecommendationsForUser = async (userId: string): Promise<number> => {
+  recommendationMetrics.generation_runs_total += 1;
+
   // First check if user has any watchlist items
   const watchlistCheck = await query(
     'SELECT COUNT(*) as count FROM watchlists WHERE user_id = $1',
@@ -66,7 +205,10 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
   // If no watchlist, show popular programs
   if (watchlistCount === 0) {
     console.log(`[Recommendations] User ${userId} has no watchlist, showing popular programs...`);
-    return await generatePopularRecommendations(userId);
+    const created = await generatePopularRecommendations(userId);
+    recommendationMetrics.generation_mode_counts.popular += 1;
+    recommendationMetrics.generation_created_total += created;
+    return created;
   }
 
   const sql = `
@@ -140,7 +282,10 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
   // If no collaborative recommendations, use content-based fallback
   if (result.rows.length === 0) {
     console.log(`[Recommendations] No collaborative recommendations for user ${userId}, using fallback...`);
-    return await generateFallbackRecommendations(userId);
+    const created = await generateFallbackRecommendations(userId);
+    recommendationMetrics.generation_mode_counts.fallback += 1;
+    recommendationMetrics.generation_created_total += created;
+    return created;
   }
 
   // Prepare recommendations for bulk insert
@@ -154,7 +299,10 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
   }));
 
   // Bulk insert recommendations
-  return await recommendationsModel.bulkCreate(recommendations);
+  const created = await recommendationsModel.bulkCreate(recommendations);
+  recommendationMetrics.generation_mode_counts.collaborative += 1;
+  recommendationMetrics.generation_created_total += created;
+  return created;
 };
 
 /**
@@ -341,6 +489,8 @@ const generatePopularRecommendations = async (userId: string): Promise<number> =
 export const generateRecommendationsForAllUsers = async (
   batchSize: number = 50
 ): Promise<{ usersProcessed: number; recommendationsCreated: number }> => {
+  recommendationMetrics.batch_generation_runs_total += 1;
+
   // Get all student users with watchlists
   const getUsersSql = `
     SELECT DISTINCT u.id
@@ -409,6 +559,8 @@ export const cleanupExpiredRecommendations = async (): Promise<number> => {
  * @returns Number of new recommendations created
  */
 export const refreshUserRecommendations = async (userId: string): Promise<number> => {
+  recommendationMetrics.manual_refresh_total += 1;
+
   // Delete existing recommendations
   await recommendationsModel.deleteByUserId(userId);
   

@@ -393,33 +393,43 @@ export const getUniversityDashboard = async (
       ),
       recent_admissions AS (
         SELECT 
-          id::text,
-          title,
-          description,
-          program_type,
-          degree_level,
-          field_of_study,
-          duration,
-          tuition_fee,
-          currency,
-          application_fee,
-          deadline::text,
-          start_date,
-          location,
-          delivery_mode,
-          requirements,
-          verification_status::text,
-          verified_by::text,
-          verified_at::text,
-          rejection_reason,
-          verification_comments,
-          admin_notes,
-          created_at::text,
-          updated_at::text
-        FROM admissions
-        WHERE (created_by::text = ANY($2::text[]) OR university_id::text = ANY($3::text[]))
-          AND is_active = true
-        ORDER BY updated_at DESC
+          a.id::text,
+          a.title,
+          a.description,
+          a.program_type,
+          a.degree_level,
+          a.field_of_study,
+          a.duration,
+          a.tuition_fee,
+          a.currency,
+          a.application_fee,
+          a.deadline::text,
+          a.start_date,
+          a.location,
+          a.delivery_mode,
+          a.requirements,
+          a.verification_status::text,
+          a.verified_by::text,
+          a.verified_at::text,
+          a.rejection_reason,
+          a.verification_comments,
+          a.admin_notes,
+          a.created_at::text,
+          a.updated_at::text,
+          COALESCE(view_counts.views, 0)::int as views
+        FROM admissions a
+        LEFT JOIN LATERAL (
+          SELECT COUNT(DISTINCT ua.user_id::text)::int AS views
+          FROM user_activity ua
+          WHERE ua.entity_type = 'admission'
+            AND ua.activity_type::text = 'viewed'
+            AND ua.user_type::text = 'student'
+            AND ua.entity_id::text = a.id::text
+            AND ua.user_id IS NOT NULL
+        ) view_counts ON TRUE
+        WHERE (a.created_by::text = ANY($2::text[]) OR a.university_id::text = ANY($3::text[]))
+          AND a.is_active = true
+        ORDER BY a.updated_at DESC
       ),
       pending_verifications AS (
         SELECT 
@@ -493,40 +503,38 @@ export const getUniversityDashboard = async (
         WHERE (created_by::text = ANY($1::text[]) OR university_id::text = ANY($2::text[]))
           AND is_active = true
       ),
-      first_views AS (
-        SELECT
-          ua.entity_id::text as admission_id,
-          ua.user_id::text as person_id,
-          MIN(ua.created_at) as first_at
-        FROM user_activity ua
-        INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
-        WHERE ua.entity_type = 'admission'
-          AND ua.user_type::text = 'student'
-          AND ua.activity_type::text = 'viewed'
-          AND ua.user_id IS NOT NULL
-        GROUP BY ua.entity_id::text, ua.user_id::text
-      ),
-      first_clicks AS (
-        SELECT
-          ua.entity_id::text as admission_id,
-          ua.user_id::text as person_id,
-          MIN(ua.created_at) as first_at
-        FROM user_activity ua
-        INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
-        WHERE ua.entity_type = 'admission'
-          AND ua.user_type::text = 'student'
-          AND ua.activity_type::text IN ('searched', 'compared', 'alert')
-          AND ua.user_id IS NOT NULL
-        GROUP BY ua.entity_id::text, ua.user_id::text
-      ),
       views_data AS (
-        SELECT date_trunc('week', fv.first_at) as week_start, COUNT(*)::int as count
-        FROM first_views fv
+        SELECT date_trunc('week', dedup.first_viewed_at) as week_start,
+               COUNT(*)::int as count
+        FROM (
+          SELECT ua.entity_id::text, ua.user_id::text, MIN(ua.created_at) AS first_viewed_at
+          FROM user_activity ua
+          INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
+          WHERE ua.entity_type = 'admission'
+            AND ua.user_type::text = 'student'
+            AND ua.activity_type::text = 'viewed'
+            AND ua.created_at IS NOT NULL
+            AND ua.user_id IS NOT NULL
+          GROUP BY ua.entity_id::text, ua.user_id::text
+        ) dedup
+        WHERE dedup.first_viewed_at IS NOT NULL
         GROUP BY 1
       ),
       clicks_data AS (
-        SELECT date_trunc('week', fc.first_at) as week_start, COUNT(*)::int as count
-        FROM first_clicks fc
+        SELECT date_trunc('week', dedup.first_clicked_at) as week_start,
+               COUNT(*)::int as count
+        FROM (
+          SELECT ua.entity_id::text, ua.user_id::text, MIN(ua.created_at) AS first_clicked_at
+          FROM user_activity ua
+          INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
+          WHERE ua.entity_type = 'admission'
+            AND ua.user_type::text = 'student'
+            AND ua.activity_type::text IN ('searched', 'compared', 'alert')
+            AND ua.created_at IS NOT NULL
+            AND ua.user_id IS NOT NULL
+          GROUP BY ua.entity_id::text, ua.user_id::text
+        ) dedup
+        WHERE dedup.first_clicked_at IS NOT NULL
         GROUP BY 1
       ),
       reminders_data AS (
@@ -544,15 +552,12 @@ export const getUniversityDashboard = async (
         GROUP BY 1
       ),
       saves_data AS (
-        SELECT date_trunc('week', ua.created_at) as week_start,
-               COUNT(DISTINCT (ua.user_id::text || ':' || ua.entity_id::text))::int as count
-        FROM user_activity ua
-        INNER JOIN owned_admissions oa ON oa.admission_id = ua.entity_id::text
-        WHERE ua.entity_type = 'admission'
-          AND ua.user_type::text = 'student'
-          AND ua.activity_type::text IN ('saved', 'watchlisted')
-          AND ua.user_id IS NOT NULL
-          AND ua.created_at IS NOT NULL
+        SELECT date_trunc('week', w.created_at) as week_start,
+               COUNT(DISTINCT (w.user_id::text || ':' || w.admission_id::text))::int as count
+        FROM watchlists w
+        INNER JOIN owned_admissions oa ON oa.admission_id = w.admission_id::text
+        WHERE w.user_id IS NOT NULL
+          AND w.created_at IS NOT NULL
         GROUP BY 1
       )
       SELECT

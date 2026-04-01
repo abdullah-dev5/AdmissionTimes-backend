@@ -30,6 +30,16 @@ router.get(
 );
 
 /**
+ * @route GET /api/v1/recommendations/observability
+ * @desc Get recommendation service observability metrics
+ * @access Admin
+ */
+router.get(
+  '/observability',
+  recommendationsController.getRecommendationsObservability
+);
+
+/**
  * @route POST /api/v1/recommendations/refresh
  * @desc Refresh recommendations for authenticated user
  * @access Student
