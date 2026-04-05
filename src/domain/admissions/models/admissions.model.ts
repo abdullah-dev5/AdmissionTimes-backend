@@ -30,8 +30,28 @@ export const findById = async (
   includeInactive: boolean = false
 ): Promise<Admission | null> => {
   const sql = includeInactive
-    ? 'SELECT * FROM admissions WHERE id = $1'
-    : 'SELECT * FROM admissions WHERE id = $1 AND is_active = true';
+    ? `
+      SELECT
+        a.*,
+        u.name AS university_name,
+        u.logo_url AS university_logo_url,
+        u.city AS university_city,
+        u.country AS university_country
+      FROM admissions a
+      LEFT JOIN universities u ON u.id = a.university_id
+      WHERE a.id = $1
+    `
+    : `
+      SELECT
+        a.*,
+        u.name AS university_name,
+        u.logo_url AS university_logo_url,
+        u.city AS university_city,
+        u.country AS university_country
+      FROM admissions a
+      LEFT JOIN universities u ON u.id = a.university_id
+      WHERE a.id = $1 AND a.is_active = true
+    `;
 
   const result = await query(sql, [id]);
   return result.rows[0] || null;
