@@ -50,6 +50,21 @@ export const getById = async (
   // Public access: only verified admissions
   if (!userContext || userContext.role === 'guest' || userContext.role === 'student') {
     if (admission.verification_status !== VERIFICATION_STATUS.VERIFIED) {
+      // Student exception: allow access to admissions already saved in the student's watchlist.
+      if (userContext?.role === 'student' && userContext.id) {
+        const watchlistCheck = await query(
+          'SELECT 1 FROM watchlists WHERE user_id = $1 AND admission_id = $2 LIMIT 1',
+          [userContext.id, id]
+        );
+
+        if (watchlistCheck.rows.length > 0) {
+          trackAdmissionView(id, userContext).catch(() => {
+            // Silently fail - activity tracking should not break the request
+          });
+          return admission;
+        }
+      }
+
       throw new AppError('Admission not found', 404);
     }
   }
@@ -644,9 +659,15 @@ async function applyAccessControl(
 ): Promise<AdmissionFilters> {
   const effectiveFilters = { ...filters };
 
-  // Public/Student: only verified admissions
-  if (!userContext || userContext.role === 'guest' || userContext.role === 'student') {
+  // Public (guest): only verified admissions
+  if (!userContext || userContext.role === 'guest') {
     effectiveFilters.verification_status = VERIFICATION_STATUS.VERIFIED;
+    effectiveFilters.is_active = true;
+  }
+
+  // Student: verified + pending admissions
+  if (userContext?.role === 'student') {
+    effectiveFilters.verification_status = [VERIFICATION_STATUS.VERIFIED, VERIFICATION_STATUS.PENDING];
     effectiveFilters.is_active = true;
   }
 

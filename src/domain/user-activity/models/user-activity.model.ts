@@ -118,7 +118,7 @@ export const findExistingCappedStudentAdmissionActivity = async (
       AND (
         ($3 = '${ACTIVITY_TYPE.VIEWED}' AND activity_type = '${ACTIVITY_TYPE.VIEWED}')
         OR
-        ($3 = ANY($4::text[]) AND activity_type = ANY($4::text[]))
+        ($3 = ANY($4::text[]) AND activity_type::text = ANY($4::text[]))
       )
     ORDER BY created_at ASC
     LIMIT 1
