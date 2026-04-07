@@ -42,6 +42,12 @@ export interface AdminAuditLog {
   user_agent: string | null;
   created_at: string; // ISO8601 timestamp
   created_by: string;
+
+  // Phase 0 additive normalized fields
+  changed_at_iso?: string;
+  admission_title?: string;
+  action_label?: 'Verified' | 'Rejected' | 'Updated';
+  changed_by_label?: string;
 }
 
 /**
@@ -65,6 +71,25 @@ export interface AdminAdmission {
   created_at: string;
   updated_at: string;
   is_active: boolean;
+
+  // Phase 0 additive normalized fields
+  contract_version?: number;
+  degree_label?: string;
+  degree_type?: string;
+  deadline_iso?: string | null;
+  days_remaining?: number;
+  program_status?: 'Open' | 'Closing Soon' | 'Closed';
+  fee_amount?: number;
+  fee_display?: string;
+  eligibility_text?: string | null;
+  university_website_url?: string | null;
+  admission_portal_url?: string | null;
+  primary_apply_url?: string | null;
+  status_label?: 'Verified' | 'Pending' | 'Closed' | 'Draft' | 'Pending Audit';
+  match_label?: string;
+  submitted_on?: string;
+  submitted_by_label?: string;
+  admission_title?: string;
 }
 
 /**

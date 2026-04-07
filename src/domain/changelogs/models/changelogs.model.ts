@@ -108,7 +108,23 @@ export const findByAdmissionId = async (
     SELECT 
       c.*,
       a.title as program_title,
-      u.display_name as changed_by_name
+      a.title as admission_title,
+      u.display_name as changed_by_name,
+      c.created_at::text as changed_at_iso,
+      CASE
+        WHEN c.actor_type = 'admin' THEN 'Admin Edit'
+        WHEN c.actor_type = 'system' THEN 'Scraper Update'
+        ELSE 'Manual Edit'
+      END as change_type,
+      COALESCE(
+        NULLIF(u.display_name, ''),
+        CASE
+          WHEN c.actor_type = 'admin' THEN 'Administrator'
+          WHEN c.actor_type = 'university' THEN 'University Representative'
+          WHEN c.actor_type = 'system' THEN 'Automated System'
+          ELSE 'System'
+        END
+      ) as modified_by
     FROM changelogs c
     LEFT JOIN admissions a ON c.admission_id = a.id
     LEFT JOIN users u ON c.changed_by = u.id
@@ -336,7 +352,23 @@ function buildFindManyQuery(
     SELECT 
       c.*,
       a.title as program_title,
-      u.display_name as changed_by_name
+      a.title as admission_title,
+      u.display_name as changed_by_name,
+      c.created_at::text as changed_at_iso,
+      CASE
+        WHEN c.actor_type = 'admin' THEN 'Admin Edit'
+        WHEN c.actor_type = 'system' THEN 'Scraper Update'
+        ELSE 'Manual Edit'
+      END as change_type,
+      COALESCE(
+        NULLIF(u.display_name, ''),
+        CASE
+          WHEN c.actor_type = 'admin' THEN 'Administrator'
+          WHEN c.actor_type = 'university' THEN 'University Representative'
+          WHEN c.actor_type = 'system' THEN 'Automated System'
+          ELSE 'System'
+        END
+      ) as modified_by
     FROM changelogs c
     LEFT JOIN admissions a ON c.admission_id = a.id
     LEFT JOIN users u ON c.changed_by = u.id
