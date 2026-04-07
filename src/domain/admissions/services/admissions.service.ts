@@ -28,6 +28,7 @@ import {
 import { query } from '@db/connection';
 import { CHANGE_TYPE, NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE, VERIFICATION_STATUS, type UserType, DEADLINE_TYPE } from '@config/constants';
 import * as deadlinesModel from '../../deadlines/models/deadlines.model';
+import { withAdmissionContract } from '@shared/utils/admissionContract';
 
 /**
  * Get admission by ID
@@ -42,14 +43,15 @@ export const getById = async (
   userContext?: UserContext
 ): Promise<Admission> => {
   const admission = await admissionsModel.findById(id);
+  const normalizedAdmission = admission ? withAdmissionContract(admission as any) : null;
 
-  if (!admission) {
+  if (!normalizedAdmission) {
     throw new AppError('Admission not found', 404);
   }
 
   // Public access: only verified admissions
   if (!userContext || userContext.role === 'guest' || userContext.role === 'student') {
-    if (admission.verification_status !== VERIFICATION_STATUS.VERIFIED) {
+    if (normalizedAdmission.verification_status !== VERIFICATION_STATUS.VERIFIED) {
       // Student exception: allow access to admissions already saved in the student's watchlist.
       if (userContext?.role === 'student' && userContext.id) {
         const watchlistCheck = await query(
@@ -61,7 +63,7 @@ export const getById = async (
           trackAdmissionView(id, userContext).catch(() => {
             // Silently fail - activity tracking should not break the request
           });
-          return admission;
+          return normalizedAdmission;
         }
       }
 
@@ -71,12 +73,12 @@ export const getById = async (
 
   // University can see their own admissions regardless of status
   if (userContext?.role === 'university' && userContext.university_id) {
-    if (admission.created_by === userContext.id || admission.university_id === userContext.university_id) {
+    if (normalizedAdmission.created_by === userContext.id || normalizedAdmission.university_id === userContext.university_id) {
       // Track activity: user viewed admission
       trackAdmissionView(id, userContext).catch(() => {
         // Silently fail - activity tracking should not break the request
       });
-      return admission;
+      return normalizedAdmission;
     }
   }
 
@@ -86,11 +88,11 @@ export const getById = async (
     trackAdmissionView(id, userContext).catch(() => {
       // Silently fail - activity tracking should not break the request
     });
-    return admission;
+    return normalizedAdmission;
   }
 
   // Default: only verified admissions for public
-  if (admission.verification_status !== VERIFICATION_STATUS.VERIFIED) {
+  if (normalizedAdmission.verification_status !== VERIFICATION_STATUS.VERIFIED) {
     throw new AppError('Admission not found', 404);
   }
 
@@ -99,7 +101,7 @@ export const getById = async (
     // Silently fail - activity tracking should not break the request
   });
 
-  return admission;
+  return normalizedAdmission;
 };
 
 /**
@@ -130,7 +132,9 @@ export const getMany = async (
     admissionsModel.count(effectiveFilters),
   ]);
 
-  return { admissions, total };
+  const normalizedAdmissions = admissions.map((admission) => withAdmissionContract(admission as any));
+
+  return { admissions: normalizedAdmissions, total };
 };
 
 /**

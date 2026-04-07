@@ -21,6 +21,12 @@ export interface Changelog {
   diff_summary: string | null;
   metadata: Record<string, any> | null;
   created_at: string; // ISO8601 timestamp
+
+  // Phase 0 additive normalized fields
+  admission_title?: string;
+  changed_at_iso?: string;
+  change_type?: 'Manual Edit' | 'Admin Edit' | 'Scraper Update';
+  modified_by?: string;
 }
 
 /**

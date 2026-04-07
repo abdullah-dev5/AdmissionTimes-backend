@@ -45,6 +45,21 @@ export interface RecommendedProgram {
   match_reason?: string;
   saved: boolean;
   alert_enabled: boolean;
+
+  // Phase 0 additive normalized contract fields
+  contract_version?: number;
+  degree_label?: string;
+  degree_type?: string;
+  deadline_iso?: string | null;
+  program_status?: 'Open' | 'Closing Soon' | 'Closed';
+  fee_amount?: number;
+  fee_display?: string;
+  eligibility_text?: string | null;
+  university_website_url?: string | null;
+  admission_portal_url?: string | null;
+  primary_apply_url?: string | null;
+  status_label?: 'Verified' | 'Pending' | 'Closed' | 'Draft';
+  match_label?: string;
 }
 
 /**
@@ -149,6 +164,13 @@ export interface PendingVerification {
   submitted_at: string;
   verification_status: 'pending';
   admin_notes: string | null;
+
+  // Phase 0 additive normalized fields
+  contract_version?: number;
+  status_label?: 'Pending';
+  admission_title?: string;
+  submitted_on?: string;
+  submitted_by_label?: string;
 }
 
 /**
@@ -163,6 +185,13 @@ export interface RecentChange {
   new_value: string;
   changed_at: string;
   changed_by: string;
+
+  // Phase 0 additive normalized fields
+  contract_version?: number;
+  admission_title?: string;
+  action_label?: 'Verified' | 'Rejected' | 'Updated';
+  changed_at_iso?: string;
+  changed_by_label?: string;
 }
 
 /**

@@ -23,9 +23,16 @@ export const getPendingAdmissions = async (
 ): Promise<AdminAdmission[]> => {
   try {
     const result = await query(
-      `SELECT *
-       FROM admissions
-       WHERE verification_status = 'pending'
+      `SELECT 
+         a.*, 
+         u.name as university_name,
+         a.title as admission_title,
+         a.updated_at::text as submitted_on,
+         'University' as submitted_by_label
+       FROM admissions a
+       LEFT JOIN universities u ON a.university_id = u.id
+       WHERE a.verification_status = 'pending'
+         AND a.is_active = true
        ORDER BY updated_at DESC
        LIMIT $1 OFFSET $2`,
       [limit, offset]
@@ -52,12 +59,13 @@ export const getAllAdmissionsWithStatus = async (
         u.name as university_name
       FROM admissions a
       LEFT JOIN universities u ON a.university_id = u.id
+      WHERE a.is_active = true
     `;
     const params: any[] = [];
     let paramIndex = 1;
 
     if (status && status !== 'All') {
-      query_str += ` WHERE a.verification_status = $${paramIndex}`;
+      query_str += ` AND a.verification_status = $${paramIndex}`;
       params.push(status);
       paramIndex++;
     }
@@ -78,11 +86,11 @@ export const getAllAdmissionsWithStatus = async (
  */
 export const getAllAdmissionsCount = async (status?: string): Promise<number> => {
   try {
-    let query_str = `SELECT COUNT(*) as count FROM admissions`;
+    let query_str = `SELECT COUNT(*) as count FROM admissions WHERE is_active = true`;
     const params: any[] = [];
 
     if (status && status !== 'All') {
-      query_str += ` WHERE verification_status = $1`;
+      query_str += ` AND verification_status = $1`;
       params.push(status);
     }
 
@@ -99,9 +107,16 @@ export const getAllAdmissionsCount = async (status?: string): Promise<number> =>
 export const getAdmissionById = async (id: string): Promise<AdminAdmission> => {
   try {
     const result = await query(
-      `SELECT *
-       FROM admissions
-       WHERE id = $1`,
+      `SELECT 
+         a.*, 
+         u.name as university_name,
+         a.title as admission_title,
+         a.updated_at::text as submitted_on,
+         'University' as submitted_by_label
+       FROM admissions a
+       LEFT JOIN universities u ON a.university_id = u.id
+       WHERE a.id = $1
+         AND a.is_active = true`,
       [id]
     );
 
@@ -217,10 +232,10 @@ export const getDashboardStats = async (): Promise<AdminDashboardStats> => {
   try {
     const result = await query(
       `SELECT
-         COUNT(*) as total_admissions,
-         COUNT(CASE WHEN verification_status = 'pending' THEN 1 END) as pending_count,
-         COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as verified_count,
-         COUNT(CASE WHEN verification_status = 'rejected' THEN 1 END) as rejected_count,
+         COUNT(*) FILTER (WHERE is_active = true) as total_admissions,
+         COUNT(*) FILTER (WHERE verification_status = 'pending' AND is_active = true) as pending_count,
+         COUNT(*) FILTER (WHERE verification_status = 'verified' AND is_active = true) as verified_count,
+         COUNT(*) FILTER (WHERE verification_status = 'rejected' AND is_active = true) as rejected_count,
          (SELECT COUNT(DISTINCT id) FROM universities WHERE is_active = true) as universities_active,
          (SELECT COUNT(DISTINCT id) FROM users WHERE role = 'student') as students_registered
        FROM admissions`
@@ -250,8 +265,11 @@ export const getDashboardStats = async (): Promise<AdminDashboardStats> => {
 export const getRecentActions = async (limit: number = 10): Promise<AdminAuditLog[]> => {
   try {
     const result = await query(
-      `SELECT *
-       FROM admin_audit_logs
+      `SELECT 
+         aal.*,
+         a.title as admission_title
+       FROM admin_audit_logs aal
+       LEFT JOIN admissions a ON a.id::text = aal.entity_id::text
        ORDER BY created_at DESC
        LIMIT $1`,
       [limit]
@@ -276,7 +294,8 @@ export const getPendingCount = async (): Promise<number> => {
     const result = await query(
       `SELECT COUNT(*) as count
        FROM admissions
-       WHERE verification_status = 'pending'`
+       WHERE verification_status = 'pending'
+         AND is_active = true`
     );
 
     return parseInt(result.rows[0].count) || 0;

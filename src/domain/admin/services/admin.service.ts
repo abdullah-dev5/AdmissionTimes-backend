@@ -36,6 +36,7 @@ import {
 import { createClient } from '@supabase/supabase-js';
 import { randomInt } from 'crypto';
 import { publishNotification } from '@domain/notifications/services/notificationPublisher';
+import { withAdmissionContract } from '@shared/utils/admissionContract';
 
 /**
  * Valid status transitions for admissions
@@ -118,6 +119,34 @@ const sanitizeAuditLogForDashboard = (log: any): any => ({
   old_values: redactValue(log?.old_values || null),
   new_values: redactValue(log?.new_values || null),
 });
+
+const toActionLabel = (actionType: string | null | undefined): 'Verified' | 'Rejected' | 'Updated' => {
+  const value = String(actionType || '').toLowerCase();
+  if (value.includes('verify')) return 'Verified';
+  if (value.includes('reject')) return 'Rejected';
+  return 'Updated';
+};
+
+const toChangedByLabel = (createdBy: string | null | undefined): string => {
+  const value = String(createdBy || '').trim();
+  if (!value) return 'System';
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  return uuidLike ? 'System' : value;
+};
+
+const normalizeAdminAdmission = (admission: any): AdminAdmission => {
+  const normalized = withAdmissionContract(admission || {}) as any;
+  return {
+    ...normalized,
+    admission_title: normalized.admission_title || normalized.title || 'Unknown',
+    submitted_on: normalized.submitted_on || normalized.updated_at || normalized.created_at || null,
+    submitted_by_label: normalized.submitted_by_label || 'University',
+    status_label:
+      normalized.status_label === 'Pending'
+        ? 'Pending Audit'
+        : normalized.status_label || 'Pending Audit',
+  } as AdminAdmission;
+};
 
 const getSupabaseAdminClient = () => {
   if (!config.supabase.url || !config.supabase.serviceRoleKey) {
@@ -537,7 +566,9 @@ export const getPendingAdmissions = async (
     const admissions = await adminModel.getPendingAdmissions(limit, offset);
     const total = await adminModel.getPendingCount();
 
-    return { data: admissions, total };
+    const normalizedAdmissions = admissions.map((admission) => normalizeAdminAdmission(admission));
+
+    return { data: normalizedAdmissions, total };
   } catch (error) {
     throw new AppError('Failed to fetch pending admissions', 500);
   }
@@ -555,7 +586,9 @@ export const getAllAdmissions = async (
     const admissions = await adminModel.getAllAdmissionsWithStatus(limit, offset, status);
     const total = await adminModel.getAllAdmissionsCount(status);
 
-    return { data: admissions, total };
+    const normalizedAdmissions = admissions.map((admission) => normalizeAdminAdmission(admission));
+
+    return { data: normalizedAdmissions, total };
   } catch (error) {
     throw new AppError('Failed to fetch all admissions', 500);
   }
@@ -572,13 +605,21 @@ export const getAdminDashboard = async (): Promise<AdminDashboard> => {
       adminModel.getRecentActions(10), // Last 10 actions
     ]);
 
-    const sanitizedRecentActions = recentActions.map((log) =>
-      sanitizeAuditLogForDashboard(log)
-    ) as typeof recentActions;
+    const normalizedPending = pendingAdmissions.map((admission) => normalizeAdminAdmission(admission));
+    const sanitizedRecentActions = recentActions.map((log) => {
+      const sanitized = sanitizeAuditLogForDashboard(log);
+      return {
+        ...sanitized,
+        changed_at_iso: sanitized.created_at || null,
+        admission_title: sanitized.admission_title || 'Unknown',
+        action_label: toActionLabel(sanitized.action_type),
+        changed_by_label: toChangedByLabel(sanitized.created_by),
+      };
+    }) as typeof recentActions;
 
     return {
       stats,
-      pending_verifications: pendingAdmissions,
+      pending_verifications: normalizedPending,
       recent_actions: sanitizedRecentActions,
     };
   } catch (error) {
@@ -593,7 +634,8 @@ export const getAdmissionDetails = async (
   admissionId: string
 ): Promise<AdminAdmission> => {
   try {
-    return await adminModel.getAdmissionById(admissionId);
+    const admission = await adminModel.getAdmissionById(admissionId);
+    return normalizeAdminAdmission(admission);
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw new AppError('Failed to fetch admission details', 500);

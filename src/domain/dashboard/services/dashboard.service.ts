@@ -20,6 +20,30 @@ import {
   AdminDashboardData,
 } from '../types/dashboard.types';
 import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
+import { withAdmissionContract } from '@shared/utils/admissionContract';
+
+const deriveActionLabel = (field: string | null | undefined, oldValue: string | null | undefined, newValue: string | null | undefined): 'Verified' | 'Rejected' | 'Updated' => {
+  const normalizedField = String(field || '').toLowerCase();
+  const normalizedOld = String(oldValue || '').toLowerCase();
+  const normalizedNew = String(newValue || '').toLowerCase();
+
+  if (normalizedField === 'verification_status' || normalizedField === 'status') {
+    if (normalizedNew.includes('verified')) return 'Verified';
+    if (normalizedNew.includes('rejected')) return 'Rejected';
+    if (normalizedOld.includes('pending') && normalizedNew.includes('verified')) return 'Verified';
+    if (normalizedOld.includes('pending') && normalizedNew.includes('rejected')) return 'Rejected';
+  }
+
+  return 'Updated';
+};
+
+const deriveChangedByLabel = (changedBy: string | null | undefined): string => {
+  const value = String(changedBy || '').trim();
+  if (!value) return 'System';
+
+  const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  return uuidLike ? 'System' : value;
+};
 
 /**
  * Get student dashboard data
@@ -241,7 +265,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
         urgent_deadlines: parseInt(row.stats?.urgent_deadlines || 0, 10),
       },
       recommended_programs: (recommendedPrograms || []).map((program: any) => ({
-        ...program,
+        ...withAdmissionContract(program),
         verification_status: program.verification_status || 'verified',
         match_score: parseInt(program.match_score || 0, 10),
         days_remaining: parseInt(program.days_remaining || 0, 10),
@@ -591,11 +615,25 @@ export const getUniversityDashboard = async (
         saved_admissions: parseInt(row.stats?.saved_admissions || 0, 10),
       },
       recent_admissions: (row.recent_admissions || []).map((admission: any) => ({
-        ...admission,
+        ...withAdmissionContract(admission),
         verification_status: admission.verification_status || 'pending',
       })),
-      pending_verifications: row.pending_verifications || [],
-      recent_changes: row.recent_changes || [],
+      pending_verifications: (row.pending_verifications || []).map((item: any) => ({
+        ...item,
+        contract_version: 2,
+        status_label: 'Pending',
+        admission_title: item.program_title || 'Unknown',
+        submitted_on: item.submitted_at || null,
+        submitted_by_label: 'University',
+      })),
+      recent_changes: (row.recent_changes || []).map((item: any) => ({
+        ...item,
+        contract_version: 2,
+        admission_title: item.program_title || 'Unknown',
+        action_label: deriveActionLabel(item.field, item.old_value, item.new_value),
+        changed_at_iso: item.changed_at || null,
+        changed_by_label: deriveChangedByLabel(item.changed_by),
+      })),
       recent_notifications: (row.recent_notifications || []).map((notif: any) => ({
         ...notif,
         is_read: Boolean(notif.is_read),
@@ -785,8 +823,22 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
         recent_actions: parseInt(row.stats?.recent_actions || 0, 10),
         scraper_jobs_running: parseInt(row.stats?.scraper_jobs_running || 0, 10),
       },
-      pending_verifications: row.pending_verifications || [],
-      recent_actions: row.recent_actions || [],
+      pending_verifications: (row.pending_verifications || []).map((item: any) => ({
+        ...item,
+        contract_version: 2,
+        status_label: 'Pending',
+        admission_title: item.program_title || 'Unknown',
+        submitted_on: item.submitted_at || null,
+        submitted_by_label: 'University',
+      })),
+      recent_actions: (row.recent_actions || []).map((item: any) => ({
+        ...item,
+        contract_version: 2,
+        admission_title: item.program_title || 'Unknown',
+        action_label: deriveActionLabel(item.field, item.old_value, item.new_value),
+        changed_at_iso: item.changed_at || null,
+        changed_by_label: deriveChangedByLabel(item.changed_by),
+      })),
       scraper_activity: [], // TODO: Implement scraper activity
       reminder_coverage: {
         look_ahead_days: 7,

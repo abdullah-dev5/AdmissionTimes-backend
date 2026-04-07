@@ -36,6 +36,22 @@ export interface Admission {
   created_at: string; // ISO8601 timestamp
   updated_at: string; // ISO8601 timestamp
   is_active: boolean;
+
+  // Phase 0 additive normalized contract fields
+  contract_version?: number;
+  degree_label?: string;
+  degree_type?: string;
+  deadline_iso?: string | null;
+  days_remaining?: number;
+  program_status?: 'Open' | 'Closing Soon' | 'Closed';
+  fee_amount?: number;
+  fee_display?: string;
+  eligibility_text?: string | null;
+  university_website_url?: string | null;
+  admission_portal_url?: string | null;
+  primary_apply_url?: string | null;
+  status_label?: 'Verified' | 'Pending' | 'Closed' | 'Draft';
+  match_label?: string;
 }
 
 /**
