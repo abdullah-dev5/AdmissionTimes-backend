@@ -115,6 +115,10 @@ export const adminFilterSchema = Joi.object({
     .valid('draft', 'pending', 'verified', 'rejected')
     .optional(),
 
+  data_origin: Joi.string()
+    .valid('scraper', 'manual', 'university')
+    .optional(),
+
   university_id: Joi.string()
     .uuid()
     .optional(),

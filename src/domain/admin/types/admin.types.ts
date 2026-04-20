@@ -71,6 +71,8 @@ export interface AdminAdmission {
   created_at: string;
   updated_at: string;
   is_active: boolean;
+  data_origin?: string | null;
+  source_system?: string | null;
 
   // Phase 0 additive normalized fields
   contract_version?: number;
@@ -148,6 +150,7 @@ export interface AdminFilterParams {
   page?: number;
   limit?: number;
   status?: VerificationStatus;
+  data_origin?: string;
   university_id?: string;
   verified_by?: string;
   date_from?: string;

@@ -101,6 +101,13 @@ export const config = {
     timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || '12000', 10),
     maxInputChars: parseInt(process.env.AI_MAX_INPUT_CHARS || '16000', 10),
   },
+
+  // Scraper integration configuration
+  scraperIntegration: {
+    enabled: process.env.SCRAPER_INTEGRATION_ENABLED === 'true',
+    publishEnabled: process.env.SCRAPER_PUBLISH_ENABLED === 'true',
+    internalServiceToken: process.env.SCRAPER_INTERNAL_SERVICE_TOKEN || '',
+  },
 };
 
 /**

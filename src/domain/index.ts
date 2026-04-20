@@ -26,6 +26,7 @@ import dashboardRoutes from './dashboard/routes/dashboard.routes';
 import schedulerRoutes from './scheduler/routes/scheduler.routes';
 import recommendationsRoutes from './recommendations/routes/recommendations.routes';
 import aiRoutes from './ai/routes/ai.routes';
+import scraperIntegrationRoutes from './scraper-integration/routes/scraper-integration.routes';
 
 /**
  * Registers all domain routes with the Express application
@@ -69,4 +70,7 @@ export function registerDomains(app: Application): void {
 
   // Scheduler Domain (Phase 2 reminders)
   app.use('/api/v1/scheduler', schedulerRoutes);
+
+  // Internal scraper ingestion (token-protected)
+  app.use('/api/v1/internal/scraper', scraperIntegrationRoutes);
 }

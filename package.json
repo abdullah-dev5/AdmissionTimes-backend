@@ -19,7 +19,8 @@
     "smoke:admission-contract": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-test-admission-contract.ps1",
     "test-api": "ts-node -r tsconfig-paths/register scripts/test-api.ts",
     "test-jwt": "ts-node -r tsconfig-paths/register scripts/test-jwt-auth.ts",
-    "convert-mock": "ts-node -r tsconfig-paths/register scripts/convert-mock-to-seed.ts"
+    "convert-mock": "ts-node -r tsconfig-paths/register scripts/convert-mock-to-seed.ts",
+    "test:integration": "jest --config jest.config.cjs --runInBand"
   },
   "keywords": [
     "admission",
