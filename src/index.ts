@@ -20,7 +20,7 @@ declare global {
   }
 }
 
-import express, { Application, Request, Response } from 'express';
+import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import { networkInterfaces } from 'os';
@@ -67,9 +67,13 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
 app.use('/api/v1/auth', authRoutes);
 
 // 🔐 REAL JWT AUTHENTICATION (Phase 4C-1)
-// All other routes under /api/v1 require valid JWT token
-// Health check and API docs remain public
-app.use('/api/v1', jwtAuth);
+// All routes under /api/v1 require JWT except token-protected internal scraper routes.
+app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
+  if (req.path.startsWith('/internal/scraper')) {
+    return next();
+  }
+  return jwtAuth(req, res, next);
+});
 
 /**
  * @swagger

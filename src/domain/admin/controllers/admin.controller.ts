@@ -89,7 +89,8 @@ export const getAllAdmissions = async (
     const { data, total } = await adminService.getAllAdmissions(
       limit,
       offset,
-      queryParams.status
+      queryParams.status,
+      queryParams.data_origin
     );
 
     // Calculate pagination metadata

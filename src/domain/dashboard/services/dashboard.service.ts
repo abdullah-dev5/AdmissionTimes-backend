@@ -790,6 +790,42 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
       ORDER BY tc.threshold_day DESC;
     `;
 
+    const scraperStatsAndActivityQuery = `
+      WITH recent_runs AS (
+        SELECT
+          r.id::text,
+          COALESCE(NULLIF(r.university_scope, ''), 'All Sources') AS university,
+          r.status,
+          r.started_at,
+          r.completed_at,
+          COALESCE(r.updated_count, 0) + COALESCE(r.published_count, 0) AS changes_detected,
+          COALESCE(r.failed_count, 0) AS failed_count
+        FROM scraper_ingestion_runs r
+        ORDER BY r.started_at DESC
+        LIMIT 10
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM scraper_ingestion_runs WHERE status = 'running') AS scraper_jobs_running,
+        COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'id', rr.id,
+              'university', rr.university,
+              'lastRun', rr.started_at::text,
+              'status',
+                CASE
+                  WHEN rr.status IN ('failed', 'partial') OR rr.failed_count > 0 THEN 'Error'
+                  WHEN rr.changes_detected > 0 THEN 'Success'
+                  ELSE 'No Change'
+                END,
+              'changesDetected', rr.changes_detected
+            )
+          )
+          FROM recent_runs rr
+          WHERE rr.status <> 'running'
+        ), '[]'::json) AS scraper_activity;
+    `;
+
     console.log('🔍 [getAdminDashboard] Executing dashboard query...');
     const [result, coverageResult] = await Promise.all([
       query(dashboardQuery, []),
@@ -797,6 +833,18 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
     ]);
     const row = result.rows[0];
     const coverageRows = coverageResult.rows || [];
+
+    let scraperJobsRunning = parseInt(row.stats?.scraper_jobs_running || 0, 10);
+    let scraperActivity: any[] = [];
+
+    try {
+      const scraperResult = await query(scraperStatsAndActivityQuery, []);
+      const scraperRow = scraperResult.rows[0] || {};
+      scraperJobsRunning = parseInt(scraperRow.scraper_jobs_running || 0, 10);
+      scraperActivity = scraperRow.scraper_activity || [];
+    } catch (scraperError: any) {
+      console.warn('[getAdminDashboard] Scraper activity query fallback:', scraperError?.message || scraperError);
+    }
 
     const byThreshold = coverageRows.map((coverage: any) => ({
       threshold_day: parseInt(coverage.threshold_day, 10) as 7 | 3 | 1,
@@ -821,7 +869,7 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
         total_universities: parseInt(row.stats?.total_universities || 0, 10),
         total_students: parseInt(row.stats?.total_students || 0, 10),
         recent_actions: parseInt(row.stats?.recent_actions || 0, 10),
-        scraper_jobs_running: parseInt(row.stats?.scraper_jobs_running || 0, 10),
+        scraper_jobs_running: scraperJobsRunning,
       },
       pending_verifications: (row.pending_verifications || []).map((item: any) => ({
         ...item,
@@ -839,7 +887,7 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
         changed_at_iso: item.changed_at || null,
         changed_by_label: deriveChangedByLabel(item.changed_by),
       })),
-      scraper_activity: [], // TODO: Implement scraper activity
+      scraper_activity: scraperActivity,
       reminder_coverage: {
         look_ahead_days: 7,
         total_targets_next_7_days: totalTargetsNext7Days,

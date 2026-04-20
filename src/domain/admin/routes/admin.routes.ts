@@ -9,6 +9,13 @@
 
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller';
+import {
+  getRunDetailController,
+  getRunsController,
+  getRunSummaryController,
+  manualRerunController,
+  manualRunAllController,
+} from '@domain/scraper-integration/controllers/scraper-integration.controller';
 import { adminOnly } from '../middleware/adminOnly';
 import {
   verifyAdmissionSchema,
@@ -26,6 +33,21 @@ const router: Router = Router();
  * Apply admin authorization to all routes
  */
 router.use(adminOnly);
+
+// GET /api/v1/admin/scraper/summary - Get scraper run summary cards
+router.get('/scraper/summary', getRunSummaryController);
+
+// GET /api/v1/admin/scraper/runs - Get paginated scraper run history
+router.get('/scraper/runs', getRunsController);
+
+// GET /api/v1/admin/scraper/runs/:id - Get scraper run details and events
+router.get('/scraper/runs/:id', getRunDetailController);
+
+// POST /api/v1/admin/scraper/run-all - Trigger manual replay run using latest ingestion events
+router.post('/scraper/run-all', manualRunAllController);
+
+// POST /api/v1/admin/scraper/runs/:id/rerun - Trigger manual replay from a specific run
+router.post('/scraper/runs/:id/rerun', manualRerunController);
 
 // POST /api/v1/admin/university-reps - Create university representative (Flow C)
 router.post(

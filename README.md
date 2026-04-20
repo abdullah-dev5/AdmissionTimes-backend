@@ -243,3 +243,11 @@ NODE_ENV=production pnpm start
 **Current Version:** 1.0.0  
 **Last Updated:** February 25, 2026  
 **Status:** Active Development
+
+## Latest Updates (April 2026)
+
+- Added scraper ingestion pipeline endpoints and internal auth middleware.
+- Added scraper run summary, run list, and run detail support for admin operations.
+- Expanded admin services and dashboard integration for scraper activity visibility.
+- Hardened admission contract handling for scraper-origin records.
+

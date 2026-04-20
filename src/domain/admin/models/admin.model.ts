@@ -50,7 +50,8 @@ export const getPendingAdmissions = async (
 export const getAllAdmissionsWithStatus = async (
   limit: number = 50,
   offset: number = 0,
-  status?: string
+  status?: string,
+  dataOrigin?: string
 ): Promise<Array<AdminAdmission & { university_name?: string }>> => {
   try {
     let query_str = `
@@ -70,6 +71,12 @@ export const getAllAdmissionsWithStatus = async (
       paramIndex++;
     }
 
+    if (dataOrigin && dataOrigin !== 'All') {
+      query_str += ` AND COALESCE(a.data_origin, 'manual') = $${paramIndex}`;
+      params.push(dataOrigin);
+      paramIndex++;
+    }
+
     query_str += ` ORDER BY a.updated_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
@@ -84,14 +91,21 @@ export const getAllAdmissionsWithStatus = async (
 /**
  * Get count of admissions by status
  */
-export const getAllAdmissionsCount = async (status?: string): Promise<number> => {
+export const getAllAdmissionsCount = async (status?: string, dataOrigin?: string): Promise<number> => {
   try {
     let query_str = `SELECT COUNT(*) as count FROM admissions WHERE is_active = true`;
     const params: any[] = [];
+    let paramIndex = 1;
 
     if (status && status !== 'All') {
-      query_str += ` AND verification_status = $1`;
+      query_str += ` AND verification_status = $${paramIndex}`;
       params.push(status);
+      paramIndex++;
+    }
+
+    if (dataOrigin && dataOrigin !== 'All') {
+      query_str += ` AND COALESCE(data_origin, 'manual') = $${paramIndex}`;
+      params.push(dataOrigin);
     }
 
     const result = await query(query_str, params);

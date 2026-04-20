@@ -580,11 +580,12 @@ export const getPendingAdmissions = async (
 export const getAllAdmissions = async (
   limit: number = 50,
   offset: number = 0,
-  status?: string
+  status?: string,
+  dataOrigin?: string
 ): Promise<{ data: any[]; total: number }> => {
   try {
-    const admissions = await adminModel.getAllAdmissionsWithStatus(limit, offset, status);
-    const total = await adminModel.getAllAdmissionsCount(status);
+    const admissions = await adminModel.getAllAdmissionsWithStatus(limit, offset, status, dataOrigin);
+    const total = await adminModel.getAllAdmissionsCount(status, dataOrigin);
 
     const normalizedAdmissions = admissions.map((admission) => normalizeAdminAdmission(admission));
 
