@@ -333,13 +333,16 @@ const publishRecord = async (
         $3,
         $4,
         $5,
+        $6,
         'pending',
         true,
         'scraper',
         'AdmissionTimes-Scrapers',
+        $7,
+        $8,
         NOW(),
-        $6,
-        $7
+        $9,
+        $10
       )
       ON CONFLICT (source_record_hash)
       DO UPDATE SET
