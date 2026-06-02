@@ -5,8 +5,9 @@
  * Uses node-cron for production-grade scheduling.
  * 
  * Jobs:
- * - Generate recommendations (daily at 2 AM)
- * - Clean up expired recommendations (daily at 3 AM)
+ * - Clean up expired recommendations (daily at 1 AM — only rows past expires_at)
+ * - Generate recommendations (daily at 2 AM — 24h cache TTL)
+ * - Safety cleanup pass (daily at 4:30 AM — expired rows only, never same-day batch)
  * - Send deadline reminders (every hour at minute 5)
  */
 
@@ -240,7 +241,17 @@ export const initializeScheduler = (): void => {
     }
   });
 
-  // ✅ Run recommendations generation daily at 2 AM
+  // ✅ Remove expired rows before nightly batch (expires_at <= NOW only)
+  const preBatchCleanupTask = cron.schedule('0 1 * * *', async () => {
+    console.log('[Scheduler] Pre-batch recommendation cleanup triggered...');
+    try {
+      await runRecommendationCleanup();
+    } catch (error) {
+      console.error('[Scheduler] ❌ Pre-batch cleanup failed:', error);
+    }
+  });
+
+  // ✅ Run recommendations generation daily at 2 AM (24h TTL — safe until next day ~2 AM+)
   const recommendationTask = cron.schedule('0 2 * * *', async () => {
     console.log('[Scheduler] Recommendation generation job triggered...');
     try {
@@ -250,13 +261,13 @@ export const initializeScheduler = (): void => {
     }
   });
 
-  // ✅ Clean up expired recommendations daily at 3 AM
-  const cleanupTask = cron.schedule('0 3 * * *', async () => {
-    console.log('[Scheduler] Cleanup job triggered...');
+  // ✅ Safety cleanup after batch window — still only deletes expires_at <= NOW()
+  const cleanupTask = cron.schedule('30 4 * * *', async () => {
+    console.log('[Scheduler] Post-batch recommendation cleanup triggered...');
     try {
       await runRecommendationCleanup();
     } catch (error) {
-      console.error('[Scheduler] ❌ Cleanup failed:', error);
+      console.error('[Scheduler] ❌ Post-batch cleanup failed:', error);
     }
   });
 
@@ -291,8 +302,9 @@ export const initializeScheduler = (): void => {
   console.log('[Scheduler] 💡 Cron patterns:');
   console.log('[Scheduler]   - Deadline reminders: "5 * * * *" (every hour at minute 5)');
   console.log('[Scheduler]   - Email retries: "*/5 * * * *" (every 5 minutes)');
-  console.log('[Scheduler]   - Recommendations: "0 2 * * *" (daily at 2 AM)');
-  console.log('[Scheduler]   - Cleanup: "0 3 * * *" (daily at 3 AM)');
+  console.log('[Scheduler]   - Rec pre-cleanup: "0 1 * * *" (daily at 1 AM, expired rows only)');
+  console.log('[Scheduler]   - Recommendations: "0 2 * * *" (daily at 2 AM, 24h TTL)');
+  console.log('[Scheduler]   - Rec post-cleanup: "30 4 * * *" (daily at 4:30 AM, expired rows only)');
   console.log('[Scheduler] 💡 Tips: Use POST /api/v1/recommendations/generate-all and POST /api/v1/scheduler/reminder for manual triggers');
 
   // Graceful shutdown: stop all cron jobs
@@ -300,6 +312,7 @@ export const initializeScheduler = (): void => {
     console.log('[Scheduler] Stopping cron tasks...');
     deadlineReminderTask.stop();
     emailRetryTask.stop();
+    preBatchCleanupTask.stop();
     recommendationTask.stop();
     cleanupTask.stop();
   });
@@ -308,6 +321,7 @@ export const initializeScheduler = (): void => {
     console.log('[Scheduler] Stopping cron tasks (SIGINT)...');
     deadlineReminderTask.stop();
     emailRetryTask.stop();
+    preBatchCleanupTask.stop();
     recommendationTask.stop();
     cleanupTask.stop();
   });

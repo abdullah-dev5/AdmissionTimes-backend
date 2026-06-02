@@ -31,6 +31,10 @@ export interface RecommendationWithAdmission extends Recommendation {
   admission?: {
     id: string;
     university_id: string;
+    university_name?: string | null;
+    university_logo_url?: string | null;
+    university_city?: string | null;
+    university_country?: string | null;
     program_name: string;
     degree_level: string;
     status: string;

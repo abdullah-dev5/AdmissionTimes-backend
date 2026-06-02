@@ -14,6 +14,12 @@
 import { query } from '@db/connection';
 import * as recommendationsModel from '../models/recommendations.model';
 import { CreateRecommendationDTO, RecommendationWithAdmission } from '../types/recommendations.types';
+import {
+  RECOMMENDATION_CACHE_TTL_HOURS,
+  getRecommendationExpiresAt,
+} from '../recommendations.constants';
+
+export { getRecommendationExpiresAt };
 
 const RECOMMENDATION_REFRESH_COOLDOWN_MINUTES = 30;
 const RECOMMENDATION_MAX_STALE_HOURS = 24;
@@ -68,6 +74,7 @@ export const getRecommendationObservability = () => {
     policy: {
       refresh_cooldown_minutes: RECOMMENDATION_REFRESH_COOLDOWN_MINUTES,
       max_stale_hours: RECOMMENDATION_MAX_STALE_HOURS,
+      cache_ttl_hours: RECOMMENDATION_CACHE_TTL_HOURS,
       activity_lookback_days: ACTIVITY_LOOKBACK_DAYS,
     },
   };
@@ -274,7 +281,7 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
       ORDER BY score DESC
       LIMIT 20  -- Generate top 20 recommendations
     )
-    SELECT * FROM scored_recommendations WHERE score >= 30;  -- Minimum quality threshold
+    SELECT * FROM scored_recommendations WHERE score >= 50;  -- Align with API min_score default
   `;
 
   const result = await query(sql, [userId]);
@@ -295,7 +302,7 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
     score: row.score,
     reason: row.reason,
     factors: row.factors,
-    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days TTL
+    expires_at: getRecommendationExpiresAt(),
   }));
 
   // Bulk insert recommendations
@@ -395,7 +402,7 @@ const generateFallbackRecommendations = async (userId: string): Promise<number> 
     score: row.score,
     reason: row.reason,
     factors: row.factors,
-    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    expires_at: getRecommendationExpiresAt()
   }));
 
   console.log(`[Recommendations] Generated ${recommendations.length} fallback recommendations`);
@@ -471,7 +478,7 @@ const generatePopularRecommendations = async (userId: string): Promise<number> =
     score: row.score,
     reason: row.reason,
     factors: row.factors,
-    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    expires_at: getRecommendationExpiresAt()
   }));
 
   console.log(`[Recommendations] Generated ${recommendations.length} popular recommendations`);

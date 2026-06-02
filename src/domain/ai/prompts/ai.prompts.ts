@@ -8,7 +8,8 @@ const EXTRACTION_SCHEMA = `{
   "location": "<city or country or null>",
   "program_type": "<e.g. BS, MS, BBA or null>",
   "delivery_mode": "<online|on-campus|hybrid or null>",
-  "deadline_within_days": "<number or null>",
+  "deadline_within_days": "<number or null — use for ranges like 'this week', NOT for a specific calendar day>",
+  "deadline_on": "<YYYY-MM-DD or null — when user names a specific closing date e.g. 26 June 2026>",
   "clarification_question": "<one short question only when intent=clarification, else null>",
   "refusal_reason": "<one sentence only when intent=unsupported, else null>"
 }`;
@@ -80,4 +81,56 @@ export const buildSummarizationPrompt = (rawText: string): string => {
     'Admission text:',
     rawText,
   ].join('\n\n');
+};
+
+const COMPARE_SCHEMA = `Return JSON only:\n{\n  "summary": string,\n  "highlights": string[]\n}`;
+
+export const buildCompareProgramsPrompt = (
+  programs: Array<{
+    title: string;
+    university_name: string;
+    degree_level: string | null;
+    field_of_study: string | null;
+    location: string | null;
+    fee_display: string | null;
+    deadline: string | null;
+    days_remaining: number | null;
+    delivery_mode: string | null;
+    program_type: string | null;
+    description: string | null;
+    eligibility_text: string | null;
+    verification_status: string;
+  }>,
+  focus?: string
+): string => {
+  const payload = programs.map((p, index) => ({
+    index: index + 1,
+    university: p.university_name,
+    program: p.title,
+    degree_level: p.degree_level,
+    field_of_study: p.field_of_study,
+    location: p.location,
+    fee: p.fee_display,
+    deadline: p.deadline,
+    days_remaining: p.days_remaining,
+    delivery_mode: p.delivery_mode,
+    program_type: p.program_type,
+    verification_status: p.verification_status,
+    description: p.description?.slice(0, 600) || null,
+    eligibility: p.eligibility_text?.slice(0, 400) || null,
+  }));
+
+  return [
+    'You are an admissions comparison expert for AdmissionTimes (Pakistan university admissions).',
+    'Compare ONLY the programs in the JSON below. Use their fields — do not invent universities, fees, or deadlines.',
+    'Consider: application fee, deadline urgency, degree/field fit, location, delivery mode, eligibility differences, and verification status.',
+    'summary: 2-3 sentences with the overall recommendation framing (no generic filler).',
+    'highlights: 4-6 concise bullet strings. Each bullet must name specific universities/programs and a concrete difference.',
+    focus ? `Student focus for this comparison: ${focus}` : '',
+    COMPARE_SCHEMA,
+    'Programs JSON:',
+    JSON.stringify(payload, null, 2),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 };

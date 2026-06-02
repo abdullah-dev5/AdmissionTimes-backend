@@ -109,6 +109,8 @@ export const signIn = async (req: Request, res: Response): Promise<void> => {
     sendSuccess(res, {
       user: result.user,
       message: result.message,
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
     }, 'Signed in successfully', 200);
   } catch (error: any) {
     // Handle AppError (business logic errors)

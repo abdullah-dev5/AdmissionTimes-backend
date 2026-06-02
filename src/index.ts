@@ -28,7 +28,7 @@ import { config } from '@config/config';
 import { errorHandler } from '@shared/middleware/errorHandler';
 import { sendSuccess } from '@shared/utils/response';
 import { initializePool, testConnection, closePool } from '@db/connection';
-import { jwtAuth } from '@shared/middleware/jwtAuth';
+import { apiAuth } from '@shared/middleware/apiAuth';
 import { registerDomains } from '@domain/index';
 import { swaggerSpec } from '@config/swagger';
 import authRoutes from '@domain/auth/routes/auth.routes';
@@ -72,7 +72,7 @@ app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/internal/scraper')) {
     return next();
   }
-  return jwtAuth(req, res, next);
+  return apiAuth(req, res, next);
 });
 
 /**

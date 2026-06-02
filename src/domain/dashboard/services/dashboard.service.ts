@@ -109,7 +109,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
         SELECT 
           a.id,
           COALESCE(a.university_id::text, 'unknown') as university_id,
-          COALESCE(a.location, 'Unknown University') as university_name,
+          COALESCE(u.name, 'Unknown University') as university_name,
           a.title,
           a.degree_level,
           a.deadline::text as deadline,
@@ -123,6 +123,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           COALESCE(w.alert_opt_in, false) as alert_enabled
         FROM recommendations r
         INNER JOIN admissions a ON r.admission_id = a.id
+        LEFT JOIN universities u ON u.id = a.university_id
         LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
         WHERE r.user_id = $1
           AND r.expires_at > NOW()
@@ -136,7 +137,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
         SELECT 
           d.id,
           d.admission_id::text,
-          COALESCE(a.location, 'Unknown University') as university_name,
+          COALESCE(u.name, 'Unknown University') as university_name,
           a.title as program_title,
           d.deadline_date::text as deadline,
           EXTRACT(DAY FROM (d.deadline_date - NOW()))::int as days_remaining,
@@ -150,6 +151,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           COALESCE(w.alert_opt_in, false) as alert_enabled
         FROM deadlines d
         INNER JOIN admissions a ON a.id = d.admission_id
+          LEFT JOIN universities u ON u.id = a.university_id
         LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
         WHERE d.deadline_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'
           AND d.deadline_date > NOW()
@@ -221,7 +223,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           SELECT 
             a.id,
             COALESCE(a.university_id::text, 'unknown') as university_id,
-            COALESCE(a.location, 'Unknown University') as university_name,
+            COALESCE(u.name, 'Unknown University') as university_name,
             a.title,
             a.degree_level,
             a.deadline::text as deadline,
@@ -235,6 +237,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
             COALESCE(w.alert_opt_in, false) as alert_enabled
           FROM recommendations r
           INNER JOIN admissions a ON r.admission_id = a.id
+          LEFT JOIN universities u ON u.id = a.university_id
           LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
           WHERE r.user_id = $1
             AND r.expires_at > NOW()

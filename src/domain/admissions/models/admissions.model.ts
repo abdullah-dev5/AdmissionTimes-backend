@@ -235,7 +235,7 @@ export const deleteById = async (id: string): Promise<Admission | null> => {
  * @returns SQL query and parameters
  */
 function buildCountQuery(filters: AdmissionFilters): { sql: string; params: any[] } {
-  const conditions: string[] = ['is_active = true'];
+  const conditions: string[] = ['a.is_active = true'];
   const params: any[] = [];
   let paramIndex = 1;
 
@@ -243,17 +243,17 @@ function buildCountQuery(filters: AdmissionFilters): { sql: string; params: any[
   if (filters.verification_status) {
     if (Array.isArray(filters.verification_status)) {
       const placeholders = filters.verification_status.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`verification_status IN (${placeholders})`);
+      conditions.push(`a.verification_status IN (${placeholders})`);
       params.push(...filters.verification_status);
     } else {
-      conditions.push(`verification_status = $${paramIndex++}`);
+      conditions.push(`a.verification_status = $${paramIndex++}`);
       params.push(filters.verification_status);
     }
   }
 
   // Created by filter
   if (filters.created_by) {
-    conditions.push(`created_by = $${paramIndex++}`);
+    conditions.push(`a.created_by = $${paramIndex++}`);
     params.push(filters.created_by);
   }
 
@@ -262,12 +262,12 @@ function buildCountQuery(filters: AdmissionFilters): { sql: string; params: any[
     const ownerConditions: string[] = [];
 
     if (filters.owner_user_ids && filters.owner_user_ids.length > 0) {
-      ownerConditions.push(`created_by = ANY($${paramIndex++}::uuid[])`);
+      ownerConditions.push(`a.created_by = ANY($${paramIndex++}::uuid[])`);
       params.push(filters.owner_user_ids);
     }
 
     if (filters.owner_university_ids && filters.owner_university_ids.length > 0) {
-      ownerConditions.push(`university_id = ANY($${paramIndex++}::uuid[])`);
+      ownerConditions.push(`a.university_id = ANY($${paramIndex++}::uuid[])`);
       params.push(filters.owner_university_ids);
     }
 
@@ -276,45 +276,49 @@ function buildCountQuery(filters: AdmissionFilters): { sql: string; params: any[
 
   // Program type filter
   if (filters.program_type) {
-    conditions.push(`program_type ILIKE $${paramIndex++}`);
+    conditions.push(`a.program_type ILIKE $${paramIndex++}`);
     params.push(`%${filters.program_type}%`);
   }
 
   // Degree level filter
   if (filters.degree_level) {
-    conditions.push(`degree_level ILIKE $${paramIndex++}`);
+    conditions.push(`a.degree_level ILIKE $${paramIndex++}`);
     params.push(`%${filters.degree_level}%`);
   }
 
   // Field of study filter
   if (filters.field_of_study) {
-    conditions.push(`field_of_study ILIKE $${paramIndex++}`);
+    conditions.push(`a.field_of_study ILIKE $${paramIndex++}`);
     params.push(`%${filters.field_of_study}%`);
   }
 
   // Location filter
   if (filters.location) {
-    conditions.push(`location ILIKE $${paramIndex++}`);
+    conditions.push(`a.location ILIKE $${paramIndex++}`);
     params.push(`%${filters.location}%`);
   }
 
   // Delivery mode filter
   if (filters.delivery_mode) {
-    conditions.push(`delivery_mode = $${paramIndex++}`);
+    conditions.push(`a.delivery_mode = $${paramIndex++}`);
     params.push(filters.delivery_mode);
   }
 
   // Search filter (full-text search across multiple fields)
   if (filters.search) {
     const searchConditions = SEARCH_FIELDS.map((field, idx) => {
-      return `${field} ILIKE $${paramIndex + idx}`;
+      return `a.${field} ILIKE $${paramIndex + idx}`;
     });
+    const universityNameParam = `$${paramIndex + SEARCH_FIELDS.length}`;
+    searchConditions.push(`u.name ILIKE ${universityNameParam}`);
+    searchConditions.push(`u.city ILIKE ${universityNameParam}`);
+    searchConditions.push(`u.country ILIKE ${universityNameParam}`);
     conditions.push(`(${searchConditions.join(' OR ')})`);
-    params.push(...SEARCH_FIELDS.map(() => `%${filters.search}%`));
-    paramIndex += SEARCH_FIELDS.length;
+    params.push(...SEARCH_FIELDS.map(() => `%${filters.search}%`), `%${filters.search}%`);
+    paramIndex += SEARCH_FIELDS.length + 1;
   }
 
-  const sql = `SELECT COUNT(*) as count FROM admissions WHERE ${conditions.join(' AND ')}`;
+  const sql = `SELECT COUNT(*) as count FROM admissions a LEFT JOIN universities u ON u.id = a.university_id WHERE ${conditions.join(' AND ')}`;
   return { sql, params };
 }
 
@@ -403,9 +407,13 @@ function buildFindManyQuery(
     const searchConditions = SEARCH_FIELDS.map((field, idx) => {
       return `a.${field} ILIKE $${paramIndex + idx}`;
     });
+    const universityNameParam = `$${paramIndex + SEARCH_FIELDS.length}`;
+    searchConditions.push(`u.name ILIKE ${universityNameParam}`);
+    searchConditions.push(`u.city ILIKE ${universityNameParam}`);
+    searchConditions.push(`u.country ILIKE ${universityNameParam}`);
     conditions.push(`(${searchConditions.join(' OR ')})`);
-    params.push(...SEARCH_FIELDS.map(() => `%${filters.search}%`));
-    paramIndex += SEARCH_FIELDS.length;
+    params.push(...SEARCH_FIELDS.map(() => `%${filters.search}%`), `%${filters.search}%`);
+    paramIndex += SEARCH_FIELDS.length + 1;
   }
 
   // Validate sort field

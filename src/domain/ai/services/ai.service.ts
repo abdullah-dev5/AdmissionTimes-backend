@@ -13,8 +13,17 @@ import {
   GeminiChatExtraction,
 } from '../types/ai.types';
 import { generateJson, generateText, getGeminiUsageMetadata, isGeminiConfigured } from './gemini.client';
+import {
+  applySearchFirstPolicy,
+  buildSearchFirstFilters,
+  buildSearchRelaxationCandidates,
+  buildSearchTermsFromMessage,
+  extractProgramCodeTokens,
+} from './admissionSearchFilters.service';
 
 const MAX_RESULTS = 8;
+const DEFAULT_UPCOMING_DEADLINE_DAYS = 30;
+const DEADLINE_QUERY_FETCH_LIMIT = 60;
 const SENSITIVE_QUERY_PATTERN = /(password|passcode|credential|credentials|email list|all users|admin data|internal analytics|service role|token|refresh token|secret|api key|private key|otp|cnic|id card|identity number)/i;
 const STOP_WORDS = new Set([
   'is', 'any', 'the', 'a', 'an', 'for', 'in', 'on', 'at', 'to', 'of', 'and', 'or', 'with', 'this', 'that',
@@ -29,9 +38,32 @@ type LocalIntentResult = {
   intent: 'guidance' | 'search_admissions' | 'summarize_saved_admissions' | 'unknown';
   answer?: string;
   filters?: AdmissionChatFilters;
-  verification_status?: 'verified' | 'pending' | 'rejected';
+  verification_status?: 'verified' | 'pending' | 'rejected' | 'draft';
   sort?: 'created_at' | 'updated_at' | 'deadline' | 'title' | 'tuition_fee' | 'verified_at';
   order?: 'asc' | 'desc';
+};
+
+const UNIVERSITY_REVERIFICATION_HINT =
+  /re[\s-]?verification|reverification|needs?\s+reverification|triggers?\s+re[\s-]?verification/i;
+
+const isUniversityReverificationQuery = (normalizedLowerMessage: string): boolean =>
+  UNIVERSITY_REVERIFICATION_HINT.test(normalizedLowerMessage) ||
+  normalizedLowerMessage.includes('re verification');
+
+const extractUniversityVerificationStatusFromMessage = (
+  message: string
+): LocalIntentResult['verification_status'] | undefined => {
+  const lower = normalizeQueryText(message);
+  if (lower.includes('verified')) return 'verified';
+  if (lower.includes('pending') || lower.includes('audit')) return 'pending';
+  if (lower.includes('rejected')) return 'rejected';
+  if (lower.includes('draft')) return 'draft';
+  return undefined;
+};
+
+const formatStatusLabel = (status: string | null | undefined): string => {
+  if (!status) return 'Unknown';
+  return status.charAt(0).toUpperCase() + status.slice(1);
 };
 
 type ConversationHistoryEntry = {
@@ -44,20 +76,70 @@ const ADMISSION_HINT = /(admission|admissions|admis|admsi|admssion|announced|ope
 const DEADLINE_HINT = /(deadline|deadlines|urgent|closing|this\s+week|within\s+week|next\s+week|due\s+soon)/i;
 const SAVED_SUMMARY_HINT = /(saved|watchlist|bookmark|bookmarked|shortlist)/i;
 const SUMMARY_HINT = /(summar(y|ize|ise)|overview|recap)/i;
-const CITY_HINTS = ['lahore', 'karachi', 'islamabad', 'rawalpindi', 'faisalabad', 'multan', 'peshawar', 'quetta', 'sialkot'];
 const MONTH_MAP: Record<string, number> = {
   january: 0,
+  jan: 0,
   february: 1,
+  feb: 1,
   march: 2,
+  mar: 2,
   april: 3,
+  apr: 3,
   may: 4,
   june: 5,
+  jun: 5,
   july: 6,
+  jul: 6,
   august: 7,
+  aug: 7,
   september: 8,
+  sep: 8,
+  sept: 8,
   october: 9,
+  oct: 9,
   november: 10,
+  nov: 10,
   december: 11,
+  dec: 11,
+};
+
+const MONTH_NAME_PATTERN =
+  'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec';
+
+type ParsedDeadlineDate = {
+  iso: string;
+  label: string;
+};
+
+const QUERY_NORMALIZATIONS: Array<[RegExp, string]> = [
+  [/\badmssion\b/gi, 'admission'],
+  [/\badmsion\b/gi, 'admission'],
+  [/\badmisison\b/gi, 'admission'],
+  [/\badmision\b/gi, 'admission'],
+  [/\badmsi\b/gi, 'admission'],
+  [/\bdeadlne\b/gi, 'deadline'],
+  [/\bdeadlin\b/gi, 'deadline'],
+  [/\bdeadlien\b/gi, 'deadline'],
+  [/\buniveristy\b/gi, 'university'],
+  [/\buniversitiy\b/gi, 'university'],
+  [/\bprogam\b/gi, 'program'],
+  [/\bprogams\b/gi, 'programs'],
+  [/\bths\b/gi, 'this'],
+  [/\bmoonth\b/gi, 'month'],
+  [/\bweelk\b/gi, 'week'],
+];
+
+const normalizeQueryText = (message: string): string => {
+  let normalized = String(message || '')
+    .toLowerCase()
+    .replace(/[’']/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ');
+
+  for (const [pattern, replacement] of QUERY_NORMALIZATIONS) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+
+  return normalized.replace(/\s+/g, ' ').trim();
 };
 
 const isGeminiQuotaError = (error: unknown): boolean => {
@@ -68,62 +150,6 @@ const isGeminiQuotaError = (error: unknown): boolean => {
     message.includes('quota') ||
     message.includes('rate-limit')
   );
-};
-
-const toTitleCase = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
-
-const extractLocationFromMessage = (lowerMessage: string): string | undefined => {
-  const city = CITY_HINTS.find((candidate) => lowerMessage.includes(candidate));
-  return city ? toTitleCase(city) : undefined;
-};
-
-const extractProgramTypeFromMessage = (message: string): string | undefined => {
-  const lower = message.toLowerCase();
-  if (/\b(undergraduate|ug)\b/i.test(lower)) {
-    return 'undergraduate';
-  }
-  if (/\b(graduate|postgraduate|pg)\b/i.test(lower)) {
-    return 'graduate';
-  }
-  return undefined;
-};
-
-const extractFieldOfStudyFromMessage = (lowerMessage: string): string | undefined => {
-  if (/(computer\s*science|\bcs\b|software|artificial intelligence|ai)/i.test(lowerMessage)) {
-    return 'Computer Science';
-  }
-  if (/(business|bba|mba|finance|accounting)/i.test(lowerMessage)) {
-    return 'Business';
-  }
-  if (/(electrical|electronics|ee)/i.test(lowerMessage)) {
-    return 'Electrical Engineering';
-  }
-  if (/(mechanical|mechatronics)/i.test(lowerMessage)) {
-    return 'Mechanical Engineering';
-  }
-  if (/(data\s*science|analytics)/i.test(lowerMessage)) {
-    return 'Data Science';
-  }
-  if (/(economics|economic)/i.test(lowerMessage)) {
-    return 'Economics';
-  }
-  return undefined;
-};
-
-const extractDegreeLevelFromMessage = (lowerMessage: string): string | undefined => {
-  if (/\b(ms|msc|mba|mphil|master|masters|postgraduate|graduate)\b/i.test(lowerMessage)) {
-    return 'master';
-  }
-  if (/\b(bs|bsc|be|bba|llb|bachelor|undergraduate)\b/i.test(lowerMessage)) {
-    return 'bachelor';
-  }
-  if (/\b(phd|doctorate)\b/i.test(lowerMessage)) {
-    return 'phd';
-  }
-  if (/\b(diploma)\b/i.test(lowerMessage)) {
-    return 'diploma';
-  }
-  return undefined;
 };
 
 const normalizeDegreeLevel = (value: string | null | undefined): string | undefined => {
@@ -158,28 +184,80 @@ const deriveSearchKeyword = (message: string): string | undefined => {
   return unique.length > 0 ? unique.join(' ') : undefined;
 };
 
-const shouldUseRawSearch = (
-  message: string,
-  lowerMessage: string,
-  structuredFilterCount: number
-): boolean => {
-  const derived = deriveSearchKeyword(message);
-  if (!derived) return false;
+const resolveYearForMonthDay = (monthIndex: number, day: number, explicitYear?: number): number => {
+  if (explicitYear && explicitYear >= 2000 && explicitYear <= 2100) {
+    return explicitYear;
+  }
+  const now = new Date();
+  let year = now.getFullYear();
+  const candidate = new Date(year, monthIndex, day, 23, 59, 59, 999);
+  if (candidate.getTime() < now.getTime()) {
+    year += 1;
+  }
+  return year;
+};
 
-  if (structuredFilterCount > 0 && !DEADLINE_HINT.test(lowerMessage)) {
-    return true;
+const buildParsedDeadlineDate = (year: number, monthIndex: number, day: number): ParsedDeadlineDate | undefined => {
+  if (day < 1 || day > 31 || monthIndex < 0 || monthIndex > 11) {
+    return undefined;
+  }
+  const iso = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const probe = new Date(iso + 'T12:00:00');
+  if (probe.getMonth() !== monthIndex || probe.getDate() !== day) {
+    return undefined;
+  }
+  const label = new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+  return { iso, label };
+};
+
+const extractSpecificDeadlineDateFromMessage = (message: string): ParsedDeadlineDate | undefined => {
+  const msg = normalizeQueryText(message);
+  const monthGroup = MONTH_NAME_PATTERN;
+
+  const dayMonth = msg.match(
+    new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthGroup})(?:\\s+(\\d{4}))?\\b`, 'i')
+  );
+  if (dayMonth) {
+    const day = Number(dayMonth[1]);
+    const monthIndex = MONTH_MAP[dayMonth[2].toLowerCase()];
+    const year = resolveYearForMonthDay(monthIndex, day, dayMonth[3] ? Number(dayMonth[3]) : undefined);
+    return buildParsedDeadlineDate(year, monthIndex, day);
   }
 
-  const tokens = message
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .filter((token) => token.length >= 3 && !SEARCH_NOISE_WORDS.has(token));
+  const monthDay = msg.match(
+    new RegExp(`\\b(${monthGroup})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?\\b`, 'i')
+  );
+  if (monthDay) {
+    const monthIndex = MONTH_MAP[monthDay[1].toLowerCase()];
+    const day = Number(monthDay[2]);
+    const year = resolveYearForMonthDay(monthIndex, day, monthDay[3] ? Number(monthDay[3]) : undefined);
+    return buildParsedDeadlineDate(year, monthIndex, day);
+  }
 
-  // Keep search for meaningful free-text queries only.
-  return tokens.length > 0 && !DEADLINE_HINT.test(lowerMessage);
+  const slash = msg.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+  if (slash) {
+    const day = Number(slash[1]);
+    const monthIndex = Number(slash[2]) - 1;
+    let year = slash[3] ? Number(slash[3]) : resolveYearForMonthDay(monthIndex, day);
+    if (year < 100) {
+      year += 2000;
+    }
+    return buildParsedDeadlineDate(year, monthIndex, day);
+  }
+
+  return undefined;
+};
+
+const toDeadlineDateKeyInKarachi = (value: string | Date): string | null => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi' }).format(date);
 };
 
 const daysUntilMonthEnd = (monthIndex: number): number | undefined => {
@@ -192,23 +270,43 @@ const daysUntilMonthEnd = (monthIndex: number): number | undefined => {
   return Math.ceil(diffMs / (24 * 60 * 60 * 1000));
 };
 
-const extractDeadlineWithinDaysFromMessage = (lowerMessage: string): number | undefined => {
-  if (lowerMessage.includes('urgent') || lowerMessage.includes('due soon')) {
+const extractDeadlineWithinDaysFromMessage = (normalizedLowerMessage: string): number | undefined => {
+  const message = normalizeQueryText(normalizedLowerMessage);
+
+  if (extractSpecificDeadlineDateFromMessage(message)) {
+    return undefined;
+  }
+
+  const explicitWindowMatch = message.match(/(?:within|in|next)\s+(\d{1,3})\s+days?/i) || message.match(/(\d{1,3})\s+days?\s+(?:left|remaining|away)/i);
+  if (explicitWindowMatch?.[1]) {
+    const parsedDays = Number(explicitWindowMatch[1]);
+    if (Number.isFinite(parsedDays) && parsedDays > 0) {
+      return parsedDays;
+    }
+  }
+
+  if (message.includes('urgent') || message.includes('due soon') || message.includes('closing soon')) {
     return 3;
   }
 
-  if (lowerMessage.includes('this week') || lowerMessage.includes('within week') || lowerMessage.includes('next week')) {
+  if (message.includes('this week') || message.includes('within week') || message.includes('next week') || message.includes('coming week')) {
     return 7;
   }
 
-  if (lowerMessage.includes('this month') || lowerMessage.includes('closing this month')) {
+  if (message.includes('this month') || message.includes('closing this month') || message.includes('current month')) {
     const now = new Date();
     return daysUntilMonthEnd(now.getMonth());
   }
 
-  const monthName = Object.keys(MONTH_MAP).find((month) => lowerMessage.includes(month));
+  const monthName = Object.keys(MONTH_MAP)
+    .filter((month) => month.length > 3)
+    .find((month) => new RegExp(`\\b${month}\\b`).test(message));
   if (monthName) {
     return daysUntilMonthEnd(MONTH_MAP[monthName]);
+  }
+
+  if (/\bupcoming\b/.test(message)) {
+    return DEFAULT_UPCOMING_DEADLINE_DAYS;
   }
 
   return undefined;
@@ -233,35 +331,28 @@ const extractSortPreference = (
 };
 
 const buildLocalSearchFilters = (message: string, lowerMessage: string): AdmissionChatFilters => {
-  const deadlineWithinDays = extractDeadlineWithinDaysFromMessage(lowerMessage);
-  const degreeLevel = extractDegreeLevelFromMessage(lowerMessage);
-  const fieldOfStudy = extractFieldOfStudyFromMessage(lowerMessage);
-  const location = extractLocationFromMessage(lowerMessage);
-  const programType = extractProgramTypeFromMessage(message);
-  const deliveryMode = lowerMessage.includes('evening') ? 'on-campus' : undefined;
+  const normalizedMessage = normalizeQueryText(message);
+  const normalizedLowerMessage = normalizeQueryText(lowerMessage);
+  const specificDeadline = extractSpecificDeadlineDateFromMessage(normalizedMessage);
+  const deadlineWithinDays = specificDeadline
+    ? undefined
+    : extractDeadlineWithinDaysFromMessage(normalizedMessage);
+  const deliveryMode = normalizedLowerMessage.includes('evening') ? 'on-campus' : undefined;
 
-  const structuredFilterCount = [
-    degreeLevel,
-    fieldOfStudy,
-    location,
-    programType,
-    deliveryMode,
-    deadlineWithinDays,
-  ].filter((value) => value !== undefined && value !== null).length;
-
-  return {
-    search: shouldUseRawSearch(message, lowerMessage, structuredFilterCount) ? deriveSearchKeyword(message) : undefined,
-    degree_level: degreeLevel,
-    field_of_study: fieldOfStudy,
-    location,
-    program_type: programType,
-    delivery_mode: deliveryMode,
+  const filters = buildSearchFirstFilters(message, {
     deadline_within_days: deadlineWithinDays,
-  };
+    deadline_on: specificDeadline?.iso,
+  });
+
+  return applySearchFirstPolicy(message, {
+    ...filters,
+    delivery_mode: deliveryMode,
+    field_of_study: undefined,
+  });
 };
 
 const buildLocalGuidance = (message: string, isUniversity: boolean): string => {
-  const lower = message.toLowerCase();
+  const lower = normalizeQueryText(message);
 
   if (isUniversity) {
     if (lower.includes('pending') || lower.includes('audit') || lower.includes('status')) {
@@ -282,11 +373,12 @@ const buildLocalGuidance = (message: string, isUniversity: boolean): string => {
       ].join('\n');
     }
 
-    if (lower.includes('re-verification') || lower.includes('resubmit') || lower.includes('edit')) {
+    if (isUniversityReverificationQuery(lower) || lower.includes('resubmit') || lower.includes('edit')) {
       return [
-        'Re-verification is triggered when key admission details are edited.',
-        '- Update fields carefully and keep deadline/eligibility consistent.',
-        '- Resubmit and check verification remarks for corrections.',
+        'Re-verification is triggered when key admission details are edited after verification.',
+        '- Updates to title, deadline, eligibility, fees, or location can move status back to Pending Audit.',
+        '- Open Manage Admissions, apply corrections, then resubmit from Verification Center.',
+        '- Check admin remarks if a record was rejected and needs fixes.',
       ].join('\n');
     }
 
@@ -343,7 +435,7 @@ const buildLocalGuidance = (message: string, isUniversity: boolean): string => {
 };
 
 const buildRelaxedSearchQueries = (search: string): string[] => {
-  const raw = String(search || '').toLowerCase();
+  const raw = normalizeQueryText(search);
   if (!raw.trim()) return [];
 
   const tokens = raw
@@ -358,6 +450,119 @@ const buildRelaxedSearchQueries = (search: string): string[] => {
     .slice(0, 3);
 
   return prioritized;
+};
+
+const isDeadlineFocusedQuery = (message: string, filters: AdmissionChatFilters): boolean => {
+  const normalized = normalizeQueryText(message);
+  return Boolean(
+    filters.deadline_on ||
+    filters.deadline_within_days ||
+    /(deadline|deadlin|closing|due|urgent|upcoming|remaining|within\s+\d+\s+days|this\s+month|this\s+week|next\s+week)/i.test(normalized)
+  );
+};
+
+const resolveDeadlineWindowDays = (message: string, filters: AdmissionChatFilters): number | undefined => {
+  if (typeof filters.deadline_within_days === 'number' && filters.deadline_within_days > 0) {
+    return filters.deadline_within_days;
+  }
+
+  const normalized = normalizeQueryText(message);
+  const extracted = extractDeadlineWithinDaysFromMessage(normalized);
+  if (typeof extracted === 'number' && extracted > 0) {
+    return extracted;
+  }
+
+  return isDeadlineFocusedQuery(message, filters) ? DEFAULT_UPCOMING_DEADLINE_DAYS : undefined;
+};
+
+const pickNearestFutureAdmissionResults = (admissions: Admission[]): AdmissionChatResultItem[] => {
+  return admissions
+    .filter((item) => {
+      if (!item.deadline) return false;
+      const deadlineMs = new Date(item.deadline).getTime();
+      return Number.isFinite(deadlineMs) && deadlineMs >= Date.now();
+    })
+    .sort((a, b) => new Date(a.deadline || '').getTime() - new Date(b.deadline || '').getTime())
+    .slice(0, MAX_RESULTS)
+    .map(mapResult);
+};
+
+const filterByDeadlineOnDate = (admissions: Admission[], deadlineOn: string): Admission[] => {
+  return admissions.filter((admission) => {
+    if (!admission.deadline) {
+      return false;
+    }
+    const key = toDeadlineDateKeyInKarachi(admission.deadline);
+    return key === deadlineOn;
+  });
+};
+
+const pickNearestToDeadlineDate = (
+  admissions: Admission[],
+  deadlineOn: string
+): AdmissionChatResultItem[] => {
+  const targetMs = new Date(`${deadlineOn}T12:00:00`).getTime();
+  return admissions
+    .filter((item) => {
+      if (!item.deadline) return false;
+      const deadlineMs = new Date(item.deadline).getTime();
+      return Number.isFinite(deadlineMs) && deadlineMs >= Date.now();
+    })
+    .sort(
+      (a, b) =>
+        Math.abs(new Date(a.deadline || '').getTime() - targetMs) -
+        Math.abs(new Date(b.deadline || '').getTime() - targetMs)
+    )
+    .slice(0, MAX_RESULTS)
+    .map(mapResult);
+};
+
+const searchAdmissionsByDeadlineWindow = async (
+  message: string,
+  filters: AdmissionChatFilters,
+  executionContext: ChatExecutionContext,
+  sort: LocalIntentResult['sort'] = 'deadline',
+  order: LocalIntentResult['order'] = 'asc'
+): Promise<AdmissionChatResultItem[]> => {
+  const searchTerm = filters.search ? normalizeQueryText(filters.search) : deriveSearchKeyword(message);
+  const { admissions } = await admissionsService.getMany(
+    {
+      search: searchTerm,
+      degree_level: filters.degree_level,
+      field_of_study: filters.field_of_study,
+      location: filters.location,
+      program_type: filters.program_type,
+      delivery_mode: filters.delivery_mode,
+    },
+    1,
+    DEADLINE_QUERY_FETCH_LIMIT,
+    sort || 'deadline',
+    order || 'asc',
+    executionContext.userContext
+  );
+
+  if (filters.deadline_on) {
+    const exact = filterByDeadlineOnDate(admissions, filters.deadline_on).slice(0, MAX_RESULTS).map(mapResult);
+    return exact;
+  }
+
+  const primaryWindowDays = resolveDeadlineWindowDays(message, filters);
+  if (!primaryWindowDays) {
+    return [];
+  }
+
+  const windowCandidates = [primaryWindowDays, DEFAULT_UPCOMING_DEADLINE_DAYS, 90].filter(
+    (days, index, arr) => arr.indexOf(days) === index
+  );
+
+  for (const windowDays of windowCandidates) {
+    const results = filterByDeadlineWindow(admissions, windowDays).slice(0, MAX_RESULTS).map(mapResult);
+    if (results.length > 0) {
+      return results;
+    }
+  }
+
+  return pickNearestFutureAdmissionResults(admissions);
 };
 
 const tryRelaxedSearch = async (
@@ -410,45 +615,9 @@ const pickDefinedFilters = (filters: AdmissionChatFilters): AdmissionChatFilters
 
 const buildRelaxationCandidates = (filters: AdmissionChatFilters): AdmissionChatFilters[] => {
   const base = pickDefinedFilters(filters);
-  const candidates: AdmissionChatFilters[] = [base];
-
-  if (base.program_type) {
-    const { program_type, ...rest } = base;
-    candidates.push(rest);
-  }
-
-  if (base.degree_level) {
-    const { degree_level, ...rest } = base;
-    candidates.push(rest);
-  }
-
-  if (base.degree_level || base.program_type) {
-    const { degree_level, program_type, ...rest } = base;
-    candidates.push(rest);
-  }
-
-  if (base.search) {
-    candidates.push({ search: base.search, deadline_within_days: base.deadline_within_days });
-  }
-
-  if (base.field_of_study) {
-    candidates.push({
-      field_of_study: base.field_of_study,
-      location: base.location,
-      deadline_within_days: base.deadline_within_days,
-    });
-  }
-
-  if (base.location) {
-    candidates.push({ location: base.location, deadline_within_days: base.deadline_within_days });
-  }
-
-  const seen = new Set<string>();
-  return candidates.filter((candidate) => {
-    const key = JSON.stringify(candidate);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  return buildSearchRelaxationCandidates({
+    ...base,
+    field_of_study: undefined,
   });
 };
 
@@ -488,29 +657,34 @@ const tryRelaxedFilterSearch = async (
 };
 
 const detectLocalIntent = (message: string, isUniversity: boolean): LocalIntentResult => {
-  const lower = message.toLowerCase();
+  const lower = normalizeQueryText(message);
 
   if (isUniversity) {
     if (
+      isUniversityReverificationQuery(lower) ||
       lower.includes('publish') ||
       lower.includes('upload') ||
       lower.includes('pending audit') ||
       lower.includes('verification') ||
-      lower.includes('re-verification') ||
       lower.includes('resubmit') ||
       lower.includes('policy') ||
-      lower.includes('status')
+      lower.includes('status') ||
+      lower.includes('how do i') ||
+      lower.includes('how to')
     ) {
       return { intent: 'guidance', answer: buildLocalGuidance(message, true) };
     }
 
-    if (lower.includes('show') || lower.includes('list') || lower.includes('all my') || lower.includes('my ')) {
+    if (
+      lower.includes('show') ||
+      lower.includes('list') ||
+      lower.includes('all my') ||
+      lower.includes('my ') ||
+      lower.includes('our admissions') ||
+      (lower.includes('admissions') && (lower.includes('my') || lower.includes('our')))
+    ) {
       const filters: AdmissionChatFilters = {};
-      let verificationStatus: LocalIntentResult['verification_status'];
-
-      if (lower.includes('verified')) verificationStatus = 'verified';
-      if (lower.includes('pending')) verificationStatus = 'pending';
-      if (lower.includes('rejected')) verificationStatus = 'rejected';
+      const verificationStatus = extractUniversityVerificationStatusFromMessage(message);
 
       return { intent: 'search_admissions', filters, verification_status: verificationStatus };
     }
@@ -537,8 +711,23 @@ const detectLocalIntent = (message: string, isUniversity: boolean): LocalIntentR
     }
 
     if (DEADLINE_HINT.test(lower)) {
-      const withinDays = extractDeadlineWithinDaysFromMessage(lower) || (lower.includes('urgent') ? 3 : 7);
+      const specificDeadline = extractSpecificDeadlineDateFromMessage(message);
       const filters = buildLocalSearchFilters(message, lower);
+      if (specificDeadline) {
+        return {
+          intent: 'search_admissions',
+          filters: {
+            ...filters,
+            deadline_on: specificDeadline.iso,
+            deadline_within_days: undefined,
+          },
+          ...extractSortPreference(lower),
+        };
+      }
+
+      const withinDays =
+        extractDeadlineWithinDaysFromMessage(lower) ||
+        (lower.includes('urgent') ? 3 : lower.includes('this week') || lower.includes('next week') ? 7 : DEFAULT_UPCOMING_DEADLINE_DAYS);
       return {
         intent: 'search_admissions',
         filters: {
@@ -574,13 +763,22 @@ const detectLocalIntent = (message: string, isUniversity: boolean): LocalIntentR
   return { intent: 'unknown' };
 };
 
-const normalizeFilters = (extraction: GeminiChatExtraction): AdmissionChatFilters => {
-  const deadlineWithinDays = extraction.deadline_within_days ?? undefined;
+const normalizeFilters = (extraction: GeminiChatExtraction, sourceMessage = ''): AdmissionChatFilters => {
+  const specificFromGemini = extraction.deadline_on?.trim();
+  const parsedGeminiDate = specificFromGemini
+    ? extractSpecificDeadlineDateFromMessage(specificFromGemini) ||
+      (/^\d{4}-\d{2}-\d{2}$/.test(specificFromGemini) ? { iso: specificFromGemini, label: specificFromGemini } : undefined)
+    : undefined;
+  const deadlineWithinDays =
+    parsedGeminiDate ? undefined : extraction.deadline_within_days ?? undefined;
   const normalizedProgramType = normalizeProgramType(extraction.program_type);
   const normalizedDegreeLevel = normalizeDegreeLevel(extraction.degree_level || extraction.program_type);
-  const normalizedSearch = extraction.search ? deriveSearchKeyword(extraction.search) || extraction.search : undefined;
+  const rawSearch = extraction.search?.trim();
+  const normalizedSearch =
+    (rawSearch ? deriveSearchKeyword(rawSearch) || rawSearch.toLowerCase() : undefined) ||
+    buildSearchTermsFromMessage(sourceMessage);
 
-  return {
+  const merged: AdmissionChatFilters = {
     search: normalizedSearch,
     degree_level: normalizedDegreeLevel,
     field_of_study: extraction.field_of_study || undefined,
@@ -588,7 +786,23 @@ const normalizeFilters = (extraction: GeminiChatExtraction): AdmissionChatFilter
     program_type: normalizedProgramType,
     delivery_mode: extraction.delivery_mode || undefined,
     deadline_within_days: typeof deadlineWithinDays === 'number' && deadlineWithinDays > 0 ? deadlineWithinDays : undefined,
+    deadline_on: parsedGeminiDate?.iso,
   };
+
+  return applySearchFirstPolicy(sourceMessage, merged);
+};
+
+const normalizeDeadlineForResponse = (deadline: unknown): string | null => {
+  if (!deadline) return null;
+  if (deadline instanceof Date) {
+    return deadline.toISOString();
+  }
+  const asString = String(deadline);
+  const parsed = new Date(asString);
+  if (Number.isFinite(parsed.getTime())) {
+    return parsed.toISOString();
+  }
+  return asString;
 };
 
 const mapResult = (admission: Admission): AdmissionChatResultItem => ({
@@ -596,7 +810,7 @@ const mapResult = (admission: Admission): AdmissionChatResultItem => ({
   title: admission.title,
   degree_level: admission.degree_level,
   location: admission.location,
-  deadline: admission.deadline,
+  deadline: normalizeDeadlineForResponse(admission.deadline),
   verification_status: admission.verification_status,
   university_id: admission.university_id,
 });
@@ -620,11 +834,69 @@ const filterByDeadlineWindow = (admissions: Admission[], withinDays?: number): A
 };
 
 const formatAdmissionLine = (admission: AdmissionChatResultItem, index: number): string => {
-  const detailParts = [admission.degree_level, admission.location, admission.deadline].filter(Boolean);
+  const deadlineLabel = formatDateLabel(admission.deadline);
+  const detailParts = [admission.degree_level, admission.location, deadlineLabel !== 'No deadline' ? deadlineLabel : null].filter(Boolean);
   return `${index + 1}) ${admission.title}${detailParts.length > 0 ? `\n   ${detailParts.join(' | ')}` : ''}`;
 };
 
-const formatSearchAnswer = (results: AdmissionChatResultItem[], filters: AdmissionChatFilters): string => {
+const formatUniversityAdmissionLine = (admission: AdmissionChatResultItem, index: number): string => {
+  const deadlineLabel = formatDateLabel(admission.deadline);
+  const statusLabel = formatStatusLabel(admission.verification_status);
+  const detailParts = [
+    `Status: ${statusLabel}`,
+    admission.degree_level,
+    admission.location,
+    deadlineLabel !== 'No deadline' ? `Deadline: ${deadlineLabel}` : null,
+  ].filter(Boolean);
+  return `${index + 1}) ${admission.title}\n   ${detailParts.join(' | ')}`;
+};
+
+type SearchAnswerOptions = {
+  isUniversity?: boolean;
+  verificationStatus?: LocalIntentResult['verification_status'];
+};
+
+const formatUniversitySearchAnswer = (
+  results: AdmissionChatResultItem[],
+  filters: AdmissionChatFilters,
+  verificationStatus?: LocalIntentResult['verification_status']
+): string => {
+  const statusHint = verificationStatus ? formatStatusLabel(verificationStatus) : null;
+
+  if (results.length === 0) {
+    return [
+      statusHint
+        ? `I could not find any of your admissions with status ${statusHint}.`
+        : 'I could not find any of your admissions matching that request.',
+      'Try one of these:',
+      '- "Show my verified admissions"',
+      '- "List pending admissions"',
+      '- "Show my rejected admissions"',
+      'You can also open Manage Admissions and filter by verification status.',
+    ].join('\n');
+  }
+
+  const appliedFilters = [filters.search, statusHint].filter(Boolean).join(', ');
+  const intro = appliedFilters
+    ? `Here are ${results.length} of your admission${results.length === 1 ? '' : 's'} matching ${appliedFilters}:`
+    : `Here are ${results.length} of your admission${results.length === 1 ? '' : 's'}:`;
+
+  return [
+    intro,
+    ...results.map(formatUniversityAdmissionLine),
+    'Open Manage Admissions or Verification Center to edit or resubmit a record.',
+  ].join('\n');
+};
+
+const formatSearchAnswer = (
+  results: AdmissionChatResultItem[],
+  filters: AdmissionChatFilters,
+  options?: SearchAnswerOptions
+): string => {
+  if (options?.isUniversity) {
+    return formatUniversitySearchAnswer(results, filters, options.verificationStatus);
+  }
+
   if (results.length === 0) {
     const quickSuggestions = [
       '- "Show BBA programs"',
@@ -645,7 +917,11 @@ const formatSearchAnswer = (results: AdmissionChatResultItem[], filters: Admissi
     .filter(Boolean)
     .join(', ');
 
-  const intro = filters.deadline_within_days
+  const intro = filters.deadline_on
+    ? results.length > 0
+      ? `I found ${results.length} program${results.length === 1 ? '' : 's'} closing on ${formatDateLabel(filters.deadline_on)}:`
+      : `I could not find programs closing on ${formatDateLabel(filters.deadline_on)}.`
+    : filters.deadline_within_days
     ? `I found ${results.length} match${results.length === 1 ? '' : 'es'} with deadlines in the next ${filters.deadline_within_days} days:`
     : appliedFilters
     ? `I found ${results.length} match${results.length === 1 ? '' : 'es'} for: ${appliedFilters}.`
@@ -658,14 +934,37 @@ const formatSearchAnswer = (results: AdmissionChatResultItem[], filters: Admissi
   ].join('\n');
 };
 
+const formatSpecificDateFallbackAnswer = (
+  deadlineOn: string,
+  nearestResults: AdmissionChatResultItem[]
+): string => {
+  const dateLabel = formatDateLabel(deadlineOn);
+
+  if (nearestResults.length === 0) {
+    return [
+      `I could not find verified programs closing on ${dateLabel}.`,
+      'That date may not be listed yet, or closing dates may fall on a nearby day.',
+      'Try "Show deadlines this month" or open the Deadlines page on your dashboard.',
+    ].join('\n');
+  }
+
+  return [
+    `I could not find programs closing exactly on ${dateLabel}.`,
+    'Here are the closest upcoming deadlines instead:',
+    ...nearestResults.map((item, index) => formatAdmissionLine(item, index)),
+    'Tell me if you want to filter by city or degree level.',
+  ].join('\n');
+};
+
 const formatDeadlineFallbackAnswer = (
   strictWithinDays: number,
   fallbackResults: AdmissionChatResultItem[]
 ): string => {
   if (fallbackResults.length === 0) {
     return [
-      `I could not find admissions with deadlines within ${strictWithinDays} days.`,
-      'Try widening the range, for example: "Show deadlines this month".',
+      `I could not find verified admissions with upcoming deadlines in the next ${strictWithinDays} days.`,
+      'This can happen when deadlines are further out or not yet published.',
+      'Try: "Show deadlines this month", "Find CS programs in Lahore", or check the Deadlines page on your dashboard.',
     ].join('\n');
   }
 
@@ -953,9 +1252,83 @@ export const chatWithAdmissionsAssistant = async (
     extraction = { intent: 'guidance' };
   }
 
-  const filters = normalizeFilters(extraction);
+  const filters = normalizeFilters(extraction, message);
+  const localSpecificDate = extractSpecificDeadlineDateFromMessage(message);
+  if (localSpecificDate) {
+    filters.deadline_on = localSpecificDate.iso;
+    filters.deadline_within_days = undefined;
+  }
+
+  const programCodes = extractProgramCodeTokens(message);
+  if (programCodes.length > 0) {
+    filters.search = buildSearchTermsFromMessage(message) || programCodes.join(' ');
+    filters.degree_level = undefined;
+    filters.field_of_study = undefined;
+    filters.program_type = undefined;
+  } else {
+    Object.assign(filters, applySearchFirstPolicy(message, filters));
+  }
 
   if (localIntent.intent === 'search_admissions') {
+    if (isDeadlineFocusedQuery(message, localIntent.filters || {})) {
+      const deadlineResults = await searchAdmissionsByDeadlineWindow(
+        message,
+        localIntent.filters || {},
+        executionContext,
+        localIntent.sort,
+        localIntent.order
+      );
+
+      if (deadlineResults.length > 0) {
+        return {
+          intent: 'search_admissions',
+          extracted_filters: localIntent.filters || {},
+          clarification_needed: false,
+          answer: formatSearchAnswer(
+            deadlineResults,
+            localIntent.filters || {},
+            uniCtx
+              ? { isUniversity: true, verificationStatus: localIntent.verification_status }
+              : undefined
+          ),
+          result_count: deadlineResults.length,
+          results: deadlineResults,
+        };
+      }
+
+      if (localIntent.filters?.deadline_on) {
+        const { admissions: pool } = await admissionsService.getMany(
+          {
+            search: localIntent.filters?.search,
+            degree_level: localIntent.filters?.degree_level,
+            field_of_study: localIntent.filters?.field_of_study,
+            location: localIntent.filters?.location,
+            program_type: localIntent.filters?.program_type,
+            delivery_mode: localIntent.filters?.delivery_mode,
+          },
+          1,
+          DEADLINE_QUERY_FETCH_LIMIT,
+          'deadline',
+          'asc',
+          executionContext.userContext
+        );
+        const nearest = pickNearestToDeadlineDate(pool, localIntent.filters.deadline_on);
+        return {
+          intent: 'search_admissions',
+          extracted_filters: localIntent.filters,
+          clarification_needed: false,
+          answer: formatSpecificDateFallbackAnswer(localIntent.filters.deadline_on, nearest),
+          result_count: nearest.length,
+          results: nearest,
+        };
+      }
+    }
+
+    const fetchLimit =
+      localIntent.filters?.deadline_within_days || localIntent.filters?.deadline_on
+        ? DEADLINE_QUERY_FETCH_LIMIT
+        : MAX_RESULTS * 2;
+
     const { admissions } = await admissionsService.getMany(
       {
         search: localIntent.filters?.search,
@@ -967,13 +1340,27 @@ export const chatWithAdmissionsAssistant = async (
         verification_status: localIntent.verification_status,
       },
       1,
-      MAX_RESULTS * 2,
+      fetchLimit,
       localIntent.sort || 'deadline',
       localIntent.order || 'asc',
       executionContext.userContext
     );
 
-    const filteredAdmissions = filterByDeadlineWindow(admissions, localIntent.filters?.deadline_within_days);
+    let effectiveDeadlineDays = localIntent.filters?.deadline_within_days;
+    if (effectiveDeadlineDays) {
+      const windowCandidates = [effectiveDeadlineDays, DEFAULT_UPCOMING_DEADLINE_DAYS, 90].filter(
+        (days, index, arr) => arr.indexOf(days) === index
+      );
+      for (const days of windowCandidates) {
+        const candidateResults = filterByDeadlineWindow(admissions, days);
+        if (candidateResults.length > 0) {
+          effectiveDeadlineDays = days;
+          break;
+        }
+      }
+    }
+
+    const filteredAdmissions = filterByDeadlineWindow(admissions, effectiveDeadlineDays);
     let results = (localIntent.filters?.deadline_within_days ? filteredAdmissions : admissions)
       .slice(0, MAX_RESULTS)
       .map(mapResult);
@@ -996,22 +1383,27 @@ export const chatWithAdmissionsAssistant = async (
       }
     }
 
+    if (results.length === 0 && localIntent.filters?.deadline_on) {
+      const nearest = pickNearestToDeadlineDate(admissions, localIntent.filters.deadline_on);
+      return {
+        intent: 'search_admissions',
+        extracted_filters: localIntent.filters,
+        clarification_needed: false,
+        answer: formatSpecificDateFallbackAnswer(localIntent.filters.deadline_on, nearest),
+        result_count: nearest.length,
+        results: nearest,
+      };
+    }
+
     if (results.length === 0 && localIntent.filters?.deadline_within_days) {
-      const nearestUpcoming = admissions
-        .filter((item) => {
-          if (!item.deadline) return false;
-          const deadlineMs = new Date(item.deadline).getTime();
-          return Number.isFinite(deadlineMs) && deadlineMs >= Date.now();
-        })
-        .sort((a, b) => new Date(a.deadline || '').getTime() - new Date(b.deadline || '').getTime())
-        .slice(0, MAX_RESULTS)
-        .map(mapResult);
+      const nearestUpcoming = pickNearestFutureAdmissionResults(admissions);
+      const usedDays = effectiveDeadlineDays || localIntent.filters.deadline_within_days;
 
       return {
         intent: 'search_admissions',
-        extracted_filters: localIntent.filters || {},
+        extracted_filters: { ...localIntent.filters, deadline_within_days: usedDays },
         clarification_needed: false,
-        answer: formatDeadlineFallbackAnswer(localIntent.filters.deadline_within_days, nearestUpcoming),
+        answer: formatDeadlineFallbackAnswer(usedDays, nearestUpcoming),
         result_count: nearestUpcoming.length,
         results: nearestUpcoming,
       };
@@ -1021,7 +1413,13 @@ export const chatWithAdmissionsAssistant = async (
       intent: 'search_admissions',
       extracted_filters: localIntent.filters || {},
       clarification_needed: false,
-      answer: formatSearchAnswer(results, localIntent.filters || {}),
+      answer: formatSearchAnswer(
+        results,
+        localIntent.filters || {},
+        uniCtx
+          ? { isUniversity: true, verificationStatus: localIntent.verification_status }
+          : undefined
+      ),
       result_count: results.length,
       results,
     };
@@ -1093,14 +1491,30 @@ export const chatWithAdmissionsAssistant = async (
     };
   }
 
+  if (uniCtx && isUniversityReverificationQuery(normalizeQueryText(message))) {
+    return {
+      intent: 'guidance',
+      extracted_filters: {},
+      clarification_needed: false,
+      answer: buildLocalGuidance(message, true),
+      result_count: 0,
+      results: [],
+    };
+  }
+
+  const universityVerificationStatus = uniCtx
+    ? extractUniversityVerificationStatusFromMessage(message)
+    : undefined;
+
   const { admissions: extractedAdmissions } = await admissionsService.getMany(
     {
       search: filters.search,
-      degree_level: filters.degree_level,
-      field_of_study: filters.field_of_study,
+      degree_level: uniCtx ? undefined : filters.degree_level,
+      field_of_study: uniCtx ? undefined : filters.field_of_study,
       location: filters.location,
-      program_type: filters.program_type,
+      program_type: uniCtx ? undefined : filters.program_type,
       delivery_mode: filters.delivery_mode,
+      verification_status: universityVerificationStatus,
     },
     1,
     MAX_RESULTS * 2,
@@ -1109,8 +1523,44 @@ export const chatWithAdmissionsAssistant = async (
     executionContext.userContext
   );
 
-  const filteredAdmissions = filterByDeadlineWindow(extractedAdmissions, filters.deadline_within_days);
-  let results = filteredAdmissions.slice(0, MAX_RESULTS).map(mapResult);
+  if (isDeadlineFocusedQuery(message, filters)) {
+    const deadlineResults = await searchAdmissionsByDeadlineWindow(message, filters, executionContext, 'deadline', 'asc');
+    if (deadlineResults.length > 0) {
+      return {
+        intent: 'search_admissions',
+        extracted_filters: filters,
+        clarification_needed: false,
+        answer: formatSearchAnswer(
+          deadlineResults,
+          filters,
+          uniCtx ? { isUniversity: true, verificationStatus: universityVerificationStatus } : undefined
+        ),
+        result_count: deadlineResults.length,
+        results: deadlineResults,
+      };
+    }
+
+    if (filters.deadline_on) {
+      const nearest = pickNearestToDeadlineDate(extractedAdmissions, filters.deadline_on);
+      return {
+        intent: 'search_admissions',
+        extracted_filters: filters,
+        clarification_needed: false,
+        answer: formatSpecificDateFallbackAnswer(filters.deadline_on, nearest),
+        result_count: nearest.length,
+        results: nearest,
+      };
+    }
+  }
+
+  let scopedAdmissions = extractedAdmissions;
+  if (filters.deadline_on) {
+    scopedAdmissions = filterByDeadlineOnDate(scopedAdmissions, filters.deadline_on);
+  } else if (filters.deadline_within_days) {
+    scopedAdmissions = filterByDeadlineWindow(scopedAdmissions, filters.deadline_within_days);
+  }
+
+  let results = scopedAdmissions.slice(0, MAX_RESULTS).map(mapResult);
   if (results.length === 0) {
     const relaxedResults = await tryRelaxedFilterSearch(filters, executionContext, 'deadline', 'asc');
       if (relaxedResults.length > 0) {
@@ -1123,6 +1573,18 @@ export const chatWithAdmissionsAssistant = async (
     if (keywordOnlyResults.length > 0) {
       results = keywordOnlyResults;
     }
+  }
+
+  if (results.length === 0 && filters.deadline_on) {
+    const nearest = pickNearestToDeadlineDate(extractedAdmissions, filters.deadline_on);
+    return {
+      intent: 'search_admissions',
+      extracted_filters: filters,
+      clarification_needed: false,
+      answer: formatSpecificDateFallbackAnswer(filters.deadline_on, nearest),
+      result_count: nearest.length,
+      results: nearest,
+    };
   }
 
   if (results.length === 0 && filters.deadline_within_days) {
@@ -1150,7 +1612,11 @@ export const chatWithAdmissionsAssistant = async (
     intent: 'search_admissions',
     extracted_filters: filters,
     clarification_needed: false,
-    answer: formatSearchAnswer(results, filters),
+    answer: formatSearchAnswer(
+      results,
+      filters,
+      uniCtx ? { isUniversity: true, verificationStatus: universityVerificationStatus } : undefined
+    ),
     result_count: results.length,
     results,
   };

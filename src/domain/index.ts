@@ -55,6 +55,8 @@ export function registerDomains(app: Application): void {
   app.use('/api/v1/users', usersRoutes);
   app.use('/api/v1/analytics', analyticsRoutes);
   app.use('/api/v1/changelogs', changelogsRoutes);
+  // Backward-compatible alias (legacy frontend path)
+  app.use('/api/v1/change-logs', changelogsRoutes);
   
   // Advanced Features (Phase 5)
   app.use('/api/v1/watchlists', watchlistsRoutes);

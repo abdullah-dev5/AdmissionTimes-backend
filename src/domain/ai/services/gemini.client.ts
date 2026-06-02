@@ -26,7 +26,11 @@ const stripJsonFences = (value: string): string => {
 
 const parseJson = <T>(raw: string): T => {
   const cleaned = stripJsonFences(raw);
-  return JSON.parse(cleaned) as T;
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    throw new AppError('Gemini returned invalid JSON', 502);
+  }
 };
 
 export const isGeminiConfigured = (): boolean => {

@@ -16,6 +16,7 @@ import { AppError } from '@shared/middleware/errorHandler';
 import { query } from '@db/connection';
 import * as authModel from '../models/auth.model';
 import { SignUpDTO, SignInDTO, SignUpResponse, SignInResponse, AuthUser } from '../types/auth.types';
+import { getSupabaseAuthClient } from './supabaseAuth.client';
 
 /**
  * Sign up a new user
@@ -96,9 +97,32 @@ export const signIn = async (data: SignInDTO): Promise<SignInResponse> => {
     throw new AppError('Invalid email or password', 401);
   }
 
+  let access_token: string | undefined;
+  let refresh_token: string | undefined;
+
+  const supabase = getSupabaseAuthClient();
+  if (supabase) {
+    try {
+      const { data: authData, error } = await supabase.auth.signInWithPassword({
+        email: data.email,
+        password: data.password,
+      });
+      if (!error && authData.session) {
+        access_token = authData.session.access_token;
+        refresh_token = authData.session.refresh_token;
+      } else if (error) {
+        console.warn('[Auth] Supabase sign-in skipped:', error.message);
+      }
+    } catch (supabaseError: any) {
+      console.warn('[Auth] Supabase sign-in failed:', supabaseError?.message || supabaseError);
+    }
+  }
+
   return {
     user,
     message: 'Signed in successfully',
+    access_token,
+    refresh_token,
   };
 };
 

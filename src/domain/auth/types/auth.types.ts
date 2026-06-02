@@ -53,4 +53,6 @@ export interface SignUpResponse {
 export interface SignInResponse {
   user: AuthUser;
   message: string;
+  access_token?: string;
+  refresh_token?: string;
 }
