@@ -155,9 +155,8 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
         .then((preferences) => {
           const category = inferNotificationCategory(data.notification_type);
           const categoryEnabled = preferences.categories[category] !== false;
-          const forceEmailForDeadlineReminder = data.notification_type === NOTIFICATION_TYPE.DEADLINE_NEAR;
-
-          if (preferences.email && (preferences.emailEnabled || forceEmailForDeadlineReminder) && categoryEnabled) {
+          // Respect the user's email opt-out for every notification type.
+          if (preferences.email && preferences.emailEnabled && categoryEnabled) {
             sendNotificationEmail(result, preferences.email).catch((emailError) => {
               console.error('[NotificationService] Email delivery failed (non-blocking):', emailError);
             });

@@ -1,3 +1,4 @@
+export type { UserContext } from '@shared/types/auth';
 /**
  * Dashboard Domain - Type Definitions
  * 
@@ -5,15 +6,6 @@
  * Includes types for student, university, and admin dashboards.
  */
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-export interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Student Dashboard Stats
@@ -38,7 +30,7 @@ export interface RecommendedProgram {
   degree_level: string;
   deadline: string;
   days_remaining: number;
-  application_fee: number;
+  application_fee: number | null;
   location: string;
   verification_status: 'verified' | 'pending' | 'rejected';
   match_score?: number;

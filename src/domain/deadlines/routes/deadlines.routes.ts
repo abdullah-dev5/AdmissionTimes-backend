@@ -14,6 +14,9 @@ import {
   updateDeadlineSchema,
 } from '../validators/deadlines.validators';
 import { validateQuery, validateParams, validateBody } from '@shared/middleware/validation';
+import { requireRole } from '@shared/middleware/jwtAuth';
+
+const adminOnly = requireRole(['admin']);
 
 const router: Router = Router();
 
@@ -196,6 +199,7 @@ router.get(
 // POST /api/v1/deadlines - Create deadline
 router.post(
   '/',
+  adminOnly,
   validateBody(createDeadlineSchema),
   deadlinesController.createDeadline
 );
@@ -278,6 +282,7 @@ router.get(
 // POST /api/v1/deadlines/notify-upcoming - Trigger deadline reminder notifications (admin only)
 router.post(
   '/notify-upcoming',
+  adminOnly,
   deadlinesController.triggerDeadlineReminders
 );
 
@@ -399,6 +404,7 @@ router.get(
 // PUT /api/v1/deadlines/:id - Update deadline
 router.put(
   '/:id',
+  adminOnly,
   validateParams(uuidParamSchema),
   validateBody(updateDeadlineSchema),
   deadlinesController.updateDeadline
@@ -444,6 +450,7 @@ router.put(
 // DELETE /api/v1/deadlines/:id - Delete deadline
 router.delete(
   '/:id',
+  adminOnly,
   validateParams(uuidParamSchema),
   deadlinesController.deleteDeadline
 );

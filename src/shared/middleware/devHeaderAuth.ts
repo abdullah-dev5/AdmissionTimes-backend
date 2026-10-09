@@ -1,72 +1,43 @@
 /**
- * Development-only auth: attach user from x-user-id / x-user-role headers.
- * Used when the frontend has signed in via /auth/signin but has no Supabase JWT yet.
+ * Development-only header authentication.
+ *
+ * Enabled only via ALLOW_DEV_HEADER_AUTH=true outside production (see apiAuth).
+ * Impersonates an existing user by `x-user-id`; role and university always
+ * come from that user's database row — headers can never elevate privileges.
  */
 
 import { Request, Response, NextFunction } from 'express';
 import { query } from '@db/connection';
-import { UserContext } from '@domain/admissions/types/admissions.types';
 
-export const devHeaderAuth = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  const userId = req.headers['x-user-id'] as string | undefined;
-  const headerRole = req.headers['x-user-role'] as string | undefined;
-  const headerUniversityId = req.headers['x-university-id'] as string | undefined;
-
-  if (!userId) {
-    res.status(401).json({
-      success: false,
-      message: 'Authentication required',
-      errors: {
-        auth: 'Missing Authorization header or x-user-id (development)',
-      },
-      timestamp: new Date().toISOString(),
-    });
-    return;
-  }
+export const devHeaderAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const userId = String(req.headers['x-user-id'] || '').trim();
 
   try {
-    const userSql = `
-      SELECT id::text AS id, email, role, university_id::text AS university_id
-      FROM users
-      WHERE id = $1
-    `;
-    const result = await query(userSql, [userId]);
+    const result = await query(
+      `SELECT id::text AS id, email, role, university_id::text AS university_id, status
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+    const row = result.rows[0];
 
-    if (result.rows.length === 0) {
+    if (!row || row.status !== 'active') {
       res.status(401).json({
         success: false,
         message: 'Invalid user',
-        errors: { auth: 'User not found for x-user-id' },
+        errors: { auth: 'No active user for x-user-id' },
         timestamp: new Date().toISOString(),
       });
       return;
     }
 
-    const row = result.rows[0];
-    const role = (headerRole || row.role || 'student') as UserContext['role'];
-
-    let universityId = row.university_id || headerUniversityId || null;
-    if (role === 'university' && !universityId) {
-      universityId = headerUniversityId || null;
-    }
-
     req.user = {
       id: row.id,
-      role,
-      university_id: universityId,
+      role: row.role,
+      university_id: row.university_id,
+      email: row.email,
     };
-
     next();
-  } catch (error: any) {
-    console.error('devHeaderAuth error:', error?.message || error);
-    res.status(500).json({
-      success: false,
-      message: 'Authentication failed',
-      timestamp: new Date().toISOString(),
-    });
+  } catch (error) {
+    next(error);
   }
 };

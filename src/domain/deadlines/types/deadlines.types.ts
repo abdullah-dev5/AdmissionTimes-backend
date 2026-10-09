@@ -6,6 +6,7 @@
  */
 
 import { DeadlineType } from '@config/constants';
+export type { UserContext } from '@shared/types/auth';
 
 /**
  * Core deadline record interface
@@ -68,6 +69,8 @@ export interface UpdateDeadlineDTO {
  * Used for filtering deadlines
  */
 export interface DeadlineFilters {
+  /** Include deadlines of unverified/inactive admissions (admin only). */
+  include_unpublished?: boolean;
   admission_id?: string;
   deadline_type?: DeadlineType;
   is_overdue?: boolean;
@@ -87,12 +90,3 @@ export interface DeadlineQueryParams extends DeadlineFilters {
   order?: 'asc' | 'desc';
 }
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-export interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}

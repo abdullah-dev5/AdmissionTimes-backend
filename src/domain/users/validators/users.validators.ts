@@ -7,55 +7,7 @@
 
 import Joi from 'joi';
 import { USER_TYPE } from '@config/constants';
-import { FIELD_LIMITS, DEFAULTS, SORTABLE_FIELDS } from '../constants/users.constants';
-
-/**
- * Create user validation schema
- */
-export const createUserSchema = Joi.object({
-  auth_user_id: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'auth_user_id must be a valid UUID',
-    }),
-
-  role: Joi.string()
-    .valid(...Object.values(USER_TYPE))
-    .required()
-    .messages({
-      'any.only': `role must be one of: ${Object.values(USER_TYPE).join(', ')}`,
-      'any.required': 'role is required',
-    }),
-
-  display_name: Joi.string()
-    .min(FIELD_LIMITS.DISPLAY_NAME_MIN)
-    .max(FIELD_LIMITS.DISPLAY_NAME_MAX)
-    .required()
-    .messages({
-      'string.empty': 'Display name is required',
-      'string.min': `Display name must be at least ${FIELD_LIMITS.DISPLAY_NAME_MIN} characters`,
-      'string.max': `Display name must not exceed ${FIELD_LIMITS.DISPLAY_NAME_MAX} characters`,
-      'any.required': 'Display name is required',
-    }),
-
-  university_id: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'university_id must be a valid UUID',
-    }),
-
-  status: Joi.string()
-    .valid('active', 'suspended')
-    .optional()
-    .default(DEFAULTS.STATUS)
-    .messages({
-      'any.only': 'status must be either "active" or "suspended"',
-    }),
-});
+import { FIELD_LIMITS, SORTABLE_FIELDS } from '../constants/users.constants';
 
 /**
  * Update user validation schema
@@ -68,14 +20,6 @@ export const updateUserSchema = Joi.object({
     .messages({
       'string.min': `Display name must be at least ${FIELD_LIMITS.DISPLAY_NAME_MIN} characters`,
       'string.max': `Display name must not exceed ${FIELD_LIMITS.DISPLAY_NAME_MAX} characters`,
-    }),
-
-  university_id: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'university_id must be a valid UUID',
     }),
 });
 
@@ -106,6 +50,19 @@ export const updateUserRoleSchema = Joi.object({
       'any.only': `role must be one of: ${Object.values(USER_TYPE).join(', ')}`,
       'any.required': 'role is required',
     }),
+  // Required when assigning the university role.
+  university_id: Joi.string().uuid().when('role', {
+    is: 'university',
+    then: Joi.required(),
+    otherwise: Joi.forbidden(),
+  }),
+});
+
+/**
+ * Suspend / reactivate a user (admin only)
+ */
+export const updateUserStatusSchema = Joi.object({
+  status: Joi.string().valid('active', 'suspended').required(),
 });
 
 /**

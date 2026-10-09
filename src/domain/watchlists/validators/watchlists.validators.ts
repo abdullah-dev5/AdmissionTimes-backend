@@ -27,6 +27,10 @@ export const createWatchlistSchema = Joi.object({
     .messages({
       'string.max': `Notes must not exceed ${FIELD_LIMITS.NOTES_MAX} characters`,
     }),
+
+  // Saving with reminders on ("Set Reminder" / "Save"). Previously stripped by
+  // validation, so reminders were silently never enabled.
+  alert_opt_in: Joi.boolean().optional(),
 });
 
 /**

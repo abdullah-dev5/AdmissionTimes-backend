@@ -25,7 +25,7 @@ export const health = async (_req: Request, res: Response, next: NextFunction): 
 
 export const ingestBatchController = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const payload = req.body as ScraperIngestBatchRequestDTO;
+    const payload = (req.validated ?? req.body) as ScraperIngestBatchRequestDTO;
     const result = await ingestBatch(payload);
     sendSuccess(res, result, 'Scraper batch ingested successfully');
   } catch (error) {

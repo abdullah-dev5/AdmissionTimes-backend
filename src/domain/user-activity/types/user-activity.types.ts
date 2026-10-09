@@ -6,6 +6,7 @@
  */
 
 import { ActivityType, UserType } from '@config/constants';
+export type { UserContext } from '@shared/types/auth';
 
 /**
  * Core user activity record interface
@@ -58,12 +59,3 @@ export interface UserActivityQueryParams extends UserActivityFilters {
   order?: 'asc' | 'desc';
 }
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-export interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}

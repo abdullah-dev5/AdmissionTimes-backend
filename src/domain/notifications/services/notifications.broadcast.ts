@@ -30,7 +30,7 @@ export interface BroadcastResult {
  * Get all users with a specific role
  */
 async function getUsersByRole(role: string): Promise<Array<{ id: string; role: UserType }>> {
-  const result = await query('SELECT id::text as id, role FROM users WHERE role = $1', [role]);
+  const result = await query(`SELECT id::text as id, role FROM users WHERE role = $1 AND status = 'active'`, [role]);
   console.log(`🔍 [BROADCAST] getUsersByRole('${role}'): Found ${result.rows.length} users`);
   if (result.rows.length > 0) {
     result.rows.forEach(r => console.log(`   - ${r.role}: ${r.id.substring(0, 8)}...`));
@@ -42,7 +42,7 @@ async function getUsersByRole(role: string): Promise<Array<{ id: string; role: U
  * Get all active users
  */
 async function getAllUsers(): Promise<Array<{ id: string; role: UserType }>> {
-  const result = await query('SELECT id::text as id, role FROM users', []);
+  const result = await query(`SELECT id::text as id, role FROM users WHERE status = 'active'`, []);
   console.log(`🔍 [BROADCAST] getAllUsers(): Found ${result.rows.length} total users`);
   result.rows.forEach(r => console.log(`   - ${r.role.padEnd(12)}: ${r.id.substring(0, 8)}...`));
   return result.rows.map((row) => ({ id: row.id, role: row.role as UserType }));

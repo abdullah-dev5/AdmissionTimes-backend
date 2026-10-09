@@ -6,6 +6,7 @@
  */
 
 import { NotificationPriority, NotificationType, UserType } from '@config/constants';
+export type { UserContext } from '@shared/types/auth';
 
 /**
  * Core notification record interface
@@ -78,12 +79,3 @@ export interface MarkReadDTO {
   read_at?: string; // Optional, defaults to now
 }
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-export interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}

@@ -1,84 +1,30 @@
 /**
  * Auth Domain - Validators
- * 
- * Request validation schemas for authentication endpoints.
  */
 
 import Joi from 'joi';
-import { USER_TYPE } from '@config/constants';
 
 /**
- * Sign up validation schema
+ * Public self-service signup creates STUDENT profiles only.
+ * University representatives are provisioned by admins
+ * (POST /admin/university-reps); admins are seeded.
  */
 export const signUpSchema = Joi.object({
-  email: Joi.string()
-    .email({ tlds: { allow: false } }) // Allow any TLD including .test
-    .required()
-    .messages({
-      'string.email': 'Invalid email format',
-      'any.required': 'Email is required',
-    }),
-
-  password: Joi.string()
-    .min(6)
-    .required()
-    .messages({
-      'string.min': 'Password must be at least 6 characters',
-      'any.required': 'Password is required',
-    }),
-
-  user_type: Joi.string()
-    .valid(...Object.values(USER_TYPE))
-    .required()
-    .messages({
-      'any.only': `User type must be one of: ${Object.values(USER_TYPE).join(', ')}`,
-      'any.required': 'User type is required',
-    }),
-
-  display_name: Joi.string()
-    .max(255)
-    .optional()
-    .messages({
-      'string.max': 'Display name must not exceed 255 characters',
-    }),
-
-  university_id: Joi.when('user_type', {
-    is: USER_TYPE.UNIVERSITY,
-    then: Joi.string()
-      .uuid()
-      .required()
-      .messages({
-        'string.guid': 'University ID must be a valid UUID',
-        'any.required': 'University ID is required for university accounts',
-      }),
-    otherwise: Joi.forbidden().messages({
-      'any.unknown': 'University ID can only be provided for university accounts',
-    }),
+  email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).max(255).required(),
+  // Credentials are owned by Supabase Auth. Older clients still send the
+  // password here; it is discarded and never stored.
+  password: Joi.any().strip(),
+  university_id: Joi.any().strip(),
+  user_type: Joi.string().valid('student').default('student').messages({
+    'any.only': 'Only student accounts can be created through signup. University accounts are created by an administrator.',
   }),
-
-  auth_user_id: Joi.string()
-    .uuid()
-    .optional()
-    .messages({
-      'string.guid': 'Auth user ID must be a valid UUID',
-    }),
+  display_name: Joi.string().trim().max(255).optional(),
+  auth_user_id: Joi.string().uuid().required().messages({
+    'any.required': 'auth_user_id (Supabase user id) is required',
+  }),
 });
 
-/**
- * Sign in validation schema
- */
 export const signInSchema = Joi.object({
-  email: Joi.string()
-    .email({ tlds: { allow: false } }) // Allow any TLD including .test
-    .required()
-    .messages({
-      'string.email': 'Invalid email format',
-      'any.required': 'Email is required',
-    }),
-
-  password: Joi.string()
-    .required()
-    .messages({
-      'any.required': 'Password is required',
-    }),
+  email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
+  password: Joi.string().required(),
 });

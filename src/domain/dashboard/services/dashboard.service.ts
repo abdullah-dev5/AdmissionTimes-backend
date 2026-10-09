@@ -20,7 +20,7 @@ import {
   AdminDashboardData,
 } from '../types/dashboard.types';
 import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
-import { withAdmissionContract } from '@shared/utils/admissionContract';
+import { withAdmissionContract, calculateDaysRemaining } from '@shared/utils/admissionContract';
 
 const deriveActionLabel = (field: string | null | undefined, oldValue: string | null | undefined, newValue: string | null | undefined): 'Verified' | 'Rejected' | 'Updated' => {
   const normalizedField = String(field || '').toLowerCase();
@@ -73,8 +73,9 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
              AND a.deadline > NOW()
              AND a.is_active = true) as active_admissions,
           
-          (SELECT COUNT(DISTINCT w.id) 
+          (SELECT COUNT(DISTINCT w.id)
            FROM watchlists w
+           JOIN admissions sa ON sa.id = w.admission_id AND sa.is_active = true
            WHERE w.user_id = $1) as saved_count,
           
           (SELECT COUNT(DISTINCT d.id)
@@ -83,6 +84,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
            LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
            WHERE d.deadline_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'
              AND d.deadline_date > NOW()
+             AND a.is_active = true
              AND (w.id IS NOT NULL OR a.verification_status = 'verified')) as upcoming_deadlines,
           
           (SELECT COUNT(DISTINCT d.id)
@@ -91,6 +93,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
            LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
            WHERE d.deadline_date BETWEEN NOW() AND NOW() + INTERVAL '3 days'
              AND d.deadline_date > NOW()
+             AND a.is_active = true
              AND (w.id IS NOT NULL OR a.verification_status = 'verified')) as urgent_deadlines,
           
           (SELECT COUNT(DISTINCT n.id)
@@ -112,10 +115,16 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           COALESCE(u.name, 'Unknown University') as university_name,
           a.title,
           a.degree_level,
-          a.deadline::text as deadline,
-          EXTRACT(DAY FROM (a.deadline - NOW()))::int as days_remaining,
-          COALESCE(a.application_fee, 0) as application_fee,
+          a.deadline,
+          a.application_fee,
+          a.currency,
           a.location,
+          a.data_origin,
+          a.source_url,
+          a.requirements,
+          u.city as university_city,
+          u.country as university_country,
+          u.website as university_website,
           a.verification_status,
           COALESCE(r.score, 0) as match_score,
           COALESCE(r.reason, 'Recommended for you') as match_reason,
@@ -155,7 +164,8 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
         LEFT JOIN watchlists w ON w.admission_id = a.id AND w.user_id = $1
         WHERE d.deadline_date BETWEEN NOW() AND NOW() + INTERVAL '30 days'
           AND d.deadline_date > NOW()
-          AND (w.id IS NOT NULL OR a.verification_status = 'verified')
+          AND a.is_active = true
+             AND (w.id IS NOT NULL OR a.verification_status = 'verified')
         ORDER BY d.deadline_date ASC
         LIMIT 3
       ),
@@ -226,10 +236,16 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
             COALESCE(u.name, 'Unknown University') as university_name,
             a.title,
             a.degree_level,
-            a.deadline::text as deadline,
-            EXTRACT(DAY FROM (a.deadline - NOW()))::int as days_remaining,
-            COALESCE(a.application_fee, 0) as application_fee,
+            a.deadline,
+            a.application_fee,
+            a.currency,
             a.location,
+            a.data_origin,
+            a.source_url,
+            a.requirements,
+            u.city as university_city,
+            u.country as university_country,
+            u.website as university_website,
             a.verification_status,
             COALESCE(r.score, 0) as match_score,
             COALESCE(r.reason, 'Recommended for you') as match_reason,
@@ -271,14 +287,13 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
         ...withAdmissionContract(program),
         verification_status: program.verification_status || 'verified',
         match_score: parseInt(program.match_score || 0, 10),
-        days_remaining: parseInt(program.days_remaining || 0, 10),
-        application_fee: parseFloat(program.application_fee || 0),
         saved: Boolean(program.saved),
         alert_enabled: Boolean(program.alert_enabled),
       })),
       upcoming_deadlines: (row.upcoming_deadlines || []).map((deadline: any) => ({
         ...deadline,
-        days_remaining: parseInt(deadline.days_remaining || 0, 10),
+        // Same calendar-day rule as every admission (see admissionContract).
+        days_remaining: calculateDaysRemaining(deadline.deadline ? new Date(deadline.deadline).toISOString() : null),
         saved: Boolean(deadline.saved),
         alert_enabled: Boolean(deadline.alert_enabled),
       })),

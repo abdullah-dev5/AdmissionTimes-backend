@@ -1,22 +1,11 @@
 /**
- * Admin Domain - Controller Layer
- * 
- * HTTP request/response handlers for admin endpoints.
- * 
- * Responsibilities:
- * - Extract request data (body, params, query)
- * - Call service methods
- * - Format responses using sendSuccess(), sendPaginated()
- * - Set appropriate HTTP status codes
- * - Handle async errors with try-catch
- * 
- * NO business logic - that belongs in the service layer.
+ * Admin Domain - Controllers (all routes are behind adminOnly)
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import { sendSuccess, sendPaginated } from '@shared/utils/response';
-import * as adminService from '../services/admin.service';
 import { parsePagination, calculatePagination } from '@shared/utils/pagination';
+import * as adminService from '../services/admin.service';
 import {
   AdminVerifyAdmissionDTO,
   AdminRevisionRequestDTO,
@@ -26,213 +15,51 @@ import {
   UserContext,
 } from '../types/admin.types';
 
-/**
- * Get pending admissions
- * 
- * GET /api/v1/admin/admissions/pending
- */
-export const getPendingAdmissions = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const queryParams = req.validated as AdminFilterParams;
-
-    // Parse pagination
-    const { page, limit } = parsePagination({
-      page: queryParams.page,
-      limit: queryParams.limit,
-    });
-
-    // Calculate offset
-    const offset = (page - 1) * limit;
-
-    // Get pending admissions
-    const { data, total } = await adminService.getPendingAdmissions(
-      limit,
-      offset
-    );
-
-    // Calculate pagination metadata
-    const pagination = calculatePagination(total, page, limit);
-
-    sendPaginated(res, data, pagination, 'Pending admissions retrieved successfully');
-  } catch (error) {
-    next(error);
-  }
+const pageParams = (params: AdminFilterParams) => {
+  const { page, limit } = parsePagination({ page: params.page, limit: params.limit });
+  return { page, limit, offset: (page - 1) * limit };
 };
 
-/**
- * Get all admissions with optional status filter
- * 
- * GET /api/v1/admin/admissions
- */
-export const getAllAdmissions = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const queryParams = req.validated as AdminFilterParams & { status?: string };
-
-    // Parse pagination
-    const { page, limit } = parsePagination({
-      page: queryParams.page,
-      limit: queryParams.limit,
-    });
-
-    // Calculate offset
-    const offset = (page - 1) * limit;
-
-    // Get all admissions with optional status filter
-    const { data, total } = await adminService.getAllAdmissions(
-      limit,
-      offset,
-      queryParams.status,
-      queryParams.data_origin
-    );
-
-    // Calculate pagination metadata
-    const pagination = calculatePagination(total, page, limit);
-
-    sendPaginated(res, data, pagination, 'Admissions retrieved successfully');
-  } catch (error) {
-    next(error);
-  }
+export const getPendingAdmissions = async (req: Request, res: Response): Promise<void> => {
+  const params = req.validated as AdminFilterParams;
+  const { page, limit, offset } = pageParams(params);
+  const { data, total } = await adminService.getPendingAdmissions(params, limit, offset);
+  sendPaginated(res, data, calculatePagination(total, page, limit), 'Pending admissions retrieved successfully');
 };
 
-/**
- * Get admission details
- * 
- * GET /api/v1/admin/admissions/:id
- */
-export const getAdmissionDetails = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-
-    const admission = await adminService.getAdmissionDetails(id);
-
-    sendSuccess(res, admission, 'Admission details retrieved successfully');
-  } catch (error) {
-    next(error);
-  }
+export const getAllAdmissions = async (req: Request, res: Response): Promise<void> => {
+  const params = req.validated as AdminFilterParams;
+  const { page, limit, offset } = pageParams(params);
+  const { data, total } = await adminService.getAllAdmissions(params, limit, offset);
+  sendPaginated(res, data, calculatePagination(total, page, limit), 'Admissions retrieved successfully');
 };
 
-/**
- * Verify a single admission
- * 
- * POST /api/v1/admin/admissions/:id/verify
- */
-export const verifyAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as AdminVerifyAdmissionDTO;
-    const userContext = (req.user as UserContext | undefined)!;
-
-    const admission = await adminService.verifyAdmission(
-      id,
-      data,
-      userContext
-    );
-
-    sendSuccess(res, admission, 'Admission verified successfully');
-  } catch (error) {
-    next(error);
-  }
+export const getAdmissionDetails = async (req: Request, res: Response): Promise<void> => {
+  sendSuccess(res, await adminService.getAdmissionDetails(req.params.id), 'Admission details retrieved successfully');
 };
 
-/**
- * Request revision for an admission
- *
- * POST /api/v1/admin/admissions/:id/revision-required
- */
-export const requestRevision = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as AdminRevisionRequestDTO;
-    const userContext = (req.user as UserContext | undefined)!;
-
-    const admission = await adminService.requestRevision(id, data.reason, userContext);
-
-    sendSuccess(res, admission, 'Revision requested successfully');
-  } catch (error) {
-    next(error);
-  }
+export const verifyAdmission = async (req: Request, res: Response): Promise<void> => {
+  const data = req.validated as AdminVerifyAdmissionDTO;
+  const admission = await adminService.verifyAdmission(req.params.id, data, req.user as UserContext);
+  sendSuccess(res, admission, data.verification_status === 'rejected' ? 'Admission rejected successfully' : 'Admission verified successfully');
 };
 
-/**
- * Bulk verify admissions
- * 
- * POST /api/v1/admin/admissions/bulk-verify
- */
-export const bulkVerifyAdmissions = async (
-  _req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const req = _req as any;
-    const data = req.validated as AdminBulkVerifyDTO;
-    const userContext = (req.user as UserContext | undefined)!;
-
-    const result = await adminService.bulkVerifyAdmissions(data, userContext);
-
-    sendSuccess(res, result, 'Bulk verification completed', 200);
-  } catch (error) {
-    next(error);
-  }
+export const requestRevision = async (req: Request, res: Response): Promise<void> => {
+  const data = req.validated as AdminRevisionRequestDTO;
+  const admission = await adminService.requestRevision(req.params.id, data.reason, req.user as UserContext);
+  sendSuccess(res, admission, 'Revision requested successfully');
 };
 
-/**
- * Get admin dashboard
- * 
- * GET /api/v1/admin/dashboard
- */
-export const getAdminDashboard = async (
-  _req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const dashboard = await adminService.getAdminDashboard();
-
-    sendSuccess(res, dashboard, 'Admin dashboard retrieved successfully');
-  } catch (error) {
-    next(error);
-  }
+export const bulkVerifyAdmissions = async (req: Request, res: Response): Promise<void> => {
+  const result = await adminService.bulkVerifyAdmissions(req.validated as AdminBulkVerifyDTO, req.user as UserContext);
+  sendSuccess(res, result, `Bulk verification completed: ${result.succeeded.length} succeeded, ${result.failed.length} failed`);
 };
 
-/**
- * Create university representative (Flow C)
- *
- * POST /api/v1/admin/university-reps
- */
-export const createUniversityRep = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const data = req.validated as AdminCreateUniversityRepDTO;
-    const userContext = (req.user as UserContext | undefined)!;
+export const getAdminDashboard = async (_req: Request, res: Response): Promise<void> => {
+  sendSuccess(res, await adminService.getAdminDashboard(), 'Admin dashboard retrieved successfully');
+};
 
-    const result = await adminService.createUniversityRep(data, userContext);
-
-    sendSuccess(res, result, 'University representative created successfully', 201);
-  } catch (error) {
-    next(error);
-  }
+export const createUniversityRep = async (req: Request, res: Response): Promise<void> => {
+  const result = await adminService.createUniversityRep(req.validated as AdminCreateUniversityRepDTO, req.user as UserContext);
+  sendSuccess(res, result, 'University representative created successfully', 201);
 };

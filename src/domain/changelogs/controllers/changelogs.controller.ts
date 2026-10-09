@@ -20,12 +20,8 @@ import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import {
   ChangelogQueryParams,
 } from '../types/changelogs.types';
+import type { AuthenticatedUserContext as UserContextLike } from '@shared/types/auth';
 
-interface UserContextLike {
-  id: string;
-  role: 'admin' | 'student' | 'university' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Get changelog by ID

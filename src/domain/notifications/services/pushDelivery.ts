@@ -136,6 +136,13 @@ export const sendPushNotificationToUser = async (
       return;
     }
 
+    // The app opens the program on tap. Deadline reminders reference the
+    // deadline row, so take the admission from the /program/:id link.
+    const admissionId =
+      /^\/program\/([0-9a-f-]{36})/i.exec(notification.action_url || '')?.[1] ||
+      (notification.related_entity_type === 'admission' ? notification.related_entity_id : null) ||
+      null;
+
     const messages = tokens.map((token) => ({
       to: token,
       title: notification.title,
@@ -147,6 +154,8 @@ export const sendPushNotificationToUser = async (
         category,
         related_entity_id: notification.related_entity_id,
         related_entity_type: notification.related_entity_type,
+        admission_id: admissionId,
+        action_url: notification.action_url || null,
       },
       priority: notification.priority === 'urgent' || notification.priority === 'high' ? 'high' : 'default',
     }));

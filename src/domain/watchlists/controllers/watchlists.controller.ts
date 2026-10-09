@@ -18,16 +18,8 @@ import { sendSuccess, sendPaginated } from '@shared/utils/response';
 import * as watchlistsService from '../services/watchlists.service';
 import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import { WatchlistQueryParams } from '../types/watchlists.types';
+import type { UserContext } from '@shared/types/auth';
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Get user's watchlists with filters and pagination

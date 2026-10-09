@@ -13,7 +13,6 @@
 import { Application } from 'express';
 import admissionsRoutes from './admissions/routes/admissions.routes';
 import universityAdmissionsRoutes from './admissions/routes/university-admissions.routes';
-import adminAdmissionsRoutes from './admissions/routes/admin-admissions.routes';
 import adminRoutes from './admin/routes/admin.routes';
 import notificationsRoutes from './notifications/routes/notifications.routes';
 import deadlinesRoutes from './deadlines/routes/deadlines.routes';
@@ -42,9 +41,6 @@ export function registerDomains(app: Application): void {
   
   // Admin Domain (New - Full admin module)
   app.use('/api/v1/admin', adminRoutes);
-  
-  // Admin admissions alias routes (register after admin domain to avoid /pending conflicts)
-  app.use('/api/v1/admin/admissions', adminAdmissionsRoutes);
   
   // Supporting Domains (Phase 4A)
   app.use('/api/v1/notifications', notificationsRoutes);

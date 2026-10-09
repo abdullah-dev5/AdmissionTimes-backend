@@ -12,8 +12,12 @@ import {
   analyticsQuerySchema,
 } from '../validators/analytics.validators';
 import { validateBody, validateQuery } from '@shared/middleware/validation';
+import { requireRole } from '@shared/middleware/jwtAuth';
 
 const router: Router = Router();
+
+// Statistics are admin-only; POST /events (below) is open to every signed-in user.
+const adminOnly = requireRole(['admin']);
 
 /**
  * Analytics Endpoints
@@ -159,6 +163,7 @@ router.post(
 // GET /api/v1/analytics/user-activity - List analytics events
 router.get(
   '/user-activity',
+  adminOnly,
   validateQuery(analyticsQuerySchema),
   analyticsController.getEvents
 );
@@ -203,12 +208,14 @@ router.get(
 // GET /api/v1/analytics/stats - Get general statistics
 router.get(
   '/stats',
+  adminOnly,
   analyticsController.getGeneralStatistics
 );
 
 // GET /api/v1/analytics/system-metrics - Alias for general statistics
 router.get(
   '/system-metrics',
+  adminOnly,
   analyticsController.getGeneralStatistics
 );
 
@@ -252,12 +259,14 @@ router.get(
 // GET /api/v1/analytics/admissions - Get admission statistics
 router.get(
   '/admissions',
+  adminOnly,
   analyticsController.getAdmissionStatistics
 );
 
 // GET /api/v1/analytics/admission-stats - Alias for admission statistics
 router.get(
   '/admission-stats',
+  adminOnly,
   analyticsController.getAdmissionStatistics
 );
 
@@ -301,6 +310,7 @@ router.get(
 // GET /api/v1/analytics/users - Get user statistics
 router.get(
   '/users',
+  adminOnly,
   analyticsController.getUserStatistics
 );
 
@@ -352,6 +362,7 @@ router.get(
 // GET /api/v1/analytics/activity - Get aggregated activity feed
 router.get(
   '/activity',
+  adminOnly,
   analyticsController.getActivityFeed
 );
 

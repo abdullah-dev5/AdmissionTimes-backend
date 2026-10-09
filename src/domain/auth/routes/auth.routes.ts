@@ -12,6 +12,18 @@
 import express, { Router } from 'express';
 import * as authController from '../controllers/auth.controller';
 import { jwtAuth } from '@shared/middleware/jwtAuth';
+import { validateBody } from '@shared/middleware/validation';
+import { signUpSchema, signInSchema } from '../validators/auth.validators';
+import { userRateLimit } from '@shared/middleware/userRateLimit';
+
+// Per-IP limits on credential endpoints (generous enough for shared campus IPs).
+const credentialLimit = userRateLimit({
+  scope: 'auth-credentials',
+  limit: 60,
+  windowMs: 60_000,
+  byIp: true,
+  message: 'Too many sign-in attempts. Please wait a minute and try again.',
+});
 
 const router: Router = express.Router();
 
@@ -19,7 +31,11 @@ const router: Router = express.Router();
  * @swagger
  * /api/v1/auth/signup:
  *   post:
- *     summary: Sign up a new user
+ *     summary: Create the student profile for a new Supabase user
+ *     description: >
+ *       Call after supabase.auth.signUp(). The API verifies via the Supabase
+ *       Admin API that auth_user_id belongs to the email. Only student accounts
+ *       can self-register; university accounts are created by admins.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -27,37 +43,26 @@ const router: Router = express.Router();
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - email
- *               - password
- *               - user_type
+ *             required: [email, auth_user_id]
  *             properties:
  *               email:
  *                 type: string
  *                 format: email
- *                 example: student@example.com
- *               password:
- *                 type: string
- *                 minLength: 6
- *                 example: password123
- *               user_type:
- *                 type: string
- *                 enum: [student, university, admin]
- *                 example: student
- *               display_name:
- *                 type: string
- *                 example: John Doe
- *               university_id:
+ *               auth_user_id:
  *                 type: string
  *                 format: uuid
- *                 example: 412c9cd6-78db-46c1-84e1-c059a20d11bf
+ *               display_name:
+ *                 type: string
+ *               user_type:
+ *                 type: string
+ *                 enum: [student]
  *     responses:
  *       201:
  *         description: Account created successfully
  *       400:
  *         description: Validation failed or email already exists
  */
-router.post('/signup', authController.signUp);
+router.post('/signup', credentialLimit, validateBody(signUpSchema), authController.signUp);
 
 /**
  * @swagger
@@ -88,7 +93,7 @@ router.post('/signup', authController.signUp);
  *       401:
  *         description: Invalid email or password
  */
-router.post('/signin', authController.signIn);
+router.post('/signin', credentialLimit, validateBody(signInSchema), authController.signIn);
 
 /**
  * @swagger

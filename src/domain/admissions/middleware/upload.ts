@@ -1,29 +1,18 @@
 /**
- * File Upload Middleware
- * 
- * Configures multer for PDF file uploads.
+ * PDF upload middleware (in-memory, 10MB, PDF only).
  */
 
 import multer from 'multer';
+import { AppError } from '@shared/middleware/errorHandler';
 
-/**
- * Multer configuration for PDF file uploads
- * 
- * - Accepts only PDF files
- * - Maximum file size: 10MB
- * - Stores file in memory as buffer
- */
 export const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-  },
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
-    // Only accept PDF files
     if (file.mimetype === 'application/pdf') {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF files are allowed'));
+      cb(new AppError('Only PDF files are allowed', 400, true, { file: 'Only PDF files are allowed' }));
     }
   },
 });

@@ -4,6 +4,13 @@ import request from 'supertest';
 describe('Admin scraper endpoints integration (router/service)', () => {
   let query: jest.Mock;
 
+  // Deterministic config regardless of the developer's .env (dotenv never
+  // overrides variables that are already set).
+  beforeAll(() => {
+    process.env.SCRAPER_INTEGRATION_ENABLED = 'true';
+    process.env.SCRAPER_PUBLISH_ENABLED = 'false';
+  });
+
   const makeApp = async () => {
     jest.resetModules();
 
@@ -118,6 +125,7 @@ describe('Admin scraper endpoints integration (router/service)', () => {
           },
         ],
       })
+      .mockResolvedValueOnce({ rows: [] }) // fail stale runs sweep
       .mockResolvedValueOnce({ rows: [{ id: 'new-run-1' }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
@@ -149,6 +157,7 @@ describe('Admin scraper endpoints integration (router/service)', () => {
           },
         ],
       })
+      .mockResolvedValueOnce({ rows: [] }) // fail stale runs sweep
       .mockResolvedValueOnce({ rows: [{ id: 'new-run-2' }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });

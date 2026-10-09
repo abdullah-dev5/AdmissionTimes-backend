@@ -26,7 +26,6 @@ import { URGENCY_THRESHOLDS } from '../constants/deadlines.constants';
 import * as admissionsModel from '@domain/admissions/models/admissions.model';
 import { NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE } from '@config/constants';
 import { enqueueNotificationJob } from '@domain/notifications/services/notificationJobQueue';
-import * as notificationsModel from '@domain/notifications/models/notifications.model';
 
 const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 
@@ -166,108 +165,74 @@ export const getUpcoming = async (limit: number = 10): Promise<DeadlineWithMetad
  * @returns Created deadline record with metadata
  * @throws AppError if admission not found or validation fails
  */
+const APPLICATION_TYPE = 'application';
+
+const assertNotApplicationDeadline = (deadlineType?: string | null): void => {
+  if (deadlineType === APPLICATION_TYPE) {
+    throw new AppError(
+      'The application deadline is managed through the admission itself. Update the admission deadline instead.',
+      409
+    );
+  }
+};
+
+const assertFuture = (value: string | Date): void => {
+  if (new Date(value).getTime() <= Date.now()) {
+    throw new AppError('Deadline date must be in the future', 400);
+  }
+};
+
+/**
+ * Create an additional (non-application) deadline, e.g. interview or payment.
+ */
 export const create = async (data: CreateDeadlineDTO): Promise<DeadlineWithMetadata> => {
-  // Verify admission exists
+  assertNotApplicationDeadline(data.deadline_type);
   const admission = await admissionsModel.findById(data.admission_id);
   if (!admission) {
     throw new AppError('Admission not found', 404);
   }
-
-  // Validate deadline date is in the future (for new deadlines)
-  const deadlineDate = new Date(data.deadline_date);
-  const now = new Date();
-  if (deadlineDate <= now) {
-    throw new AppError('Deadline date must be in the future', 400);
-  }
+  assertFuture(data.deadline_date);
 
   const deadline = await deadlinesModel.create(data);
   return enrichDeadline(deadline);
 };
 
-/**
- * Update an existing deadline
- * 
- * @param id - Deadline UUID
- * @param data - Partial deadline data to update
- * @returns Updated deadline record with metadata
- * @throws AppError if not found
- */
-export const update = async (
-  id: string,
-  data: UpdateDeadlineDTO
-): Promise<DeadlineWithMetadata> => {
+export const update = async (id: string, data: UpdateDeadlineDTO): Promise<DeadlineWithMetadata> => {
   const deadline = await deadlinesModel.findById(id);
-
   if (!deadline) {
     throw new AppError('Deadline not found', 404);
   }
-
-  // If updating deadline_date, validate it's in the future
-  if (data.deadline_date) {
-    const deadlineDate = new Date(data.deadline_date);
-    const now = new Date();
-    if (deadlineDate <= now) {
-      throw new AppError('Deadline date must be in the future', 400);
-    }
-  }
+  assertNotApplicationDeadline(deadline.deadline_type);
+  assertNotApplicationDeadline(data.deadline_type);
+  if (data.deadline_date) assertFuture(data.deadline_date);
 
   const deadlineDateChanged =
     data.deadline_date !== undefined &&
     new Date(data.deadline_date).getTime() !== new Date(deadline.deadline_date).getTime();
 
-  const updatePayload: UpdateDeadlineDTO = deadlineDateChanged
-    ? {
-        ...data,
-        reminder_sent: false,
-        reminder_sent_7d_at: null,
-        reminder_sent_3d_at: null,
-        reminder_sent_1d_at: null,
-      }
-    : data;
-
-  const updated = await deadlinesModel.update(id, updatePayload);
-
+  // Reminder event keys include the date, so moved deadlines remind again
+  // without deleting the history of already-sent reminders.
+  const updated = await deadlinesModel.update(
+    id,
+    deadlineDateChanged
+      ? { ...data, reminder_sent: false, reminder_sent_7d_at: null, reminder_sent_3d_at: null, reminder_sent_1d_at: null }
+      : data
+  );
   if (!updated) {
     throw new AppError('Deadline not found', 404);
   }
-
-  if (deadlineDateChanged) {
-    const deleted = await notificationsModel.deleteDeadlineReminderNotificationsByDeadlineId(id);
-    console.log(
-      `[DeadlinesService] Deadline date changed for ${id}; reset reminder flags and cleared ${deleted} stale deadline reminder notifications`
-    );
-  }
-
   return enrichDeadline(updated);
 };
 
-/**
- * Delete a deadline
- * 
- * @param id - Deadline UUID
- * @returns True if deleted
- * @throws AppError if not found
- */
 export const deleteById = async (id: string): Promise<boolean> => {
   const deadline = await deadlinesModel.findById(id);
-
   if (!deadline) {
     throw new AppError('Deadline not found', 404);
   }
-
-  return await deadlinesModel.deleteById(id);
+  assertNotApplicationDeadline(deadline.deadline_type);
+  return deadlinesModel.deleteById(id);
 };
 
-/**
- * Get user's upcoming deadlines with admission and university details
- * 
- * @param userId - User UUID
- * @param page - Page number (1-based)
- * @param limit - Items per page
- * @param lookAheadDays - Number of days in future to look for
- * @param alertOptInOnly - Only include deadlines with alerts enabled
- * @returns Object with deadlines array and total count
- */
 export const getUserUpcomingDeadlines = async (
   userId: string,
   page: number,
@@ -307,6 +272,20 @@ export const triggerDeadlineReminders = async (
  * Uses idempotent event keys scoped per day:
  * deadline_near:<deadline_id>:<recipient_id>:<yyyy-mm-dd>
  */
+/**
+ * Idempotency key for one reminder. Includes the deadline instant, so when a
+ * deadline moves the 7/3/1-day reminders fire again for the new date.
+ */
+const reminderEventKey = (
+  target: { deadline_id: string; recipient_id: string; deadline_date: string | Date },
+  threshold: number,
+  forceRunKey: string | null
+): string => {
+  const deadlineStamp = new Date(target.deadline_date).toISOString();
+  const base = `deadline_near:${target.deadline_id}:${target.recipient_id}:d${threshold}:${deadlineStamp}`;
+  return forceRunKey ? `${base}:${forceRunKey}` : base;
+};
+
 export const triggerDeadlineReminderNotifications = async (
   thresholdDays: number[] = [7, 3, 1],
   options?: { forceRun?: boolean }
@@ -353,9 +332,7 @@ export const triggerDeadlineReminderNotifications = async (
     attempted += 1;
 
     try {
-      const eventKey = forceRunKey
-        ? `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}:${forceRunKey}`
-        : `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}`;
+      const eventKey = reminderEventKey(target, matchedThreshold, forceRunKey);
 
       const result = await publishWithRetry({
         recipients: [{ id: target.recipient_id, role: USER_TYPE.STUDENT }],
@@ -365,7 +342,7 @@ export const triggerDeadlineReminderNotifications = async (
         message: `Your saved program has an upcoming ${target.deadline_type} deadline in ${matchedThreshold} day(s).`,
         related_entity_type: 'deadline',
         related_entity_id: target.deadline_id,
-        action_url: `/admissions/${target.admission_id}`,
+        action_url: `/program/${target.admission_id}`,
         event_key: eventKey,
       });
 
@@ -407,9 +384,7 @@ export const triggerDeadlineReminderNotifications = async (
       }
     } catch (error) {
       failed += 1;
-      const eventKey = forceRunKey
-        ? `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}:${forceRunKey}`
-        : `deadline_near:${target.deadline_id}:${target.recipient_id}:d${matchedThreshold}`;
+      const eventKey = reminderEventKey(target, matchedThreshold, forceRunKey);
 
       console.error('❌ [DEADLINE-REMINDER] Failed to publish deadline reminder:', {
         deadline_id: target.deadline_id,

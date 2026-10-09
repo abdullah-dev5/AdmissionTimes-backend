@@ -13,9 +13,7 @@ const resolveBackendAdmissionId = (id: string): string => id.split('::program::'
 
 const formatFee = (admission: Admission & Record<string, unknown>): string => {
   const feeDisplay = admission.fee_display as string | undefined;
-  if (feeDisplay?.trim()) return feeDisplay.trim();
-  if (admission.application_fee != null) return `PKR ${admission.application_fee}`;
-  return 'Not specified';
+  return feeDisplay?.trim() || 'Not specified';
 };
 
 const formatDeadlineLabel = (deadline: string | null): string => {
@@ -153,7 +151,7 @@ const loadProgramsForCompare = async (
 
   for (const id of uniqueIds) {
     try {
-      const admission = await admissionsService.getById(id, userContext);
+      const admission = await admissionsService.getById(id, userContext, { trackView: false });
       loaded.push(admissionToCompareInput(admission as Admission & Record<string, unknown>));
     } catch {
       // skip inaccessible or missing ids

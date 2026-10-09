@@ -32,7 +32,6 @@ export const verifyAdmissionSchema = Joi.object({
     }),
 
   admin_notes: Joi.string()
-    .min(10)
     .max(1000)
     .optional()
     .allow(null, ''),
@@ -100,93 +99,40 @@ export const bulkVerifySchema = Joi.object({
  * Admin filter query schema
  */
 export const adminFilterSchema = Joi.object({
-  page: Joi.number()
-    .integer()
-    .min(1)
-    .default(1),
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(20),
+  status: Joi.string().valid('draft', 'pending', 'verified', 'rejected').optional(),
+  // Alias used by the web client; normalized to `status`.
+  verification_status: Joi.string().valid('draft', 'pending', 'verified', 'rejected').optional(),
+  data_origin: Joi.string().valid('scraper', 'manual', 'university').optional(),
+  university_id: Joi.string().uuid().optional(),
+  verified_by: Joi.string().uuid().optional(),
+  needs_reverification: Joi.boolean().optional(),
+  date_from: Joi.date().optional(),
+  date_to: Joi.date().min(Joi.ref('date_from')).optional(),
+  search: Joi.string().trim().max(100).allow('').optional(),
+  sort: Joi.string().valid('created_at', 'updated_at', 'verified_at', 'status', 'deadline', 'title').default('updated_at'),
+  order: Joi.string().valid('asc', 'desc').default('desc'),
+})
+  .rename('verification_status', 'status', { ignoreUndefined: true, override: true })
+  .custom((value) => ({ ...value, search: value.search || undefined }));
 
-  limit: Joi.number()
-    .integer()
-    .min(1)
-    .max(100)
-    .default(20),
-
-  status: Joi.string()
-    .valid('draft', 'pending', 'verified', 'rejected')
-    .optional(),
-
-  data_origin: Joi.string()
-    .valid('scraper', 'manual', 'university')
-    .optional(),
-
-  university_id: Joi.string()
-    .uuid()
-    .optional(),
-
-  verified_by: Joi.string()
-    .uuid()
-    .optional(),
-
-  date_from: Joi.date()
-    .optional(),
-
-  date_to: Joi.date()
-    .min(Joi.ref('date_from'))
-    .optional(),
-
-  search: Joi.string()
-    .max(100)
-    .optional(),
-
-  sort: Joi.string()
-    .valid('created_at', 'verified_at', 'status')
-    .default('created_at'),
-
-  order: Joi.string()
-    .valid('asc', 'desc')
-    .default('desc'),
-});
-
-/**
- * Create university representative (Flow C)
- */
 export const createUniversityRepSchema = Joi.object({
-  email: Joi.string()
-    .email({ tlds: { allow: false } })
-    .required()
-    .messages({
-      'string.email': 'Invalid email format',
-      'any.required': 'Email is required',
-    }),
-
-  display_name: Joi.string()
-    .min(2)
-    .max(255)
-    .required()
-    .messages({
-      'string.min': 'Display name must be at least 2 characters',
-      'string.max': 'Display name must not exceed 255 characters',
-      'any.required': 'Display name is required',
-    }),
-
-  university_name: Joi.string()
-    .min(2)
-    .max(255)
-    .required()
-    .messages({
-      'string.min': 'University name must be at least 2 characters',
-      'string.max': 'University name must not exceed 255 characters',
-      'any.required': 'University name is required',
-    }),
-
+  email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required().messages({
+    'string.email': 'Invalid email format',
+    'any.required': 'Email is required',
+  }),
+  display_name: Joi.string().trim().min(2).max(255).required(),
+  // Attach to an existing university by id, or by name (created if missing).
+  university_id: Joi.string().uuid().optional(),
+  university_name: Joi.string().trim().min(2).max(255).optional(),
   city: Joi.string().max(100).optional().allow(null, ''),
   country: Joi.string().max(100).optional().allow(null, ''),
   website: Joi.string().uri().max(255).optional().allow(null, ''),
-});
+})
+  .or('university_id', 'university_name')
+  .messages({ 'object.missing': 'Provide university_id or university_name' });
 
-/**
- * UUID param schema
- */
 export const uuidParamSchema = Joi.object({
   id: Joi.string()
     .uuid()

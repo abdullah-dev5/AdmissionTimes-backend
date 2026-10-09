@@ -265,3 +265,20 @@ export const unregisterPushTokenSchema = Joi.object({
       'any.required': 'expo_push_token is required',
     }),
 });
+
+/**
+ * Admin broadcast validation schema
+ */
+export const broadcastSchema = Joi.object({
+  target_type: Joi.string().valid('all', 'role', 'maintenance', 'emergency').required(),
+  target_roles: Joi.when('target_type', {
+    is: 'role',
+    then: Joi.array().items(Joi.string().valid('student', 'university', 'admin')).min(1).required(),
+    otherwise: Joi.forbidden(),
+  }),
+  title: Joi.string().trim().min(3).max(200).required(),
+  message: Joi.string().trim().min(3).max(2000).required(),
+  priority: Joi.string().valid('low', 'medium', 'high', 'urgent').optional(),
+  // Internal app paths only (e.g. /student/search), never external links.
+  action_url: Joi.string().trim().pattern(/^\/[A-Za-z0-9/_\-?=&.%]*$/).max(500).allow('', null).optional(),
+});

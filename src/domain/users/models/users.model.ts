@@ -18,6 +18,9 @@ import { User, UserFilters, CreateUserDTO, UpdateUserDTO, UniversityProfile, Upd
 import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/users.constants';
 
+/** Public user columns. Never select `*`: legacy rows may still hold credentials. */
+const USER_COLUMNS = `id, auth_user_id, email, role, display_name, university_id, status, created_at, updated_at`;
+
 /**
  * Find user by ID
  * 
@@ -25,7 +28,7 @@ import { SORTABLE_FIELDS } from '../constants/users.constants';
  * @returns User record or null if not found
  */
 export const findById = async (id: string): Promise<User | null> => {
-  const sql = 'SELECT * FROM users WHERE id = $1';
+  const sql = `SELECT ${USER_COLUMNS} FROM users WHERE id = $1`;
   const result = await query(sql, [id]);
   return result.rows[0] || null;
 };
@@ -37,7 +40,7 @@ export const findById = async (id: string): Promise<User | null> => {
  * @returns User record or null if not found
  */
 export const findByAuthUserId = async (authUserId: string): Promise<User | null> => {
-  const sql = 'SELECT * FROM users WHERE auth_user_id = $1';
+  const sql = `SELECT ${USER_COLUMNS} FROM users WHERE auth_user_id = $1`;
   const result = await query(sql, [authUserId]);
   return result.rows[0] || null;
 };
@@ -89,7 +92,7 @@ export const create = async (data: CreateUserDTO): Promise<User> => {
       auth_user_id, role, display_name, university_id, status
     )
     VALUES ($1, $2, $3, $4, $5)
-    RETURNING *
+    RETURNING ${USER_COLUMNS}
   `;
 
   const params = [
@@ -124,6 +127,7 @@ export const update = async (
   const fieldMap: Record<string, any> = {
     display_name: data.display_name,
     university_id: data.university_id,
+    status: data.status,
   };
 
   // Build SET clause for provided fields
@@ -149,7 +153,7 @@ export const update = async (
     UPDATE users
     SET ${fields.join(', ')}
     WHERE id = $${paramIndex}
-    RETURNING *
+    RETURNING ${USER_COLUMNS}
   `;
 
   const result = await query(sql, values);
@@ -171,7 +175,7 @@ export const updateRole = async (
     UPDATE users
     SET role = $1, updated_at = NOW()
     WHERE id = $2
-    RETURNING *
+    RETURNING ${USER_COLUMNS}
   `;
 
   const result = await query(sql, [role, id]);
@@ -193,7 +197,7 @@ export const updateStatus = async (
     UPDATE users
     SET status = $1, updated_at = NOW()
     WHERE id = $2
-    RETURNING *
+    RETURNING ${USER_COLUMNS}
   `;
 
   const result = await query(sql, [status, id]);
@@ -307,7 +311,7 @@ function buildFindManyQuery(
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const sql = `
-    SELECT * FROM users
+    SELECT ${USER_COLUMNS} FROM users
     ${whereClause}
     ORDER BY ${sortField} ${sortOrder}
     LIMIT $${paramIndex++} OFFSET $${paramIndex}

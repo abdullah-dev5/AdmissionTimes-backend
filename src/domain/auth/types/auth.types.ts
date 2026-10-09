@@ -1,58 +1,43 @@
 /**
- * Auth Domain - TypeScript Types
- * 
- * Defines all TypeScript interfaces and types for the authentication domain.
+ * Auth Domain - Types
  */
 
 import { UserType } from '@config/constants';
 
-/**
- * Sign up request DTO
- */
 export interface SignUpDTO {
   email: string;
-  password: string;
-  user_type: UserType;
+  password?: string;
+  user_type: 'student';
   display_name?: string;
-  university_id?: string; // Required if user_type is 'university'
-  auth_user_id?: string; // Supabase Auth UUID (optional)
+  /** Supabase Auth user id created by the client via supabase.auth.signUp. */
+  auth_user_id: string;
 }
 
-/**
- * Sign in request DTO
- */
 export interface SignInDTO {
   email: string;
   password: string;
 }
 
-/**
- * Auth user response (user without password)
- */
 export interface AuthUser {
   id: string;
-  email: string;
+  email: string | null;
   role: UserType;
   university_id: string | null;
   display_name: string;
+  status: string;
   created_at: string;
   updated_at: string;
 }
 
-/**
- * Sign up response
- */
 export interface SignUpResponse {
   user: AuthUser;
   message: string;
 }
 
-/**
- * Sign in response
- */
 export interface SignInResponse {
   user: AuthUser;
   message: string;
-  access_token?: string;
-  refresh_token?: string;
+  access_token: string;
+  refresh_token: string;
+  expires_at?: number;
 }

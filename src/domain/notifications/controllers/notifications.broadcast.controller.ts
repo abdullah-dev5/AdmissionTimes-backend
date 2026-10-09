@@ -19,7 +19,7 @@ export const sendBroadcast = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const payload = req.body;
+    const payload = req.validated;
 
     // Validate required fields
     if (!payload.target_type) {

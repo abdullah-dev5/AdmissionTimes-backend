@@ -192,7 +192,7 @@ BEGIN
     'Philadelphia, Pennsylvania, USA',
     'on-campus',
     '{"gpa": "3.7/4.0", "test_scores": ["SAT 1350+", "ACT 29+"], "honors": "High school honors program completion", "documents": ["Transcript", "LOR (2)", "Essay", "Activities Resume"]}'::jsonb,
-    'disputed',
+    'rejected',
     NOW() - INTERVAL '3 days',
     NULL,
     NULL,

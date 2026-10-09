@@ -15,8 +15,12 @@ import {
   uuidParamSchema,
 } from '../validators/admissions.validators';
 import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
+import { requireRole } from '@shared/middleware/jwtAuth';
 
 const router: Router = Router();
+
+// University portal routes: representatives (scoped to their university) and admins.
+router.use(requireRole(['university', 'admin']));
 
 // GET /api/v1/university/admissions - List admissions
 router.get(

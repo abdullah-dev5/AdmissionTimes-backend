@@ -52,6 +52,11 @@ export interface ReminderDeliveryLogFilters {
  * @param id - Deadline UUID
  * @returns Deadline record or null if not found
  */
+const VISIBLE_ADMISSION_CONDITION = `EXISTS (
+  SELECT 1 FROM admissions va
+  WHERE va.id = deadlines.admission_id AND va.is_active = true AND va.verification_status = 'verified'
+)`;
+
 export const findById = async (id: string): Promise<Deadline | null> => {
   const sql = 'SELECT * FROM deadlines WHERE id = $1';
   const result = await query(sql, [id]);
@@ -115,6 +120,7 @@ export const findUpcoming = async (limit: number = 10): Promise<Deadline[]> => {
   const sql = `
     SELECT * FROM deadlines
     WHERE deadline_date > NOW()
+      AND ${VISIBLE_ADMISSION_CONDITION}
     ORDER BY deadline_date ASC
     LIMIT $1
   `;
@@ -217,6 +223,11 @@ function buildCountQuery(filters: DeadlineFilters): { sql: string; params: any[]
   let paramIndex = 1;
 
   // Admission ID filter
+
+  // Only deadlines of live (active + verified) admissions unless explicitly asked.
+  if (!filters.include_unpublished) {
+    conditions.push(VISIBLE_ADMISSION_CONDITION);
+  }
   if (filters.admission_id) {
     conditions.push(`admission_id = $${paramIndex++}`);
     params.push(filters.admission_id);
@@ -282,6 +293,11 @@ function buildFindManyQuery(
   let paramIndex = 1;
 
   // Apply same filters as count query
+
+  // Only deadlines of live (active + verified) admissions unless explicitly asked.
+  if (!filters.include_unpublished) {
+    conditions.push(VISIBLE_ADMISSION_CONDITION);
+  }
   if (filters.admission_id) {
     conditions.push(`admission_id = $${paramIndex++}`);
     params.push(filters.admission_id);
@@ -457,11 +473,15 @@ export const findReminderTargets = async (
     FROM deadlines d
     JOIN admissions a ON a.id = d.admission_id
     JOIN watchlists w ON w.admission_id = a.id
+    JOIN users ru ON ru.id = w.user_id AND ru.status = 'active'
     LEFT JOIN user_preferences up ON up.user_id = w.user_id
     WHERE a.is_active = true
-      AND a.verification_status = 'verified'
+      AND (
+        a.verification_status = 'verified'
+        -- previously verified programs keep reminding watchers while re-reviewed
+        OR (a.verification_status = 'pending' AND a.needs_reverification = true)
+      )
       AND w.alert_opt_in = true
-      AND COALESCE(up.email_notifications_enabled, true) = true
       AND COALESCE((up.notification_categories ->> 'deadline')::boolean, true) = true
       AND d.deadline_date >= $1
       AND d.deadline_date <= $2

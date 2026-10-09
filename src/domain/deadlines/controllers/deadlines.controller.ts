@@ -65,6 +65,7 @@ export const getDeadlines = async (
 
     // Extract filters
     const filters = {
+      include_unpublished: req.user?.role === 'admin',
       admission_id: queryParams.admission_id,
       deadline_type: queryParams.deadline_type,
       is_overdue: queryParams.is_overdue,
