@@ -6,16 +6,8 @@
  */
 
 import { VerificationStatus } from '@config/constants';
+export type { AuthenticatedUserContext as UserContext } from '@shared/types/auth';
 
-/**
- * User context from JWT token
- */
-export interface UserContext {
-  id: string;
-  email?: string;
-  role: 'admin' | 'student' | 'university' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Admin verification action types
@@ -68,6 +60,8 @@ export interface AdminAdmission {
   rejection_reason: string | null;
   admin_notes: string | null;
   verification_comments: string | null;
+  needs_reverification?: boolean;
+  university_name?: string | null;
   created_at: string;
   updated_at: string;
   is_active: boolean;
@@ -126,6 +120,7 @@ export interface AdminBulkVerifyDTO {
  */
 export interface AdminDashboardStats {
   total_admissions: number;
+  reverification_count: number;
   pending_count: number;
   verified_count: number;
   rejected_count: number;
@@ -152,6 +147,7 @@ export interface AdminFilterParams {
   status?: VerificationStatus;
   data_origin?: string;
   university_id?: string;
+  needs_reverification?: boolean;
   verified_by?: string;
   date_from?: string;
   date_to?: string;
@@ -166,7 +162,8 @@ export interface AdminFilterParams {
 export interface AdminCreateUniversityRepDTO {
   email: string;
   display_name: string;
-  university_name: string;
+  university_id?: string;
+  university_name?: string;
   city?: string | null;
   country?: string | null;
   website?: string | null;
@@ -186,6 +183,7 @@ export interface AdminCreateUniversityRepResponse {
   university: {
     id: string;
     name: string;
+    created: boolean;
   };
   credentials: {
     temporary_password: string;

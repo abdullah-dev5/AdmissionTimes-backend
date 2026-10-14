@@ -22,16 +22,8 @@ import {
   WatchlistFilters,
   WatchlistQueryParams,
 } from '../types/watchlists.types';
+import type { UserContext } from '@shared/types/auth';
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Get watchlist by ID
@@ -112,18 +104,16 @@ export const addToWatchlist = async (
     throw new AppError('Authentication required', 401);
   }
 
-  // Verify admission exists
-  try {
-    const { findById } = await import('@domain/admissions/models/admissions.model');
-    const admission = await findById(data.admission_id, false);
-    if (!admission) {
-      throw new AppError('Admission not found', 404);
-    }
-  } catch (error: any) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-    throw new AppError('Failed to verify admission', 500);
+  // Only live admissions can be saved; otherwise saving a guessed id would
+  // grant read access to another university's draft (see admissions getById).
+  const { findById } = await import('@domain/admissions/models/admissions.model');
+  const admission = await findById(data.admission_id, false);
+  const isLive =
+    !!admission &&
+    (admission.verification_status === 'verified' ||
+      (admission.verification_status === 'pending' && admission.needs_reverification === true));
+  if (!isLive) {
+    throw new AppError('Admission not found', 404);
   }
 
   // Create or get existing watchlist (idempotent)
@@ -131,6 +121,7 @@ export const addToWatchlist = async (
     user_id: userContext.id,
     admission_id: data.admission_id,
     notes: data.notes || null,
+    alert_opt_in: data.alert_opt_in === true,
   });
 
   // Track activity: watchlisted

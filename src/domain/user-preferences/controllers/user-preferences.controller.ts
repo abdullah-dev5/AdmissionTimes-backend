@@ -17,16 +17,8 @@ import { Request, Response, NextFunction } from 'express';
 import { sendSuccess } from '@shared/utils/response';
 import * as userPreferencesService from '../services/user-preferences.service';
 import { UpdateUserPreferencesDTO } from '../types/user-preferences.types';
+import type { UserContext } from '@shared/types/auth';
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Get user preferences

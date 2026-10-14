@@ -1,9 +1,22 @@
+/**
+ * AI admissions assistant.
+ *
+ * Flow (local-first, so the assistant keeps working without Gemini quota):
+ *  1. Refuse sensitive requests.
+ *  2. Rule-based intent detection (guidance / saved summary / search).
+ *  3. Only unclassified messages go to Gemini for intent + filter extraction.
+ *  4. Every search runs through one pipeline that queries the database with
+ *     exact deadline windows, then relaxes filters, then falls back to the
+ *     nearest upcoming deadlines.
+ * Results always respect the caller's visibility rules (admissions service).
+ */
+
 import * as admissionsService from '@domain/admissions/services/admissions.service';
 import { Admission } from '@domain/admissions/types/admissions.types';
-import * as watchlistsService from '@domain/watchlists/services/watchlists.service';
-import { AppError } from '@shared/middleware/errorHandler';
+import { query } from '@db/connection';
 import { config } from '@config/config';
-import { buildChatExtractionPrompt, buildGuidanceAnswerPrompt, buildSummarizationPrompt, isUniversityContext } from '../prompts/ai.prompts';
+import { createLogger } from '@shared/utils/logger';
+import { buildChatExtractionPrompt, buildGuidanceAnswerPrompt, buildSummarizationPrompt } from '../prompts/ai.prompts';
 import {
   AdmissionChatFilters,
   AdmissionChatResponse,
@@ -12,583 +25,321 @@ import {
   ChatExecutionContext,
   GeminiChatExtraction,
 } from '../types/ai.types';
-import { generateJson, generateText, getGeminiUsageMetadata, isGeminiConfigured } from './gemini.client';
+import { generateJson, generateText, getGeminiUsageMetadata, isGeminiConfigured, isGeminiQuotaError } from './gemini.client';
+import { applySearchFirstPolicy, buildSearchFirstFilters, buildSearchRelaxationCandidates, buildSearchTermsFromMessage } from './admissionSearchFilters.service';
+
+const log = createLogger('AI');
 
 const MAX_RESULTS = 8;
-const SENSITIVE_QUERY_PATTERN = /(password|passcode|credential|credentials|email list|all users|admin data|internal analytics|service role|token|refresh token|secret|api key|private key|otp|cnic|id card|identity number)/i;
-const STOP_WORDS = new Set([
-  'is', 'any', 'the', 'a', 'an', 'for', 'in', 'on', 'at', 'to', 'of', 'and', 'or', 'with', 'this', 'that',
-  'show', 'find', 'program', 'programs', 'admission', 'admissions', 'announced', 'please', 'me', 'my', 'all',
-]);
-const SEARCH_NOISE_WORDS = new Set([
-  'show', 'find', 'list', 'any', 'open', 'latest', 'urgent', 'deadline', 'deadlines', 'admission', 'admissions',
-  'admssion', 'showany', 'please', 'me', 'my', 'all', 'in', 'with', 'for', 'the', 'this', 'week', 'month',
-]);
+const DEFAULT_UPCOMING_DEADLINE_DAYS = 30;
+const WINDOW_ESCALATION_DAYS = [30, 90];
+/** Admissions are published for Pakistan; calendar days are interpreted in PKT. */
+const APP_UTC_OFFSET = process.env.APP_UTC_OFFSET || '+05:00';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-type LocalIntentResult = {
-  intent: 'guidance' | 'search_admissions' | 'summarize_saved_admissions' | 'unknown';
-  answer?: string;
-  filters?: AdmissionChatFilters;
-  verification_status?: 'verified' | 'pending' | 'rejected';
-  sort?: 'created_at' | 'updated_at' | 'deadline' | 'title' | 'tuition_fee' | 'verified_at';
-  order?: 'asc' | 'desc';
+const SENSITIVE_QUERY_PATTERN =
+  /(password|passcode|credential|credentials|email list|all users|admin data|internal analytics|service role|token|refresh token|secret|api key|private key|otp|cnic|id card|identity number)/i;
+const SENSITIVE_HISTORY_PATTERN =
+  /(password|passcode|credential|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer\s+[a-z0-9._-]+|(?:cnic|id\s*card|identity number)\s*[:#-]?\s*\d)/i;
+
+type Sort = 'created_at' | 'updated_at' | 'deadline' | 'title' | 'tuition_fee' | 'verified_at';
+type Status = 'verified' | 'pending' | 'rejected' | 'draft';
+
+interface SearchRequest {
+  filters: AdmissionChatFilters;
+  sort: Sort;
+  order: 'asc' | 'desc';
+  verificationStatus?: Status;
+}
+
+type LocalIntent =
+  | { intent: 'guidance'; answer: string }
+  | { intent: 'summarize_saved_admissions' }
+  | ({ intent: 'search_admissions' } & SearchRequest)
+  | { intent: 'unknown' };
+
+type ConversationHistoryEntry = { role: 'user' | 'assistant' | 'ai'; text: string };
+
+// ---------------------------------------------------------------------------
+// Text normalization & parsing
+// ---------------------------------------------------------------------------
+
+const QUERY_NORMALIZATIONS: Array<[RegExp, string]> = [
+  [/\badm(?:ss|s|is|isis)i?on\b/gi, 'admission'],
+  [/\badmsi\b/gi, 'admission'],
+  [/\bdead(?:lne|lin|lien)\b/gi, 'deadline'],
+  [/\buniver(?:isty|sitiy)\b/gi, 'university'],
+  [/\bprogams?\b/gi, 'program'],
+  [/\bths\b/gi, 'this'],
+  [/\bmoonth\b/gi, 'month'],
+  [/\bweelk\b/gi, 'week'],
+];
+
+const normalizeQueryText = (message: string): string => {
+  let normalized = String(message || '')
+    .toLowerCase()
+    .replace(/[’']/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ');
+  for (const [pattern, replacement] of QUERY_NORMALIZATIONS) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+  return normalized.replace(/\s+/g, ' ').trim();
 };
 
-type ConversationHistoryEntry = {
-  role: 'user' | 'assistant' | 'ai';
-  text: string;
-};
-
-const DEGREE_OR_PROGRAM_HINT = /\b(bba|bs|bsc|be|ms|mba|mphil|phd|llb|llm|computer|engineering|business|data\s*science)\b/i;
-const ADMISSION_HINT = /(admission|admissions|admis|admsi|admssion|announced|open\s+now|intake)/i;
-const DEADLINE_HINT = /(deadline|deadlines|urgent|closing|this\s+week|within\s+week|next\s+week|due\s+soon)/i;
-const SAVED_SUMMARY_HINT = /(saved|watchlist|bookmark|bookmarked|shortlist)/i;
-const SUMMARY_HINT = /(summar(y|ize|ise)|overview|recap)/i;
-const CITY_HINTS = ['lahore', 'karachi', 'islamabad', 'rawalpindi', 'faisalabad', 'multan', 'peshawar', 'quetta', 'sialkot'];
 const MONTH_MAP: Record<string, number> = {
-  january: 0,
-  february: 1,
-  march: 2,
-  april: 3,
-  may: 4,
-  june: 5,
-  july: 6,
-  august: 7,
-  september: 8,
-  october: 9,
-  november: 10,
-  december: 11,
+  january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2, april: 3, apr: 3, may: 4, june: 5, jun: 5,
+  july: 6, jul: 6, august: 7, aug: 7, september: 8, sep: 8, sept: 8, october: 9, oct: 9,
+  november: 10, nov: 10, december: 11, dec: 11,
+};
+const MONTH_NAME_PATTERN = Object.keys(MONTH_MAP).sort((a, b) => b.length - a.length).join('|');
+
+const resolveYear = (monthIndex: number, day: number, explicitYear?: number): number => {
+  if (explicitYear && explicitYear >= 2000 && explicitYear <= 2100) return explicitYear;
+  const now = new Date();
+  const candidate = new Date(now.getFullYear(), monthIndex, day, 23, 59, 59);
+  return candidate.getTime() < now.getTime() ? now.getFullYear() + 1 : now.getFullYear();
 };
 
-const isGeminiQuotaError = (error: unknown): boolean => {
-  const message = String((error as Error)?.message || error || '').toLowerCase();
-  return (
-    message.includes('429') ||
-    message.includes('resource_exhausted') ||
-    message.includes('quota') ||
-    message.includes('rate-limit')
-  );
+const toIsoDay = (year: number, monthIndex: number, day: number): string | undefined => {
+  const probe = new Date(Date.UTC(year, monthIndex, day));
+  if (probe.getUTCMonth() !== monthIndex || probe.getUTCDate() !== day) return undefined;
+  return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
-const toTitleCase = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
+/** Parse a specific calendar day ("26 June", "June 26 2026", "26/06"). Returns YYYY-MM-DD. */
+const extractSpecificDate = (message: string): string | undefined => {
+  const words = normalizeQueryText(message);
 
-const extractLocationFromMessage = (lowerMessage: string): string | undefined => {
-  const city = CITY_HINTS.find((candidate) => lowerMessage.includes(candidate));
-  return city ? toTitleCase(city) : undefined;
-};
-
-const extractProgramTypeFromMessage = (message: string): string | undefined => {
-  const lower = message.toLowerCase();
-  if (/\b(undergraduate|ug)\b/i.test(lower)) {
-    return 'undergraduate';
+  const dayMonth = words.match(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_NAME_PATTERN})(?:\\s+(\\d{4}))?\\b`));
+  if (dayMonth) {
+    const day = Number(dayMonth[1]);
+    const month = MONTH_MAP[dayMonth[2]];
+    return toIsoDay(resolveYear(month, day, dayMonth[3] ? Number(dayMonth[3]) : undefined), month, day);
   }
-  if (/\b(graduate|postgraduate|pg)\b/i.test(lower)) {
-    return 'graduate';
+
+  const monthDay = words.match(new RegExp(`\\b(${MONTH_NAME_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?\\b`));
+  if (monthDay) {
+    const month = MONTH_MAP[monthDay[1]];
+    const day = Number(monthDay[2]);
+    return toIsoDay(resolveYear(month, day, monthDay[3] ? Number(monthDay[3]) : undefined), month, day);
   }
+
+  // Numeric dates need the raw text: normalization strips "/" and "-".
+  const numeric = String(message || '').match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (numeric) {
+    const day = Number(numeric[1]);
+    const month = Number(numeric[2]) - 1;
+    let year = numeric[3] ? Number(numeric[3]) : resolveYear(month, day);
+    if (year < 100) year += 2000;
+    return toIsoDay(year, month, day);
+  }
+
+  const isoDay = String(message || '').match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (isoDay) return toIsoDay(Number(isoDay[1]), Number(isoDay[2]) - 1, Number(isoDay[3]));
+
   return undefined;
 };
 
-const extractFieldOfStudyFromMessage = (lowerMessage: string): string | undefined => {
-  if (/(computer\s*science|\bcs\b|software|artificial intelligence|ai)/i.test(lowerMessage)) {
-    return 'Computer Science';
+const daysUntilMonthEnd = (monthIndex: number): number => {
+  const now = new Date();
+  const year = monthIndex >= now.getMonth() ? now.getFullYear() : now.getFullYear() + 1;
+  const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+  return Math.max(1, Math.ceil((monthEnd.getTime() - now.getTime()) / DAY_MS));
+};
+
+/** Parse a relative window ("within 10 days", "this week", "urgent", "in March"). */
+const extractDeadlineWindowDays = (message: string): number | undefined => {
+  const words = normalizeQueryText(message);
+
+  const explicit = words.match(/(?:within|in|next)\s+(\d{1,3})\s+days?/) || words.match(/(\d{1,3})\s+days?\s+(?:left|remaining|away)/);
+  if (explicit) {
+    const days = Number(explicit[1]);
+    if (days > 0) return days;
   }
-  if (/(business|bba|mba|finance|accounting)/i.test(lowerMessage)) {
-    return 'Business';
-  }
-  if (/(electrical|electronics|ee)/i.test(lowerMessage)) {
-    return 'Electrical Engineering';
-  }
-  if (/(mechanical|mechatronics)/i.test(lowerMessage)) {
-    return 'Mechanical Engineering';
-  }
-  if (/(data\s*science|analytics)/i.test(lowerMessage)) {
-    return 'Data Science';
-  }
-  if (/(economics|economic)/i.test(lowerMessage)) {
-    return 'Economics';
-  }
+  if (/\b(urgent|due soon|closing soon)\b/.test(words)) return 3;
+  if (/\b(this|next|coming|within)\s+week\b/.test(words)) return 7;
+  if (/\b(this|current)\s+month\b/.test(words)) return daysUntilMonthEnd(new Date().getMonth());
+
+  const monthName = Object.keys(MONTH_MAP).find((name) => name.length > 3 && new RegExp(`\\b${name}\\b`).test(words));
+  if (monthName) return daysUntilMonthEnd(MONTH_MAP[monthName]);
+
+  if (/\bupcoming\b/.test(words)) return DEFAULT_UPCOMING_DEADLINE_DAYS;
   return undefined;
 };
 
-const extractDegreeLevelFromMessage = (lowerMessage: string): string | undefined => {
-  if (/\b(ms|msc|mba|mphil|master|masters|postgraduate|graduate)\b/i.test(lowerMessage)) {
-    return 'master';
-  }
-  if (/\b(bs|bsc|be|bba|llb|bachelor|undergraduate)\b/i.test(lowerMessage)) {
-    return 'bachelor';
-  }
-  if (/\b(phd|doctorate)\b/i.test(lowerMessage)) {
-    return 'phd';
-  }
-  if (/\b(diploma)\b/i.test(lowerMessage)) {
-    return 'diploma';
-  }
+const extractSortPreference = (words: string): Pick<SearchRequest, 'sort' | 'order'> => {
+  if (/(lowest fee|low fee|cheapest|cheap|affordable)/.test(words)) return { sort: 'tuition_fee', order: 'asc' };
+  if (/(latest|newest|recent)/.test(words)) return { sort: 'created_at', order: 'desc' };
+  return { sort: 'deadline', order: 'asc' };
+};
+
+const extractStatus = (message: string): Status | undefined => {
+  const words = normalizeQueryText(message);
+  if (/\bverified\b/.test(words)) return 'verified';
+  if (/\b(pending|audit)\b/.test(words)) return 'pending';
+  if (/\brejected\b/.test(words)) return 'rejected';
+  if (/\bdrafts?\b/.test(words)) return 'draft';
   return undefined;
 };
 
-const normalizeDegreeLevel = (value: string | null | undefined): string | undefined => {
+const normalizeDegreeLevel = (value?: string | null): string | undefined => {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw) return undefined;
   if (['master', 'masters', 'ms', 'msc', 'mba', 'mphil', 'graduate', 'postgraduate'].includes(raw)) return 'master';
   if (['bachelor', 'bachelors', 'bs', 'bsc', 'be', 'bba', 'undergraduate'].includes(raw)) return 'bachelor';
   if (['phd', 'doctorate'].includes(raw)) return 'phd';
-  if (['diploma'].includes(raw)) return 'diploma';
-  return value || undefined;
+  if (raw === 'diploma') return 'diploma';
+  return undefined;
 };
 
-const normalizeProgramType = (value: string | null | undefined): string | undefined => {
+const normalizeProgramType = (value?: string | null): string | undefined => {
   const raw = String(value || '').trim().toLowerCase();
-  if (!raw) return undefined;
   if (['graduate', 'postgraduate', 'pg'].includes(raw)) return 'graduate';
   if (['undergraduate', 'ug'].includes(raw)) return 'undergraduate';
   return undefined;
 };
 
-const deriveSearchKeyword = (message: string): string | undefined => {
-  const tokens = message
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .filter((token) => !SEARCH_NOISE_WORDS.has(token))
-    .filter((token) => token.length >= 3);
+// ---------------------------------------------------------------------------
+// Local intent detection
+// ---------------------------------------------------------------------------
 
-  const unique = Array.from(new Set(tokens)).slice(0, 4);
-  return unique.length > 0 ? unique.join(' ') : undefined;
-};
+const DEGREE_OR_PROGRAM_HINT = /\b(bba|bs|bsc|be|ms|mba|mphil|phd|llb|llm|computer|engineering|business|data\s*science)\b/;
+const ADMISSION_HINT = /\b(admission|admissions|announced|open\s+now|intake)\b/;
+const DEADLINE_HINT = /\b(deadline|deadlines|urgent|closing|due\s+soon|this\s+week|next\s+week|upcoming)\b/;
+const SAVED_HINT = /\b(saved|watchlist|bookmark|bookmarked|shortlist)\b/;
+const SUMMARY_HINT = /\b(summar(y|ize|ise)|overview|recap)\b/;
+const REVERIFICATION_HINT = /\bre\s?verification\b|\breverif/;
 
-const shouldUseRawSearch = (
-  message: string,
-  lowerMessage: string,
-  structuredFilterCount: number
-): boolean => {
-  const derived = deriveSearchKeyword(message);
-  if (!derived) return false;
+const UNIVERSITY_GUIDANCE: Array<{ test: RegExp; lines: string[] }> = [
+  {
+    test: /\b(pending|audit|status)\b/,
+    lines: [
+      'Pending Audit means the admission is waiting for admin verification.',
+      '- Open Verification Center and review remarks for that admission.',
+      '- Fix missing or invalid fields (title, deadline, eligibility, location).',
+      '- Resubmit and monitor until status moves to Verified.',
+    ],
+  },
+  {
+    test: /\b(publish|upload|new admission)\b/,
+    lines: [
+      'Publishing checklist:',
+      '- Open Manage Admissions and create a new admission.',
+      '- Upload a PDF or fill the fields manually, then check the extracted details.',
+      '- Submit for verification and track progress in Verification Center.',
+    ],
+  },
+  {
+    test: /\b(resubmit|edit)\b|re\s?verification|reverif/,
+    lines: [
+      'Editing a verified admission sends it back for re-verification.',
+      '- While it is re-reviewed it is hidden from new students; students who saved it keep access and reminders.',
+      '- Rejected admissions can be edited and resubmitted from Manage Admissions.',
+      '- Check admin remarks before resubmitting.',
+    ],
+  },
+];
 
-  if (structuredFilterCount > 0 && !DEADLINE_HINT.test(lowerMessage)) {
-    return true;
-  }
-
-  const tokens = message
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .filter((token) => token.length >= 3 && !SEARCH_NOISE_WORDS.has(token));
-
-  // Keep search for meaningful free-text queries only.
-  return tokens.length > 0 && !DEADLINE_HINT.test(lowerMessage);
-};
-
-const daysUntilMonthEnd = (monthIndex: number): number | undefined => {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const candidateYear = monthIndex >= now.getMonth() ? currentYear : currentYear + 1;
-  const monthEnd = new Date(candidateYear, monthIndex + 1, 0, 23, 59, 59, 999);
-  const diffMs = monthEnd.getTime() - now.getTime();
-  if (!Number.isFinite(diffMs) || diffMs <= 0) return undefined;
-  return Math.ceil(diffMs / (24 * 60 * 60 * 1000));
-};
-
-const extractDeadlineWithinDaysFromMessage = (lowerMessage: string): number | undefined => {
-  if (lowerMessage.includes('urgent') || lowerMessage.includes('due soon')) {
-    return 3;
-  }
-
-  if (lowerMessage.includes('this week') || lowerMessage.includes('within week') || lowerMessage.includes('next week')) {
-    return 7;
-  }
-
-  if (lowerMessage.includes('this month') || lowerMessage.includes('closing this month')) {
-    const now = new Date();
-    return daysUntilMonthEnd(now.getMonth());
-  }
-
-  const monthName = Object.keys(MONTH_MAP).find((month) => lowerMessage.includes(month));
-  if (monthName) {
-    return daysUntilMonthEnd(MONTH_MAP[monthName]);
-  }
-
-  return undefined;
-};
-
-const extractSortPreference = (
-  lowerMessage: string
-): Pick<LocalIntentResult, 'sort' | 'order'> => {
-  if (/(lowest fee|low fee|cheapest|cheap)/i.test(lowerMessage)) {
-    return { sort: 'tuition_fee', order: 'asc' };
-  }
-
-  if (/(latest|newest|recent)/i.test(lowerMessage)) {
-    return { sort: 'created_at', order: 'desc' };
-  }
-
-  if (/(nearest deadline|closing soon|deadline)/i.test(lowerMessage)) {
-    return { sort: 'deadline', order: 'asc' };
-  }
-
-  return { sort: 'deadline', order: 'asc' };
-};
-
-const buildLocalSearchFilters = (message: string, lowerMessage: string): AdmissionChatFilters => {
-  const deadlineWithinDays = extractDeadlineWithinDaysFromMessage(lowerMessage);
-  const degreeLevel = extractDegreeLevelFromMessage(lowerMessage);
-  const fieldOfStudy = extractFieldOfStudyFromMessage(lowerMessage);
-  const location = extractLocationFromMessage(lowerMessage);
-  const programType = extractProgramTypeFromMessage(message);
-  const deliveryMode = lowerMessage.includes('evening') ? 'on-campus' : undefined;
-
-  const structuredFilterCount = [
-    degreeLevel,
-    fieldOfStudy,
-    location,
-    programType,
-    deliveryMode,
-    deadlineWithinDays,
-  ].filter((value) => value !== undefined && value !== null).length;
-
-  return {
-    search: shouldUseRawSearch(message, lowerMessage, structuredFilterCount) ? deriveSearchKeyword(message) : undefined,
-    degree_level: degreeLevel,
-    field_of_study: fieldOfStudy,
-    location,
-    program_type: programType,
-    delivery_mode: deliveryMode,
-    deadline_within_days: deadlineWithinDays,
-  };
-};
-
-const buildLocalGuidance = (message: string, isUniversity: boolean): string => {
-  const lower = message.toLowerCase();
-
-  if (isUniversity) {
-    if (lower.includes('pending') || lower.includes('audit') || lower.includes('status')) {
-      return [
-        'Pending Audit means the admission is waiting for admin verification.',
-        '- Open Verification Center and review remarks for that admission.',
-        '- Fix missing or invalid fields (title, deadline, eligibility, location).',
-        '- Resubmit and monitor until status moves to Verified.',
-      ].join('\n');
-    }
-
-    if (lower.includes('publish') || lower.includes('upload') || lower.includes('new admission')) {
-      return [
-        'Publishing checklist:',
-        '- Open Manage Admissions and create a new admission.',
-        '- Upload PDF or fill fields manually and verify extracted details.',
-        '- Submit for verification and track progress in Verification Center.',
-      ].join('\n');
-    }
-
-    if (lower.includes('re-verification') || lower.includes('resubmit') || lower.includes('edit')) {
-      return [
-        'Re-verification is triggered when key admission details are edited.',
-        '- Update fields carefully and keep deadline/eligibility consistent.',
-        '- Resubmit and check verification remarks for corrections.',
-      ].join('\n');
-    }
-
-    return [
-      'I can help with university admission workflow:',
-      '- Publishing and submitting admissions',
-      '- Verification status explanation and fixes',
-      '- Resubmission and data quality checklist',
-    ].join('\n');
-  }
-
-  if (lower.includes('compare')) {
-    return [
+const STUDENT_GUIDANCE: Array<{ test: RegExp; lines: string[] }> = [
+  {
+    test: /\bcompare\b/,
+    lines: [
       'How to compare programs:',
-      '- Open Compare and select at least two saved programs.',
-      '- Review fee, deadline, location, and eligibility side by side.',
-      '- Keep the stronger option in watchlist with alerts enabled.',
-    ].join('\n');
-  }
+      '- Open Compare and select two to four saved programs.',
+      '- Review fee, deadline, location and eligibility side by side.',
+      '- Keep the stronger option in your watchlist with alerts enabled.',
+    ],
+  },
+  {
+    test: /\b(alert|alerts|watchlist|reminder|reminders)\b/,
+    lines: [
+      'How deadline reminders work:',
+      '- Save a program to your watchlist and switch its alert on.',
+      '- You get reminders 7, 3 and 1 day before the deadline (in-app, plus email/push if enabled in Settings).',
+      '- If a university extends a deadline, reminders restart for the new date.',
+    ],
+  },
+  {
+    test: /\b(status|verified|pending)\b/,
+    lines: [
+      'Status guide:',
+      '- Verified: checked and approved by an AdmissionTimes admin.',
+      '- Pending: being reviewed; saved programs stay visible to you during review.',
+      '- Closed: the application deadline has passed.',
+    ],
+  },
+];
 
-  if (lower.includes('alert') || lower.includes('watchlist') || lower.includes('reminder')) {
-    return [
-      'How to manage alerts:',
-      '- Open Watchlist and enable reminders for your saved programs.',
-      '- Check Deadlines for urgent items this week.',
-      '- Remove expired entries to keep your list relevant.',
-    ].join('\n');
-  }
-
-  if (lower.includes('deadline') || lower.includes('urgent') || lower.includes('this week') || lower.includes('closing')) {
-    return [
-      'For urgent deadlines this week:',
-      '- Open Deadlines and sort by nearest date first.',
-      '- Enable watchlist alerts to get reminders before due dates.',
-      '- Use Search with a degree/program keyword to narrow active options.',
-    ].join('\n');
-  }
-
-  if (lower.includes('status') || lower.includes('application')) {
-    return [
-      'Status quick guide:',
-      '- Verified: listing is approved and visible.',
-      '- Pending: still under review.',
-      '- Rejected: check remarks and required corrections.',
-    ].join('\n');
-  }
-
-  return [
-    'I can help with admissions tasks:',
-    '- Find programs by field, city, degree, and deadline',
-    '- Compare options and explain differences',
-    '- Explain statuses and suggest next actions',
-  ].join('\n');
+const guidanceFor = (message: string, isUniversity: boolean): string => {
+  const words = normalizeQueryText(message);
+  const match = (isUniversity ? UNIVERSITY_GUIDANCE : STUDENT_GUIDANCE).find((entry) => entry.test.test(words));
+  if (match) return match.lines.join('\n');
+  return isUniversity
+    ? ['I can help with your university workflow:', '- Publishing and submitting admissions', '- Verification status and fixes', '- Listing your admissions by status'].join('\n')
+    : ['I can help you:', '- Find programs by field, city, degree and deadline', '- Compare saved programs', '- Explain statuses and reminders'].join('\n');
 };
 
-const buildRelaxedSearchQueries = (search: string): string[] => {
-  const raw = String(search || '').toLowerCase();
-  if (!raw.trim()) return [];
+const buildSearchRequest = (message: string): SearchRequest => {
+  const words = normalizeQueryText(message);
+  const deadlineOn = extractSpecificDate(message);
+  const windowDays = deadlineOn ? undefined : extractDeadlineWindowDays(message) ?? (DEADLINE_HINT.test(words) ? DEFAULT_UPCOMING_DEADLINE_DAYS : undefined);
 
-  const tokens = raw
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
-
-  const uniqueTokens = Array.from(new Set(tokens));
-  const prioritized = uniqueTokens
-    .sort((a, b) => b.length - a.length)
-    .slice(0, 3);
-
-  return prioritized;
-};
-
-const tryRelaxedSearch = async (
-  filters: AdmissionChatFilters,
-  executionContext: ChatExecutionContext
-): Promise<AdmissionChatResultItem[]> => {
-  if (!filters.search) {
-    return [];
-  }
-
-  const candidates = buildRelaxedSearchQueries(filters.search);
-  for (const candidate of candidates) {
-    const { admissions } = await admissionsService.getMany(
-      {
-        search: candidate,
-        degree_level: filters.degree_level,
-        field_of_study: filters.field_of_study,
-        location: filters.location,
-        program_type: filters.program_type,
-        delivery_mode: filters.delivery_mode,
-      },
-      1,
-      MAX_RESULTS,
-      'deadline',
-      'asc',
-      executionContext.userContext
-    );
-
-    const filteredAdmissions = filterByDeadlineWindow(admissions, filters.deadline_within_days);
-    const results = filteredAdmissions.slice(0, MAX_RESULTS).map(mapResult);
-    if (results.length > 0) {
-      return results;
-    }
-  }
-
-  return [];
-};
-
-const pickDefinedFilters = (filters: AdmissionChatFilters): AdmissionChatFilters => {
-  const clean: AdmissionChatFilters = {};
-  if (filters.search) clean.search = filters.search;
-  if (filters.degree_level) clean.degree_level = filters.degree_level;
-  if (filters.field_of_study) clean.field_of_study = filters.field_of_study;
-  if (filters.location) clean.location = filters.location;
-  if (filters.program_type) clean.program_type = filters.program_type;
-  if (filters.delivery_mode) clean.delivery_mode = filters.delivery_mode;
-  if (filters.deadline_within_days) clean.deadline_within_days = filters.deadline_within_days;
-  return clean;
-};
-
-const buildRelaxationCandidates = (filters: AdmissionChatFilters): AdmissionChatFilters[] => {
-  const base = pickDefinedFilters(filters);
-  const candidates: AdmissionChatFilters[] = [base];
-
-  if (base.program_type) {
-    const { program_type, ...rest } = base;
-    candidates.push(rest);
-  }
-
-  if (base.degree_level) {
-    const { degree_level, ...rest } = base;
-    candidates.push(rest);
-  }
-
-  if (base.degree_level || base.program_type) {
-    const { degree_level, program_type, ...rest } = base;
-    candidates.push(rest);
-  }
-
-  if (base.search) {
-    candidates.push({ search: base.search, deadline_within_days: base.deadline_within_days });
-  }
-
-  if (base.field_of_study) {
-    candidates.push({
-      field_of_study: base.field_of_study,
-      location: base.location,
-      deadline_within_days: base.deadline_within_days,
-    });
-  }
-
-  if (base.location) {
-    candidates.push({ location: base.location, deadline_within_days: base.deadline_within_days });
-  }
-
-  const seen = new Set<string>();
-  return candidates.filter((candidate) => {
-    const key = JSON.stringify(candidate);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  const filters = applySearchFirstPolicy(message, {
+    ...buildSearchFirstFilters(message, { deadline_within_days: windowDays, deadline_on: deadlineOn }),
+    field_of_study: undefined,
   });
+
+  return { filters, ...extractSortPreference(words) };
 };
 
-const tryRelaxedFilterSearch = async (
-  filters: AdmissionChatFilters,
-  executionContext: ChatExecutionContext,
-  sort: LocalIntentResult['sort'] = 'deadline',
-  order: LocalIntentResult['order'] = 'asc'
-): Promise<AdmissionChatResultItem[]> => {
-  const candidates = buildRelaxationCandidates(filters);
-
-  for (const candidate of candidates) {
-    const { admissions } = await admissionsService.getMany(
-      {
-        search: candidate.search,
-        degree_level: candidate.degree_level,
-        field_of_study: candidate.field_of_study,
-        location: candidate.location,
-        program_type: candidate.program_type,
-        delivery_mode: candidate.delivery_mode,
-      },
-      1,
-      MAX_RESULTS * 2,
-      sort || 'deadline',
-      order || 'asc',
-      executionContext.userContext
-    );
-
-    const filteredAdmissions = filterByDeadlineWindow(admissions, candidate.deadline_within_days);
-    const results = filteredAdmissions.slice(0, MAX_RESULTS).map(mapResult);
-    if (results.length > 0) {
-      return results;
-    }
-  }
-
-  return [];
-};
-
-const detectLocalIntent = (message: string, isUniversity: boolean): LocalIntentResult => {
-  const lower = message.toLowerCase();
+const detectLocalIntent = (message: string, isUniversity: boolean): LocalIntent => {
+  const words = normalizeQueryText(message);
 
   if (isUniversity) {
-    if (
-      lower.includes('publish') ||
-      lower.includes('upload') ||
-      lower.includes('pending audit') ||
-      lower.includes('verification') ||
-      lower.includes('re-verification') ||
-      lower.includes('resubmit') ||
-      lower.includes('policy') ||
-      lower.includes('status')
-    ) {
-      return { intent: 'guidance', answer: buildLocalGuidance(message, true) };
+    if (REVERIFICATION_HINT.test(words) || /\b(publish|upload|verification|resubmit|policy|how do i|how to)\b/.test(words)) {
+      return { intent: 'guidance', answer: guidanceFor(message, true) };
     }
-
-    if (lower.includes('show') || lower.includes('list') || lower.includes('all my') || lower.includes('my ')) {
-      const filters: AdmissionChatFilters = {};
-      let verificationStatus: LocalIntentResult['verification_status'];
-
-      if (lower.includes('verified')) verificationStatus = 'verified';
-      if (lower.includes('pending')) verificationStatus = 'pending';
-      if (lower.includes('rejected')) verificationStatus = 'rejected';
-
-      return { intent: 'search_admissions', filters, verification_status: verificationStatus };
+    if (/\b(show|list|my|our)\b/.test(words) && /\b(admission|admissions|program|programs)\b/.test(words)) {
+      return { intent: 'search_admissions', ...buildSearchRequest(message), verificationStatus: extractStatus(message) };
     }
-  } else {
-    if (SAVED_SUMMARY_HINT.test(lower) && SUMMARY_HINT.test(lower)) {
-      return { intent: 'summarize_saved_admissions' };
+    if (/\b(pending|audit|status)\b/.test(words)) {
+      return { intent: 'guidance', answer: guidanceFor(message, true) };
     }
+    return { intent: 'unknown' };
+  }
 
-    if (lower.includes('my saved admissions') || lower.includes('my watchlist') || lower.includes('saved programs summary')) {
-      return { intent: 'summarize_saved_admissions' };
-    }
+  if (SAVED_HINT.test(words) && SUMMARY_HINT.test(words)) return { intent: 'summarize_saved_admissions' };
+  if (/\bmy (saved|watchlist)\b/.test(words) && !DEADLINE_HINT.test(words)) return { intent: 'summarize_saved_admissions' };
 
-    if (
-      lower.includes('how do i') ||
-      lower.includes('watchlist') ||
-      lower.includes('alerts') ||
-      lower.includes('status')
-    ) {
-      return { intent: 'guidance', answer: buildLocalGuidance(message, false) };
-    }
-
-    if (lower.includes('compare') && !(DEGREE_OR_PROGRAM_HINT.test(lower) || ADMISSION_HINT.test(lower))) {
-      return { intent: 'guidance', answer: buildLocalGuidance(message, false) };
-    }
-
-    if (DEADLINE_HINT.test(lower)) {
-      const withinDays = extractDeadlineWithinDaysFromMessage(lower) || (lower.includes('urgent') ? 3 : 7);
-      const filters = buildLocalSearchFilters(message, lower);
-      return {
-        intent: 'search_admissions',
-        filters: {
-          ...filters,
-          deadline_within_days: withinDays,
-        },
-        ...extractSortPreference(lower),
-      };
-    }
-
-    if (
-      lower.includes('find') ||
-      lower.includes('show') ||
-      lower.includes('admission') ||
-      lower.includes('program')
-    ) {
-      return {
-        intent: 'search_admissions',
-        filters: buildLocalSearchFilters(message, lower),
-        ...extractSortPreference(lower),
-      };
-    }
-
-    if (DEGREE_OR_PROGRAM_HINT.test(lower) || ADMISSION_HINT.test(lower)) {
-      return {
-        intent: 'search_admissions',
-        filters: buildLocalSearchFilters(message, lower),
-        ...extractSortPreference(lower),
-      };
-    }
+  if (/\bhow (do|can) i\b/.test(words) || /\b(alerts?|reminders?|watchlist)\b/.test(words)) {
+    return { intent: 'guidance', answer: guidanceFor(message, false) };
+  }
+  if (/\bcompare\b/.test(words) && !(DEGREE_OR_PROGRAM_HINT.test(words) || ADMISSION_HINT.test(words))) {
+    return { intent: 'guidance', answer: guidanceFor(message, false) };
+  }
+  if (/\bwhat (does|is)\b.*\b(verified|pending|status)\b/.test(words)) {
+    return { intent: 'guidance', answer: guidanceFor(message, false) };
+  }
+  if (DEADLINE_HINT.test(words) || DEGREE_OR_PROGRAM_HINT.test(words) || ADMISSION_HINT.test(words) || /\b(find|show|list|program|programs)\b/.test(words)) {
+    return { intent: 'search_admissions', ...buildSearchRequest(message) };
   }
 
   return { intent: 'unknown' };
 };
 
-const normalizeFilters = (extraction: GeminiChatExtraction): AdmissionChatFilters => {
-  const deadlineWithinDays = extraction.deadline_within_days ?? undefined;
-  const normalizedProgramType = normalizeProgramType(extraction.program_type);
-  const normalizedDegreeLevel = normalizeDegreeLevel(extraction.degree_level || extraction.program_type);
-  const normalizedSearch = extraction.search ? deriveSearchKeyword(extraction.search) || extraction.search : undefined;
+// ---------------------------------------------------------------------------
+// Search pipeline (database-backed)
+// ---------------------------------------------------------------------------
 
-  return {
-    search: normalizedSearch,
-    degree_level: normalizedDegreeLevel,
-    field_of_study: extraction.field_of_study || undefined,
-    location: extraction.location || undefined,
-    program_type: normalizedProgramType,
-    delivery_mode: extraction.delivery_mode || undefined,
-    deadline_within_days: typeof deadlineWithinDays === 'number' && deadlineWithinDays > 0 ? deadlineWithinDays : undefined,
-  };
+const dayBounds = (isoDay: string): { from: string; to: string } => ({
+  from: `${isoDay}T00:00:00${APP_UTC_OFFSET}`,
+  to: `${isoDay}T23:59:59.999${APP_UTC_OFFSET}`,
+});
+
+const toIso = (value: unknown): string | null => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
 
 const mapResult = (admission: Admission): AdmissionChatResultItem => ({
@@ -596,257 +347,401 @@ const mapResult = (admission: Admission): AdmissionChatResultItem => ({
   title: admission.title,
   degree_level: admission.degree_level,
   location: admission.location,
-  deadline: admission.deadline,
+  deadline: toIso(admission.deadline),
   verification_status: admission.verification_status,
   university_id: admission.university_id,
 });
 
-const filterByDeadlineWindow = (admissions: Admission[], withinDays?: number): Admission[] => {
-  if (!withinDays) {
-    return admissions;
+const findAdmissions = async (
+  ctx: ChatExecutionContext,
+  filters: AdmissionChatFilters & { deadline_from?: string; deadline_to?: string },
+  options: { sort?: Sort; order?: 'asc' | 'desc'; status?: Status; limit?: number } = {}
+): Promise<Admission[]> => {
+  const { admissions } = await admissionsService.getMany(
+    {
+      search: filters.search,
+      degree_level: filters.degree_level,
+      field_of_study: filters.field_of_study,
+      location: filters.location,
+      program_type: filters.program_type,
+      delivery_mode: filters.delivery_mode,
+      deadline_from: filters.deadline_from,
+      deadline_to: filters.deadline_to,
+      verification_status: options.status,
+      sort: options.sort || 'deadline',
+      order: options.order || 'asc',
+    },
+    1,
+    options.limit || MAX_RESULTS,
+    ctx.userContext
+  );
+  return admissions;
+};
+
+interface SearchOutcome {
+  results: AdmissionChatResultItem[];
+  appliedFilters: AdmissionChatFilters;
+  /** Set when the answer is a fallback rather than an exact match. */
+  fallback?: 'nearest_to_date' | 'nearest_upcoming' | 'relaxed';
+}
+
+const runSearch = async (ctx: ChatExecutionContext, request: SearchRequest): Promise<SearchOutcome> => {
+  const { filters, sort, order, verificationStatus } = request;
+  const base = { ...filters, deadline_on: undefined, deadline_within_days: undefined };
+  const now = new Date();
+
+  // 1. A specific calendar day.
+  if (filters.deadline_on) {
+    const { from, to } = dayBounds(filters.deadline_on);
+    const exact = await findAdmissions(ctx, { ...base, deadline_from: from, deadline_to: to }, { status: verificationStatus });
+    if (exact.length) return { results: exact.map(mapResult), appliedFilters: filters };
+
+    const target = new Date(from).getTime();
+    const upcoming = await findAdmissions(ctx, { ...base, deadline_from: now.toISOString() }, { status: verificationStatus, limit: 40 });
+    const nearest = upcoming
+      .filter((item) => item.deadline)
+      .sort((a, b) => Math.abs(new Date(a.deadline!).getTime() - target) - Math.abs(new Date(b.deadline!).getTime() - target))
+      .slice(0, MAX_RESULTS);
+    return { results: nearest.map(mapResult), appliedFilters: filters, fallback: 'nearest_to_date' };
   }
 
-  const now = Date.now();
-  const windowMs = withinDays * 24 * 60 * 60 * 1000;
-
-  return admissions.filter((admission) => {
-    if (!admission.deadline) {
-      return false;
+  // 2. A relative window, escalating to wider windows before giving up.
+  if (filters.deadline_within_days) {
+    const windows = Array.from(new Set([filters.deadline_within_days, ...WINDOW_ESCALATION_DAYS])).filter(
+      (days) => days >= filters.deadline_within_days!
+    );
+    for (const days of windows) {
+      const rows = await findAdmissions(
+        ctx,
+        { ...base, deadline_from: now.toISOString(), deadline_to: new Date(now.getTime() + days * DAY_MS).toISOString() },
+        { sort: 'deadline', order: 'asc', status: verificationStatus }
+      );
+      if (rows.length) {
+        return {
+          results: rows.map(mapResult),
+          appliedFilters: { ...filters, deadline_within_days: days },
+          fallback: days !== filters.deadline_within_days ? 'nearest_upcoming' : undefined,
+        };
+      }
     }
-
-    const deadlineMs = new Date(admission.deadline).getTime();
-    return Number.isFinite(deadlineMs) && deadlineMs >= now && deadlineMs - now <= windowMs;
-  });
-};
-
-const formatAdmissionLine = (admission: AdmissionChatResultItem, index: number): string => {
-  const detailParts = [admission.degree_level, admission.location, admission.deadline].filter(Boolean);
-  return `${index + 1}) ${admission.title}${detailParts.length > 0 ? `\n   ${detailParts.join(' | ')}` : ''}`;
-};
-
-const formatSearchAnswer = (results: AdmissionChatResultItem[], filters: AdmissionChatFilters): string => {
-  if (results.length === 0) {
-    const quickSuggestions = [
-      '- "Show BBA programs"',
-      '- "Show deadlines this week"',
-      '- "Show verified programs in Lahore"',
-      '- "Compare saved programs"',
-    ];
-
-    return [
-      'I could not find an exact match for that search.',
-      'You can try one of these next:',
-      ...quickSuggestions,
-      'If you want, I can also broaden the search by city, degree, or deadline window.',
-    ].join('\n');
+    const upcoming = await findAdmissions(ctx, { ...base, deadline_from: now.toISOString() }, { status: verificationStatus });
+    return { results: upcoming.map(mapResult), appliedFilters: filters, fallback: 'nearest_upcoming' };
   }
 
-  const appliedFilters = [filters.search, filters.degree_level, filters.field_of_study, filters.location]
-    .filter(Boolean)
-    .join(', ');
+  // 3. Plain search, then progressively broader candidates.
+  const direct = await findAdmissions(ctx, base, { sort, order, status: verificationStatus });
+  if (direct.length) return { results: direct.map(mapResult), appliedFilters: filters };
 
-  const intro = filters.deadline_within_days
-    ? `I found ${results.length} match${results.length === 1 ? '' : 'es'} with deadlines in the next ${filters.deadline_within_days} days:`
-    : appliedFilters
-    ? `I found ${results.length} match${results.length === 1 ? '' : 'es'} for: ${appliedFilters}.`
-    : `I found ${results.length} relevant admission${results.length === 1 ? '' : 's'}:`;
-
-  return [
-    intro,
-    ...results.map(formatAdmissionLine),
-    'Tell me if you want these sorted by nearest deadline or lowest fee.',
-  ].join('\n');
-};
-
-const formatDeadlineFallbackAnswer = (
-  strictWithinDays: number,
-  fallbackResults: AdmissionChatResultItem[]
-): string => {
-  if (fallbackResults.length === 0) {
-    return [
-      `I could not find admissions with deadlines within ${strictWithinDays} days.`,
-      'Try widening the range, for example: "Show deadlines this month".',
-    ].join('\n');
+  for (const candidate of buildSearchRelaxationCandidates({ ...base, field_of_study: undefined })) {
+    const rows = await findAdmissions(ctx, candidate, { sort, order, status: verificationStatus });
+    if (rows.length) return { results: rows.map(mapResult), appliedFilters: candidate, fallback: 'relaxed' };
   }
 
-  return [
-    `I could not find admissions within ${strictWithinDays} days.`,
-    'Here are the nearest upcoming deadlines instead:',
-    ...fallbackResults.map(formatAdmissionLine),
-    'If you want, I can narrow this to a specific city or degree level.',
-  ].join('\n');
+  if (filters.search) {
+    const tokens = normalizeQueryText(filters.search)
+      .split(' ')
+      .filter((token) => token.length >= 3)
+      .sort((a, b) => b.length - a.length)
+      .slice(0, 3);
+    for (const token of tokens) {
+      const rows = await findAdmissions(ctx, { search: token }, { sort, order, status: verificationStatus });
+      if (rows.length) return { results: rows.map(mapResult), appliedFilters: { search: token }, fallback: 'relaxed' };
+    }
+  }
+
+  return { results: [], appliedFilters: filters };
 };
+
+// ---------------------------------------------------------------------------
+// Answer formatting
+// ---------------------------------------------------------------------------
 
 const formatDateLabel = (value: string | null | undefined): string => {
   if (!value) return 'No deadline';
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Karachi' });
 };
 
-const getDaysUntil = (value: string | null | undefined): number | null => {
-  if (!value) return null;
-  const now = Date.now();
-  const deadlineMs = new Date(value).getTime();
-  if (!Number.isFinite(deadlineMs)) return null;
-  return Math.ceil((deadlineMs - now) / (24 * 60 * 60 * 1000));
+const capitalize = (value?: string | null): string => (value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown');
+
+const formatLine = (item: AdmissionChatResultItem, index: number, isUniversity: boolean): string => {
+  const details = [
+    isUniversity ? `Status: ${capitalize(item.verification_status)}` : null,
+    item.degree_level,
+    item.location,
+    item.deadline ? `Deadline: ${formatDateLabel(item.deadline)}` : null,
+  ].filter(Boolean);
+  return `${index + 1}) ${item.title}${details.length ? `\n   ${details.join(' | ')}` : ''}`;
 };
 
-const buildSavedAdmissionsSummaryAnswer = (results: AdmissionChatResultItem[]): string => {
-  if (results.length === 0) {
+const formatSearchAnswer = (outcome: SearchOutcome, request: SearchRequest, isUniversity: boolean): string => {
+  const { results, appliedFilters, fallback } = outcome;
+  const requested = request.filters;
+
+  if (!results.length) {
+    if (isUniversity) {
+      const status = request.verificationStatus ? ` with status ${capitalize(request.verificationStatus)}` : '';
+      return [`I could not find any of your admissions${status}.`, 'Try "Show my pending admissions" or open Manage Admissions.'].join('\n');
+    }
     return [
-      'You do not have any active saved admissions right now.',
-      'Try these next steps:',
-      '- Search admissions and save programs to your watchlist.',
-      '- Enable watchlist alerts so urgent deadlines are easier to track.',
+      'I could not find a match for that search.',
+      'Try: "Show BBA programs", "Deadlines this week" or "CS programs in Lahore".',
     ].join('\n');
   }
 
-  const withDeadlines = results
-    .map((item) => ({ item, days: getDaysUntil(item.deadline) }))
-    .filter((entry) => entry.days !== null)
-    .sort((a, b) => (a.days as number) - (b.days as number));
+  let intro: string;
+  if (fallback === 'nearest_to_date' && requested.deadline_on) {
+    intro = `Nothing closes exactly on ${formatDateLabel(requested.deadline_on)}. Closest upcoming deadlines:`;
+  } else if (requested.deadline_on) {
+    intro = `Programs closing on ${formatDateLabel(requested.deadline_on)}:`;
+  } else if (fallback === 'nearest_upcoming' && requested.deadline_within_days) {
+    intro = `Nothing closes within ${requested.deadline_within_days} days. Nearest upcoming deadlines${
+      appliedFilters.deadline_within_days ? ` (next ${appliedFilters.deadline_within_days} days)` : ''
+    }:`;
+  } else if (requested.deadline_within_days) {
+    intro = `${results.length} program${results.length === 1 ? '' : 's'} with deadlines in the next ${requested.deadline_within_days} days:`;
+  } else if (fallback === 'relaxed') {
+    intro = 'No exact match, but these are closely related:';
+  } else if (isUniversity) {
+    intro = `Here are ${results.length} of your admission${results.length === 1 ? '' : 's'}:`;
+  } else {
+    intro = `I found ${results.length} matching program${results.length === 1 ? '' : 's'}:`;
+  }
 
-  const urgentCount = withDeadlines.filter((entry) => (entry.days as number) >= 0 && (entry.days as number) <= 3).length;
-  const weekCount = withDeadlines.filter((entry) => (entry.days as number) >= 0 && (entry.days as number) <= 7).length;
+  return [intro, ...results.map((item, index) => formatLine(item, index, isUniversity))].join('\n');
+};
 
-  const topUpcoming = withDeadlines.slice(0, 5).map((entry, index) => {
-    const daysLabel = (entry.days as number) < 0 ? 'passed' : `${entry.days}d left`;
-    return `${index + 1}. ${entry.item.title} — ${formatDateLabel(entry.item.deadline)} (${daysLabel})`;
-  });
+// ---------------------------------------------------------------------------
+// Saved admissions summary
+// ---------------------------------------------------------------------------
+
+const summarizeSavedAdmissions = async (ctx: ChatExecutionContext): Promise<{ answer: string; results: AdmissionChatResultItem[] }> => {
+  const userId = ctx.userContext?.id;
+  if (!userId) return { answer: 'Please sign in to get a summary of your saved programs.', results: [] };
+
+  // Direct query: opening each saved admission through getById would record
+  // dozens of fake "viewed" activities.
+  const rows = await query(
+    `SELECT a.id::text AS id, a.title, a.degree_level, a.location, a.deadline,
+            a.verification_status, a.university_id::text AS university_id
+     FROM watchlists w
+     JOIN admissions a ON a.id = w.admission_id AND a.is_active = true
+     WHERE w.user_id = $1
+     ORDER BY a.deadline ASC NULLS LAST
+     LIMIT 50`,
+    [userId]
+  );
+  const results = (rows.rows as Admission[]).map(mapResult);
+
+  if (!results.length) {
+    return {
+      answer: ['You have no saved programs yet.', '- Search programs and save them to your watchlist.', '- Turn on alerts to get deadline reminders.'].join('\n'),
+      results,
+    };
+  }
+
+  const nowMs = Date.now();
+  const daysLeft = (item: AdmissionChatResultItem) => (item.deadline ? Math.ceil((new Date(item.deadline).getTime() - nowMs) / DAY_MS) : null);
+  const upcoming = results.filter((item) => (daysLeft(item) ?? -1) >= 0);
+  const urgent = upcoming.filter((item) => (daysLeft(item) as number) <= 3).length;
+  const thisWeek = upcoming.filter((item) => (daysLeft(item) as number) <= 7).length;
 
   const lines = [
-    `You currently have ${results.length} saved admission${results.length === 1 ? '' : 's'}.`,
-    `Urgent deadlines (next 3 days): ${urgentCount}`,
-    `Deadlines this week (next 7 days): ${weekCount}`,
+    `You have ${results.length} saved program${results.length === 1 ? '' : 's'}.`,
+    `Closing in the next 3 days: ${urgent}`,
+    `Closing this week: ${thisWeek}`,
   ];
-
-  if (topUpcoming.length > 0) {
-    lines.push('Top upcoming saved admissions:');
-    lines.push(...topUpcoming);
+  if (upcoming.length) {
+    lines.push('Next deadlines:');
+    upcoming.slice(0, 5).forEach((item, index) => lines.push(`${index + 1}. ${item.title} — ${formatDateLabel(item.deadline)} (${daysLeft(item)}d left)`));
   }
+  const closed = results.length - upcoming.length;
+  if (closed > 0) lines.push(`${closed} saved program${closed === 1 ? ' has' : 's have'} passed or no deadline; consider removing them.`);
 
-  lines.push('Recommended next steps:');
-  lines.push('- Prioritize programs with nearest deadlines first.');
-  lines.push('- Keep alerts enabled for high-priority saved admissions.');
-
-  return lines.join('\n');
+  return { answer: lines.join('\n'), results: results.slice(0, 20) };
 };
 
-const summarizeSavedAdmissions = async (
-  executionContext: ChatExecutionContext
-): Promise<{ answer: string; results: AdmissionChatResultItem[] }> => {
-  const userContext = executionContext.userContext;
-  if (!userContext?.id) {
-    return {
-      answer: 'Please sign in to get a summary of your saved admissions.',
-      results: [],
-    };
-  }
+// ---------------------------------------------------------------------------
+// Conversation context
+// ---------------------------------------------------------------------------
 
-  const { watchlists } = await watchlistsService.getWatchlists(
-    {
-      user_id: userContext.id,
-      page: 1,
-      limit: 50,
-      sort: 'created_at',
-      order: 'desc',
-    },
-    userContext
-  );
-
-  if (!watchlists.length) {
-    return {
-      answer: buildSavedAdmissionsSummaryAnswer([]),
-      results: [],
-    };
-  }
-
-  const settled = await Promise.allSettled(
-    watchlists.map(async (item) => admissionsService.getById(item.admission_id, userContext))
-  );
-
-  const admissions = settled
-    .filter((entry): entry is PromiseFulfilledResult<Admission> => entry.status === 'fulfilled')
-    .map((entry) => entry.value);
-
-  const results = admissions.slice(0, 20).map(mapResult);
-  return {
-    answer: buildSavedAdmissionsSummaryAnswer(results),
-    results,
-  };
+const sanitizeConversationText = (value: string): string => {
+  const text = value.trim();
+  if (!text) return '';
+  if (SENSITIVE_HISTORY_PATTERN.test(text)) return '[redacted sensitive content]';
+  return text
+    .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi, '[redacted email]')
+    .replace(/\b(?:bearer\s+)?[a-z0-9_-]{24,}\b/gi, '[redacted token]')
+    .replace(/\b\d{13,}\b/g, '[redacted id]');
 };
 
-const buildSummaryTextFromFallback = (description: string | null | undefined, title: string, location: string, deadline: string): string => {
-  const summaryParts = [
-    `${title} is an admission listing${location ? ` in ${location}` : ''}.`,
-    description ? description.slice(0, 240).trim() : '',
-    deadline ? `Application deadline: ${deadline}.` : '',
-  ].filter(Boolean);
-
-  return summaryParts.join(' ');
-};
-
-const buildConversationContext = (
-  conversationContext: string | undefined,
-  conversationHistory: ConversationHistoryEntry[] | undefined
-): string | undefined => {
-  const base = conversationContext?.trim() || '';
-  const history = Array.isArray(conversationHistory) ? conversationHistory.slice(-6) : [];
-
-  if (history.length === 0) {
-    return base || undefined;
-  }
-
-  const historyLines = history
+const buildConversationContext = (context?: string, history?: ConversationHistoryEntry[]): string | undefined => {
+  const base = sanitizeConversationText(context || '');
+  const lines = (history || [])
+    .slice(-6)
     .map((entry) => {
-      const role = entry.role === 'user' ? 'User' : 'Assistant';
-      const text = String(entry.text || '').trim().slice(0, 200);
-      return text ? `${role}: ${text}` : '';
+      const text = sanitizeConversationText(String(entry.text || '')).slice(0, 200);
+      return text ? `${entry.role === 'user' ? 'User' : 'Assistant'}: ${text}` : '';
     })
     .filter(Boolean);
 
-  if (historyLines.length === 0) {
-    return base || undefined;
-  }
-
-  const merged = [base, 'Recent messages:', ...historyLines].filter(Boolean).join('\n');
-  return merged.slice(0, 3000);
+  const merged = [base, lines.length ? 'Recent messages:' : '', ...lines].filter(Boolean).join('\n');
+  return merged ? merged.slice(0, 3000) : undefined;
 };
+
+// ---------------------------------------------------------------------------
+// Gemini-assisted path (only for messages local rules cannot classify)
+// ---------------------------------------------------------------------------
+
+const requestFromExtraction = (extraction: GeminiChatExtraction, message: string): SearchRequest => {
+  const extractedDay = typeof extraction.deadline_on === 'string' ? extractSpecificDate(extraction.deadline_on) : undefined;
+  const deadlineOn = extractSpecificDate(message) || extractedDay;
+  const withinDays = Number(extraction.deadline_within_days);
+  const rawSearch = typeof extraction.search === 'string' ? extraction.search.trim() : '';
+
+  const filters = applySearchFirstPolicy(message, {
+    search: rawSearch ? normalizeQueryText(rawSearch) : buildSearchTermsFromMessage(message),
+    degree_level: normalizeDegreeLevel(extraction.degree_level || extraction.program_type),
+    field_of_study: typeof extraction.field_of_study === 'string' ? extraction.field_of_study : undefined,
+    location: typeof extraction.location === 'string' ? extraction.location : undefined,
+    program_type: normalizeProgramType(extraction.program_type),
+    delivery_mode: ['online', 'on-campus', 'hybrid'].includes(String(extraction.delivery_mode)) ? String(extraction.delivery_mode) : undefined,
+    deadline_on: deadlineOn,
+    deadline_within_days: !deadlineOn && Number.isFinite(withinDays) && withinDays > 0 ? Math.min(withinDays, 365) : undefined,
+  });
+
+  return { filters, ...extractSortPreference(normalizeQueryText(message)) };
+};
+
+const reply = (partial: Partial<AdmissionChatResponse> & Pick<AdmissionChatResponse, 'intent' | 'answer'>): AdmissionChatResponse => ({
+  extracted_filters: {},
+  clarification_needed: false,
+  result_count: partial.results?.length ?? 0,
+  results: [],
+  ...partial,
+});
+
+const searchReply = async (ctx: ChatExecutionContext, request: SearchRequest, isUniversity: boolean): Promise<AdmissionChatResponse> => {
+  const outcome = await runSearch(ctx, request);
+  return reply({
+    intent: 'search_admissions',
+    extracted_filters: outcome.appliedFilters,
+    answer: formatSearchAnswer(outcome, request, isUniversity),
+    results: outcome.results,
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export const getAiHealth = () => {
   const metadata = getGeminiUsageMetadata();
-  return {
-    enabled: config.ai.enabled,
-    provider: metadata.provider,
-    model: metadata.model,
-    ready: isGeminiConfigured(),
-  };
+  return { enabled: config.ai.enabled, provider: metadata.provider, model: metadata.model, ready: isGeminiConfigured() };
+};
+
+export const chatWithAdmissionsAssistant = async (
+  message: string,
+  conversationContext: string | undefined,
+  conversationHistory: ConversationHistoryEntry[] | undefined,
+  ctx: ChatExecutionContext
+): Promise<AdmissionChatResponse> => {
+  if (SENSITIVE_QUERY_PATTERN.test(message)) {
+    return reply({
+      intent: 'unsupported',
+      answer: 'Sorry, I cannot help with personal or sensitive information. I can help with programs, eligibility and deadlines.',
+    });
+  }
+
+  const role = ctx.userContext?.role || 'guest';
+  const isUniversity = role === 'university';
+  const local = detectLocalIntent(message, isUniversity);
+
+  if (local.intent === 'guidance') return reply({ intent: 'guidance', answer: local.answer });
+
+  if (local.intent === 'summarize_saved_admissions') {
+    const summary = await summarizeSavedAdmissions(ctx);
+    return reply({ intent: 'search_admissions', answer: summary.answer, results: summary.results });
+  }
+
+  if (local.intent === 'search_admissions') return searchReply(ctx, local, isUniversity);
+
+  // Unclassified: ask Gemini, degrade gracefully when it is unavailable.
+  if (!isGeminiConfigured()) {
+    return reply({ intent: 'guidance', answer: guidanceFor(message, isUniversity) });
+  }
+
+  const context = buildConversationContext(conversationContext, conversationHistory);
+  let extraction: GeminiChatExtraction;
+  try {
+    extraction = await generateJson<GeminiChatExtraction>({
+      prompt: buildChatExtractionPrompt(message, context, role === 'maintenance' ? 'student' : role),
+      temperature: 0.1,
+    });
+  } catch (error) {
+    log.warn('Intent extraction failed; using local guidance', (error as Error)?.message);
+    const prefix = isGeminiQuotaError(error) ? 'The AI assistant is busy right now. Here is some quick guidance:\n' : '';
+    return reply({ intent: 'guidance', answer: prefix + guidanceFor(message, isUniversity) });
+  }
+
+  switch (extraction?.intent) {
+    case 'search_admissions':
+      return searchReply(ctx, { ...requestFromExtraction(extraction, message), verificationStatus: isUniversity ? extractStatus(message) : undefined }, isUniversity);
+
+    case 'unsupported':
+      return reply({
+        intent: 'unsupported',
+        answer:
+          typeof extraction.refusal_reason === 'string' && extraction.refusal_reason.trim()
+            ? extraction.refusal_reason.trim().slice(0, 300)
+            : 'I can help with admissions, programs, deadlines and eligibility. Could you rephrase your question?',
+      });
+
+    case 'clarification': {
+      const question =
+        typeof extraction.clarification_question === 'string' && extraction.clarification_question.trim()
+          ? extraction.clarification_question.trim().slice(0, 300)
+          : 'Could you share more details about what you are looking for?';
+      return reply({ intent: 'clarification', clarification_needed: true, clarification_question: question, answer: question });
+    }
+
+    default: {
+      let answer: string;
+      try {
+        answer = (await generateText(buildGuidanceAnswerPrompt(message, context, isUniversity), 0.4)).trim().slice(0, 2000);
+      } catch (error) {
+        log.warn('Guidance generation failed; using local guidance', (error as Error)?.message);
+        answer = guidanceFor(message, isUniversity);
+      }
+      return reply({ intent: 'guidance', answer });
+    }
+  }
 };
 
 export const summarizeAdmissionText = async (rawText: string): Promise<AdmissionSummaryResult> => {
-  const boundedText = rawText.slice(0, config.ai.maxInputChars);
-
-  if (!isGeminiConfigured()) {
-    throw new AppError('Gemini AI is not configured', 503);
-  }
-
-  const extraction = await generateJson<Omit<AdmissionSummaryResult, 'provider' | 'method' | 'model'>>({
-    prompt: buildSummarizationPrompt(boundedText),
+  const extraction = await generateJson<Partial<AdmissionSummaryResult>>({
+    prompt: buildSummarizationPrompt(rawText.slice(0, config.ai.maxInputChars)),
     temperature: 0.1,
   });
 
   const metadata = getGeminiUsageMetadata();
+  const str = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+  const fee = Number(extraction.application_fee);
+
   return {
-    ...extraction,
-    summary_text: extraction.summary_text?.trim() || 'No summary could be generated from the provided admission text.',
-    highlights: Array.isArray(extraction.highlights) ? extraction.highlights.slice(0, 6) : [],
-    extracted_fields: Array.isArray(extraction.extracted_fields) ? extraction.extracted_fields : [],
-    confidence: typeof extraction.confidence === 'number' ? Math.max(0, Math.min(100, extraction.confidence)) : 0,
+    title: str(extraction.title),
+    degree_level: str(extraction.degree_level),
+    location: str(extraction.location),
+    application_fee: Number.isFinite(fee) && fee >= 0 ? fee : null,
+    deadline: toIso(extraction.deadline),
+    description: str(extraction.description),
+    eligibility: str(extraction.eligibility),
+    summary_text: str(extraction.summary_text) || 'No summary could be generated from the provided admission text.',
+    highlights: Array.isArray(extraction.highlights) ? extraction.highlights.map(String).slice(0, 6) : [],
+    extracted_fields: Array.isArray(extraction.extracted_fields) ? extraction.extracted_fields.map(String) : [],
+    confidence: Number.isFinite(Number(extraction.confidence)) ? Math.max(0, Math.min(100, Number(extraction.confidence))) : 0,
     provider: metadata.provider,
     model: metadata.model,
     method: 'ai',
@@ -868,7 +763,16 @@ export const summarizeAdmissionTextWithFallback = async (
 ): Promise<AdmissionSummaryResult> => {
   try {
     return await summarizeAdmissionText(rawText);
-  } catch {
+  } catch (error) {
+    log.warn('PDF summary fell back to rule-based extraction', (error as Error)?.message);
+    const summary = [
+      `${fallback.title} is an admission listing${fallback.location ? ` in ${fallback.location}` : ''}.`,
+      fallback.description ? fallback.description.slice(0, 240).trim() : '',
+      fallback.deadline ? `Application deadline: ${fallback.deadline}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     return {
       title: fallback.title,
       degree_level: fallback.degree_level,
@@ -877,12 +781,7 @@ export const summarizeAdmissionTextWithFallback = async (
       deadline: fallback.deadline,
       description: fallback.description,
       eligibility: null,
-      summary_text: buildSummaryTextFromFallback(
-        fallback.description,
-        fallback.title,
-        fallback.location,
-        fallback.deadline
-      ),
+      summary_text: summary,
       highlights: [],
       extracted_fields: fallback.extracted_fields,
       confidence: fallback.confidence,
@@ -890,268 +789,4 @@ export const summarizeAdmissionTextWithFallback = async (
       method: 'fallback',
     };
   }
-};
-
-export const chatWithAdmissionsAssistant = async (
-  message: string,
-  conversationContext: string | undefined,
-  conversationHistory: ConversationHistoryEntry[] | undefined,
-  executionContext: ChatExecutionContext
-): Promise<AdmissionChatResponse> => {
-  if (!isGeminiConfigured()) {
-    throw new AppError('Gemini AI is not configured', 503);
-  }
-
-  if (SENSITIVE_QUERY_PATTERN.test(message)) {
-    return {
-      intent: 'unsupported',
-      extracted_filters: {},
-      clarification_needed: false,
-      answer: 'Sorry, I cannot access personal or sensitive information. I can only help with university admissions, programs, eligibility, and deadlines.',
-      result_count: 0,
-      results: [],
-    };
-  }
-
-  const enrichedContext = buildConversationContext(conversationContext, conversationHistory);
-  const uniCtx = isUniversityContext(enrichedContext);
-  const localIntent = detectLocalIntent(message, uniCtx);
-
-  if (localIntent.intent === 'guidance' && localIntent.answer) {
-    return {
-      intent: 'guidance',
-      extracted_filters: {},
-      clarification_needed: false,
-      answer: localIntent.answer,
-      result_count: 0,
-      results: [],
-    };
-  }
-
-  // Step 1: classify intent and extract filters (JSON, low temperature)
-  let extraction: GeminiChatExtraction;
-  try {
-    extraction = await generateJson<GeminiChatExtraction>({
-      prompt: buildChatExtractionPrompt(message, enrichedContext),
-      temperature: 0.1,
-    });
-  } catch (error) {
-    if (isGeminiQuotaError(error)) {
-      return {
-        intent: 'guidance',
-        extracted_filters: {},
-        clarification_needed: false,
-        answer: [
-          'AI quota is temporarily exhausted. You can still continue with this guidance:',
-          buildLocalGuidance(message, uniCtx),
-        ].join('\n'),
-        result_count: 0,
-        results: [],
-      };
-    }
-
-    extraction = { intent: 'guidance' };
-  }
-
-  const filters = normalizeFilters(extraction);
-
-  if (localIntent.intent === 'search_admissions') {
-    const { admissions } = await admissionsService.getMany(
-      {
-        search: localIntent.filters?.search,
-        degree_level: localIntent.filters?.degree_level,
-        field_of_study: localIntent.filters?.field_of_study,
-        location: localIntent.filters?.location,
-        program_type: localIntent.filters?.program_type,
-        delivery_mode: localIntent.filters?.delivery_mode,
-        verification_status: localIntent.verification_status,
-      },
-      1,
-      MAX_RESULTS * 2,
-      localIntent.sort || 'deadline',
-      localIntent.order || 'asc',
-      executionContext.userContext
-    );
-
-    const filteredAdmissions = filterByDeadlineWindow(admissions, localIntent.filters?.deadline_within_days);
-    let results = (localIntent.filters?.deadline_within_days ? filteredAdmissions : admissions)
-      .slice(0, MAX_RESULTS)
-      .map(mapResult);
-    if (results.length === 0) {
-      const relaxedResults = await tryRelaxedFilterSearch(
-        localIntent.filters || {},
-        executionContext,
-        localIntent.sort,
-        localIntent.order
-      );
-      if (relaxedResults.length > 0) {
-        results = relaxedResults;
-      }
-    }
-
-    if (results.length === 0) {
-      const keywordOnlyResults = await tryRelaxedSearch(localIntent.filters || {}, executionContext);
-      if (keywordOnlyResults.length > 0) {
-        results = keywordOnlyResults;
-      }
-    }
-
-    if (results.length === 0 && localIntent.filters?.deadline_within_days) {
-      const nearestUpcoming = admissions
-        .filter((item) => {
-          if (!item.deadline) return false;
-          const deadlineMs = new Date(item.deadline).getTime();
-          return Number.isFinite(deadlineMs) && deadlineMs >= Date.now();
-        })
-        .sort((a, b) => new Date(a.deadline || '').getTime() - new Date(b.deadline || '').getTime())
-        .slice(0, MAX_RESULTS)
-        .map(mapResult);
-
-      return {
-        intent: 'search_admissions',
-        extracted_filters: localIntent.filters || {},
-        clarification_needed: false,
-        answer: formatDeadlineFallbackAnswer(localIntent.filters.deadline_within_days, nearestUpcoming),
-        result_count: nearestUpcoming.length,
-        results: nearestUpcoming,
-      };
-    }
-
-    return {
-      intent: 'search_admissions',
-      extracted_filters: localIntent.filters || {},
-      clarification_needed: false,
-      answer: formatSearchAnswer(results, localIntent.filters || {}),
-      result_count: results.length,
-      results,
-    };
-  }
-
-  if (localIntent.intent === 'summarize_saved_admissions') {
-    const savedSummary = await summarizeSavedAdmissions(executionContext);
-    return {
-      intent: 'search_admissions',
-      extracted_filters: {},
-      clarification_needed: false,
-      answer: savedSummary.answer,
-      result_count: savedSummary.results.length,
-      results: savedSummary.results,
-    };
-  }
-
-  // Step 2a: guidance → separate free-text call at higher temperature
-  if (extraction.intent === 'guidance') {
-    let answer: string;
-    try {
-      answer = await generateText(
-        buildGuidanceAnswerPrompt(message, enrichedContext, uniCtx),
-        0.4
-      );
-    } catch (error) {
-      if (isGeminiQuotaError(error)) {
-        answer = [
-          'AI quota is temporarily exhausted. You can still continue with this guidance:',
-          buildLocalGuidance(message, uniCtx),
-        ].join('\n');
-      } else {
-        answer = buildLocalGuidance(message, uniCtx);
-      }
-    }
-
-    return {
-      intent: 'guidance',
-      extracted_filters: {},
-      clarification_needed: false,
-      answer: answer.trim(),
-      result_count: 0,
-      results: [],
-    };
-  }
-
-  // Step 2b: truly unsupported
-  if (extraction.intent === 'unsupported') {
-    return {
-      intent: 'unsupported',
-      extracted_filters: {},
-      clarification_needed: false,
-      answer: extraction.refusal_reason || "I can help with admissions, programs, verification workflows, deadlines, and eligibility. Could you rephrase your question?",
-      result_count: 0,
-      results: [],
-    };
-  }
-
-  // Step 2c: clarification — only as last resort
-  if (extraction.intent === 'clarification') {
-    return {
-      intent: 'clarification',
-      extracted_filters: filters,
-      clarification_needed: true,
-      clarification_question: extraction.clarification_question || undefined,
-      answer: extraction.clarification_question || 'Could you share more details about what you are looking for?',
-      result_count: 0,
-      results: [],
-    };
-  }
-
-  const { admissions: extractedAdmissions } = await admissionsService.getMany(
-    {
-      search: filters.search,
-      degree_level: filters.degree_level,
-      field_of_study: filters.field_of_study,
-      location: filters.location,
-      program_type: filters.program_type,
-      delivery_mode: filters.delivery_mode,
-    },
-    1,
-    MAX_RESULTS * 2,
-    'deadline',
-    'asc',
-    executionContext.userContext
-  );
-
-  const filteredAdmissions = filterByDeadlineWindow(extractedAdmissions, filters.deadline_within_days);
-  let results = filteredAdmissions.slice(0, MAX_RESULTS).map(mapResult);
-  if (results.length === 0) {
-    const relaxedResults = await tryRelaxedFilterSearch(filters, executionContext, 'deadline', 'asc');
-      if (relaxedResults.length > 0) {
-        results = relaxedResults;
-      }
-    }
-
-  if (results.length === 0) {
-    const keywordOnlyResults = await tryRelaxedSearch(filters, executionContext);
-    if (keywordOnlyResults.length > 0) {
-      results = keywordOnlyResults;
-    }
-  }
-
-  if (results.length === 0 && filters.deadline_within_days) {
-    const nearestUpcoming = extractedAdmissions
-      .filter((item) => {
-        if (!item.deadline) return false;
-        const deadlineMs = new Date(item.deadline).getTime();
-        return Number.isFinite(deadlineMs) && deadlineMs >= Date.now();
-      })
-      .sort((a, b) => new Date(a.deadline || '').getTime() - new Date(b.deadline || '').getTime())
-      .slice(0, MAX_RESULTS)
-      .map(mapResult);
-
-    return {
-      intent: 'search_admissions',
-      extracted_filters: filters,
-      clarification_needed: false,
-      answer: formatDeadlineFallbackAnswer(filters.deadline_within_days, nearestUpcoming),
-      result_count: nearestUpcoming.length,
-      results: nearestUpcoming,
-    };
-  }
-
-  return {
-    intent: 'search_admissions',
-    extracted_filters: filters,
-    clarification_needed: false,
-    answer: formatSearchAnswer(results, filters),
-    result_count: results.length,
-    results,
-  };
 };

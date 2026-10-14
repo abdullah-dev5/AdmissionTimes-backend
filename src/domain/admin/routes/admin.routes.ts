@@ -17,6 +17,7 @@ import {
   manualRunAllController,
 } from '@domain/scraper-integration/controllers/scraper-integration.controller';
 import { adminOnly } from '../middleware/adminOnly';
+import { deleteAdmission } from '@domain/admissions/controllers/admissions.controller';
 import {
   verifyAdmissionSchema,
   revisionRequiredSchema,
@@ -454,4 +455,10 @@ router.get(
   validateParams(uuidParamSchema),
   adminController.getAdmissionDetails
 );
+router.delete(
+  '/admissions/:id',
+  validateParams(uuidParamSchema),
+  deleteAdmission
+);
+
 export default router;

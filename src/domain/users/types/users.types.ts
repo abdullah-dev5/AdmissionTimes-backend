@@ -6,6 +6,7 @@
  */
 
 import { UserType } from '@config/constants';
+export type { UserContext } from '@shared/types/auth';
 
 /**
  * Core user record interface
@@ -14,6 +15,7 @@ import { UserType } from '@config/constants';
 export interface User {
   id: string;
   auth_user_id: string | null; // Supabase Auth UUID (nullable for now)
+  email?: string | null;
   role: UserType;
   display_name: string;
   university_id: string | null; // For university users
@@ -41,7 +43,10 @@ export interface CreateUserDTO {
  */
 export interface UpdateUserDTO {
   display_name?: string;
+  /** Internal (admin) use only. */
   university_id?: string | null;
+  /** Internal (admin) use only. */
+  status?: 'active' | 'suspended';
 }
 
 /**
@@ -49,6 +54,7 @@ export interface UpdateUserDTO {
  */
 export interface UpdateUserRoleDTO {
   role: UserType;
+  university_id?: string;
 }
 
 /**
@@ -110,14 +116,3 @@ export interface UserQueryParams extends UserFilters {
   order?: 'asc' | 'desc';
 }
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- * This is the internal user representation (not Supabase Auth)
- */
-export interface UserContext {
-  id: string | null; // Internal user ID (users.id)
-  auth_user_id: string | null; // Supabase Auth UUID (nullable)
-  role: UserType | 'guest';
-  university_id?: string | null;
-}

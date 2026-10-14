@@ -206,3 +206,14 @@ export const updateCurrentUniversityProfile = async (
     next(error);
   }
 };
+
+/**
+ * Suspend or reactivate a user (admin only)
+ *
+ * PATCH /api/v1/users/:id/status
+ */
+export const updateUserStatus = async (req: Request, res: Response): Promise<void> => {
+  const { status } = req.validated as { status: 'active' | 'suspended' };
+  const user = await usersService.updateStatus(req.params.id, status, req.user as UserContext);
+  sendSuccess(res, user, status === 'suspended' ? 'User suspended' : 'User reactivated');
+};

@@ -79,14 +79,14 @@ export const createAdmissionSchema = Joi.object({
       'number.base': 'Application fee must be a valid number',
     }),
 
+  // Format only: "must be in the future" is enforced by the service when the
+  // deadline is set or changed, so unrelated edits to past admissions work.
   deadline: Joi.date()
     .iso()
-    .greater('now')
     .allow(null)
     .optional()
     .messages({
       'date.base': 'Deadline must be a valid ISO8601 date',
-      'date.greater': 'Deadline must be in the future',
       'date.format': 'Deadline must be in ISO8601 format',
     }),
 
@@ -122,14 +122,13 @@ export const createAdmissionSchema = Joi.object({
       'object.base': 'Requirements must be a valid JSON object',
     }),
 
-  verification_status: Joi.string()
-    .valid('draft', 'pending', 'verified', 'rejected')
-    .optional()
-    .default('draft'),
+  // Submission intent only ('draft' = keep private, 'pending' = submit for review).
+  verification_status: Joi.string().valid('draft', 'pending').optional().messages({
+    'any.only': 'verification_status may only be "draft" or "pending"; verification is decided by admins',
+  }),
 
-  university_id: Joi.string()
-    .uuid()
-    .optional(),
+  // Used for admin-created admissions; ignored for university representatives.
+  university_id: Joi.string().uuid().optional(),
 });
 
 /**
@@ -142,23 +141,18 @@ export const updateAdmissionSchema = createAdmissionSchema.fork(
 );
 
 /**
- * Verify admission validation schema
+ * Verify admission (admin) validation schema
  */
 export const verifyAdmissionSchema = Joi.object({
-  verified_by: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'verified_by must be a valid UUID',
-    }),
+  notes: Joi.string().max(FIELD_LIMITS.REJECTION_REASON_MAX).allow(null, '').optional(),
 });
 
 /**
- * Reject admission validation schema
+ * Reject admission (admin) validation schema
  */
 export const rejectAdmissionSchema = Joi.object({
   rejection_reason: Joi.string()
+    .trim()
     .min(FIELD_LIMITS.REJECTION_REASON_MIN)
     .max(FIELD_LIMITS.REJECTION_REASON_MAX)
     .required()
@@ -168,63 +162,6 @@ export const rejectAdmissionSchema = Joi.object({
       'string.max': `Rejection reason must not exceed ${FIELD_LIMITS.REJECTION_REASON_MAX} characters`,
       'any.required': 'Rejection reason is required',
     }),
-
-  rejected_by: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'rejected_by must be a valid UUID',
-    }),
-});
-
-/**
- * Admin verify/reject validation schema (alias endpoint)
- */
-export const adminVerifyAdmissionSchema = Joi.object({
-  verification_status: Joi.string()
-    .valid('verified', 'rejected')
-    .required()
-    .messages({
-      'any.only': 'verification_status must be either "verified" or "rejected"',
-      'any.required': 'verification_status is required',
-    }),
-
-  verified_by: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'verified_by must be a valid UUID',
-    }),
-
-  rejected_by: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'rejected_by must be a valid UUID',
-    }),
-
-  rejection_reason: Joi.string()
-    .min(FIELD_LIMITS.REJECTION_REASON_MIN)
-    .max(FIELD_LIMITS.REJECTION_REASON_MAX)
-    .when('verification_status', {
-      is: 'rejected',
-      then: Joi.required(),
-      otherwise: Joi.optional().allow(null, ''),
-    })
-    .messages({
-      'string.empty': 'Rejection reason is required',
-      'string.min': `Rejection reason must be at least ${FIELD_LIMITS.REJECTION_REASON_MIN} characters`,
-      'string.max': `Rejection reason must not exceed ${FIELD_LIMITS.REJECTION_REASON_MAX} characters`,
-      'any.required': 'Rejection reason is required',
-    }),
-
-  notes: Joi.string()
-    .max(FIELD_LIMITS.REJECTION_REASON_MAX)
-    .allow(null, '')
-    .optional(),
 });
 
 /**
@@ -292,6 +229,10 @@ export const admissionQuerySchema = Joi.object({
     .messages({
       'string.guid': 'created_by must be a valid UUID',
     }),
+  university_id: Joi.string().uuid().allow('').optional(),
+  include_closed: Joi.boolean().optional(),
+  deadline_from: Joi.date().iso().optional(),
+  deadline_to: Joi.date().iso().min(Joi.ref('deadline_from')).optional(),
 
   sort: Joi.string()
     .valid('created_at', 'updated_at', 'deadline', 'title', 'tuition_fee', 'verified_at')
@@ -309,17 +250,9 @@ export const admissionQuerySchema = Joi.object({
 });
 
 /**
- * Submit admission validation schema
+ * Submit admission validation schema (no body fields)
  */
-export const submitAdmissionSchema = Joi.object({
-  submitted_by: Joi.string()
-    .uuid()
-    .allow(null, '')
-    .optional()
-    .messages({
-      'string.guid': 'submitted_by must be a valid UUID',
-    }),
-});
+export const submitAdmissionSchema = Joi.object({});
 
 /**
  * UUID parameter validation schema

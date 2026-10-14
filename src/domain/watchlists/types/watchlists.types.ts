@@ -38,6 +38,8 @@ export interface WatchlistWithAdmission extends Watchlist {
  * Used for adding admissions to watchlist
  */
 export interface CreateWatchlistDTO {
+  /** Enable deadline reminders for this saved admission. */
+  alert_opt_in?: boolean;
   admission_id: string;
   notes?: string | null;
 }

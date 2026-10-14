@@ -18,6 +18,10 @@ import {
   uuidParamSchema,
 } from '../validators/admissions.validators';
 import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
+import { requireRole } from '@shared/middleware/jwtAuth';
+
+const managers = requireRole(['university', 'admin']);
+const adminOnly = requireRole(['admin']);
 
 const router: Router = Router();
 
@@ -279,6 +283,7 @@ router.get(
 // POST /api/v1/admissions - Create admission (university)
 router.post(
   '/',
+  managers,
   validateBody(createAdmissionSchema),
   admissionsController.createAdmission
 );
@@ -373,6 +378,7 @@ router.post(
 // PUT /api/v1/admissions/:id - Update admission (university)
 router.put(
   '/:id',
+  managers,
   validateParams(uuidParamSchema),
   validateBody(updateAdmissionSchema),
   admissionsController.updateAdmission
@@ -381,6 +387,7 @@ router.put(
 // DELETE /api/v1/admissions/:id - Delete admission (soft delete)
 router.delete(
   '/:id',
+  managers,
   validateParams(uuidParamSchema),
   admissionsController.deleteAdmission
 );
@@ -440,6 +447,7 @@ router.delete(
 // PATCH /api/v1/admissions/:id/submit - Submit admission (university - draft to pending)
 router.patch(
   '/:id/submit',
+  managers,
   validateParams(uuidParamSchema),
   validateBody(submitAdmissionSchema),
   admissionsController.submitAdmission
@@ -510,6 +518,7 @@ router.patch(
 // PATCH /api/v1/admissions/:id/verify - Verify admission (admin)
 router.patch(
   '/:id/verify',
+  adminOnly,
   validateParams(uuidParamSchema),
   validateBody(verifyAdmissionSchema),
   admissionsController.verifyAdmission
@@ -583,6 +592,7 @@ router.patch(
 // PATCH /api/v1/admissions/:id/reject - Reject admission (admin)
 router.patch(
   '/:id/reject',
+  adminOnly,
   validateParams(uuidParamSchema),
   validateBody(rejectAdmissionSchema),
   admissionsController.rejectAdmission
@@ -648,6 +658,7 @@ router.patch(
 // GET /api/v1/admissions/:id/changelogs - Get admission changelogs
 router.get(
   '/:id/changelogs',
+  managers,
   validateParams(uuidParamSchema),
   admissionsController.getChangelogs
 );
@@ -773,6 +784,7 @@ router.get(
 // POST /api/v1/admissions/parse-pdf - Parse PDF and extract data
 router.post(
   '/parse-pdf',
+  managers,
   upload.single('file'),
   admissionsController.parsePDF
 );

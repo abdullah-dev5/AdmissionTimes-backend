@@ -1,223 +1,83 @@
 /**
- * Main entry point for the AdmissionTimes backend application
- * 
- * This file initializes the Express server and sets up all middleware,
- * routes, and error handlers.
+ * Server bootstrap: database, HTTP server, background jobs, graceful shutdown.
  */
 
-// Type augmentation for Express Request (must be at top level)
-import { UserContext } from '@domain/admissions/types/admissions.types';
-
-declare global {
-  namespace Express {
-    interface Request {
-      /**
-       * User context attached by authentication middleware
-       * Populated from JWT token claims by jwtAuth middleware
-       */
-      user?: UserContext;
-    }
-  }
-}
-
-import express, { Application, Request, Response, NextFunction } from 'express';
-import cors from 'cors';
-import swaggerUi from 'swagger-ui-express';
+import '@shared/types/express';
 import { networkInterfaces } from 'os';
 import { config } from '@config/config';
-import { errorHandler } from '@shared/middleware/errorHandler';
-import { sendSuccess } from '@shared/utils/response';
 import { initializePool, testConnection, closePool } from '@db/connection';
-import { jwtAuth } from '@shared/middleware/jwtAuth';
-import { registerDomains } from '@domain/index';
-import { swaggerSpec } from '@config/swagger';
-import authRoutes from '@domain/auth/routes/auth.routes';
-import { initializeScheduler } from '@shared/scheduler';
+import { createApp } from './app';
+import { initializeScheduler, stopScheduler } from '@shared/scheduler';
 import { verifyEmailTransport, closeTransport } from '@domain/notifications/services/emailDelivery';
+import { createLogger } from '@shared/utils/logger';
 
-// Initialize Express application
-const app: Application = express();
+const log = createLogger('Server');
 
-// CORS configuration
-// Allow frontend to make requests from configured origin
-const corsOptions = {
-  origin: config.corsOrigin === '*' 
-    ? true // Allow all origins in development
-    : config.corsOrigin.split(',').map(origin => origin.trim()), // Support multiple origins
-  credentials: true, // Allow cookies/auth headers
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role', 'x-university-id'],
-  exposedHeaders: ['x-total-count', 'x-page', 'x-per-page'],
-};
+const lanHealthUrls = (port: number): string[] =>
+  Object.values(networkInterfaces())
+    .flatMap((addresses) => addresses ?? [])
+    .filter((address) => address.family === 'IPv4' && !address.internal)
+    .map((address) => `http://${address.address}:${port}/health`);
 
-// Middleware
-app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+const start = async (): Promise<void> => {
+  initializePool();
 
-// API Documentation (Swagger/OpenAPI)
-// Accessible at: http://localhost:3000/api-docs
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'AdmissionTimes API Documentation',
-  customfavIcon: '/favicon.ico',
-}));
-
-// Auth routes (public) - sign in/up must be accessible without JWT
-app.use('/api/v1/auth', authRoutes);
-
-// 🔐 REAL JWT AUTHENTICATION (Phase 4C-1)
-// All routes under /api/v1 require JWT except token-protected internal scraper routes.
-app.use('/api/v1', (req: Request, res: Response, next: NextFunction) => {
-  if (req.path.startsWith('/internal/scraper')) {
-    return next();
-  }
-  return jwtAuth(req, res, next);
-});
-
-/**
- * @swagger
- * /health:
- *   get:
- *     summary: Health check endpoint
- *     tags: [Health]
- *     description: Returns the health status of the API server
- *     responses:
- *       200:
- *         description: Server is healthy
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Success
- *                 data:
- *                   type: object
- *                   properties:
- *                     status:
- *                       type: string
- *                       example: ok
- *                     message:
- *                       type: string
- *                       example: AdmissionTimes backend is running
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- */
-app.get('/health', (_req: Request, res: Response) => {
-  sendSuccess(res, {
-    status: 'ok',
-    message: 'AdmissionTimes backend is running',
-  });
-});
-
-// Register all domain routes
-registerDomains(app);
-
-// 404 handler
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-    path: _req.originalUrl,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// Global error handler (must be last)
-app.use(errorHandler);
-
-// Initialize database connection
-initializePool();
-
-// Start server
-const PORT = config.port || 3000;
-const HOST = config.host || '0.0.0.0';
-
-const getLanUrls = () => {
-  const nets = networkInterfaces();
-  const urls: string[] = [];
-
-  Object.values(nets).forEach((addresses) => {
-    addresses?.forEach((address) => {
-      if (address.family === 'IPv4' && !address.internal) {
-        urls.push(`http://${address.address}:${PORT}/health`);
-      }
-    });
-  });
-
-  return urls;
-};
-
-const server = app.listen(PORT, HOST, async () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`🌐 Bind host: ${HOST}`);
-  console.log(`📍 Environment: ${config.env}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
-
-  if (config.ai.enabled) {
-    if (config.ai.geminiApiKey) {
-      console.log(`🤖 AI enabled: provider=${config.ai.provider}, model=${config.ai.geminiModel}`);
-    } else {
-      console.warn('⚠️  AI is enabled but GEMINI_API_KEY is missing. /api/v1/ai/* routes will fail.');
-    }
-  } else {
-    console.log('🤖 AI is disabled (set AI_ENABLED=true and GEMINI_API_KEY to enable).');
-  }
-
-  const lanUrls = getLanUrls();
-  if (lanUrls.length > 0) {
-    console.log('📱 LAN Health URLs (for mobile API_BASE_URL host):');
-    lanUrls.forEach((url) => console.log(`   - ${url}`));
-  }
-  
-  // Test database connection on startup
   const dbConnected = await testConnection();
   if (!dbConnected) {
-    console.error('⚠️  Warning: Database connection test failed. Some features may not work.');
-  }
-
-  // Verify SMTP readiness on startup (non-blocking for server boot)
-  try {
-    const emailReadiness = await verifyEmailTransport();
-    if (!emailReadiness.enabled) {
-      console.log('📧 Email delivery disabled by configuration.');
-    } else if (emailReadiness.ready) {
-      console.log('📧 Email transport is ready.');
-    } else {
-      console.warn(`⚠️  Email transport verification failed: ${emailReadiness.lastVerifyError || 'unknown error'}`);
+    if (config.isProduction) {
+      log.error('Database unreachable at startup; refusing to start in production');
+      process.exit(1);
     }
-  } catch (error) {
-    console.warn('⚠️  Email transport readiness check failed unexpectedly:', error);
+    log.warn('Database unreachable at startup; requests touching the DB will fail until it recovers');
   }
-  
-  // Initialize scheduled tasks
-  initializeScheduler();
-});
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully...');
-  server.close(async () => {
-    await closeTransport();
-    await closePool();
-    process.exit(0);
+  const app = createApp();
+  const server = app.listen(config.port, config.host, () => {
+    log.info(`Listening on ${config.host}:${config.port} (env=${config.env})`);
+    if (!config.isProduction) {
+      log.info(`Docs: http://localhost:${config.port}/api-docs`);
+      lanHealthUrls(config.port).forEach((url) => log.info(`LAN health URL: ${url}`));
+    }
+    if (config.ai.enabled && !config.ai.geminiApiKey) {
+      log.warn('AI is enabled but GEMINI_API_KEY is missing; /ai routes will return 503');
+    }
   });
+
+  verifyEmailTransport()
+    .then((status) => {
+      if (status.enabled && !status.ready) {
+        log.warn(`Email transport not ready: ${status.lastVerifyError || 'unknown error'}`);
+      }
+    })
+    .catch((error) => log.warn('Email transport check failed', (error as Error)?.message));
+
+  if (config.scheduler.enabled) {
+    initializeScheduler();
+  } else {
+    log.info('Scheduler disabled (SCHEDULER_ENABLED=false)');
+  }
+
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info(`${signal} received, shutting down`);
+    stopScheduler();
+    server.close(async () => {
+      await closeTransport().catch(() => undefined);
+      await closePool().catch(() => undefined);
+      process.exit(0);
+    });
+    // Force exit if connections do not drain in time.
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+};
+
+process.on('unhandledRejection', (reason) => {
+  log.error('Unhandled promise rejection', reason instanceof Error ? reason.message : reason);
 });
 
-process.on('SIGINT', async () => {
-  console.log('🛑 SIGINT received, shutting down gracefully...');
-  server.close(async () => {
-    await closeTransport();
-    await closePool();
-    process.exit(0);
-  });
-});
-
-export default app;
+void start();

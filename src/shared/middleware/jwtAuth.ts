@@ -1,425 +1,248 @@
 /**
- * JWT Authentication Middleware (Phase 1: JWKS Verification)
+ * JWT Authentication Middleware
  *
- * Validates Supabase JWT tokens with cryptographic signature verification.
- * Attaches user context from verified JWT claims to requests.
- * 
- * Features:
- * - JWKS signature verification (production-grade security)
- * - Fallback to dev mode (decode-only) if JWKS not available
- * - Token expiration checking
- * - Role-based access control support
- * - User metadata extraction (role, university_id)
+ * Identity comes from the Supabase access token (`sub`, `email`), whose
+ * signature is always verified. Authorization data (role, university_id,
+ * status) comes ONLY from the `users` table — never from token claims such as
+ * `user_metadata`, which end users can edit themselves.
  */
 
+import '../types/express';
 import { Request, Response, NextFunction } from 'express';
-import { verify, decode } from 'jsonwebtoken';
-import { JwksClient } from 'jwks-rsa';
-import createClient from 'jwks-rsa';
+import { verify, decode, JwtPayload, Algorithm } from 'jsonwebtoken';
+import createJwksClient, { JwksClient } from 'jwks-rsa';
 import { config } from '@config/config';
-import { UserContext } from '@domain/admissions/types/admissions.types';
 import { query } from '@db/connection';
+import { USER_TYPE, type UserType } from '@config/constants';
+import { UserContext } from '@domain/admissions/types/admissions.types';
+import { createLogger } from '@shared/utils/logger';
 
-/**
- * Extended JWT payload from Supabase Auth
- */
-interface SupabaseJwtPayload {
-  sub: string; // User ID (UUID)
-  exp?: number; // Expiration timestamp (seconds since epoch)
-  iat?: number; // Issued at timestamp
-  iss?: string; // Issuer
-  aud?: string; // Audience
-  role?: string; // Database role
-  email?: string; // User email
-  app_metadata?: {
-    provider?: string;
-    [key: string]: any;
-  };
-  user_metadata?: {
-    role?: 'student' | 'university' | 'admin';
-    university_id?: string;
-    [key: string]: any;
-  };
+const log = createLogger('Auth');
+
+interface SupabaseJwtPayload extends JwtPayload {
+  sub: string;
+  email?: string;
 }
 
-/**
- * Initialize JWKS client for Supabase
- * Cached to avoid multiple JWKS endpoint requests
- */
-let jwksClient: JwksClient;
+interface DbUserRow {
+  id: string;
+  role: UserType;
+  university_id: string | null;
+  status: string;
+  email: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Token verification
+// ---------------------------------------------------------------------------
+
+let jwksClient: JwksClient | null = null;
 
 const getJwksClient = (): JwksClient => {
+  if (!config.jwt.jwksUrl) {
+    throw new Error('JWKS URL is not configured (set SUPABASE_URL)');
+  }
   if (!jwksClient) {
-    const jwksUrl = config.jwt.jwksUrl || 'https://lufhgsgubvxjrrcsevte.supabase.co/.well-known/jwks.json';
-    jwksClient = createClient({
-      jwksUri: jwksUrl,
+    jwksClient = createJwksClient({
+      jwksUri: config.jwt.jwksUrl,
       cache: true,
-      cacheMaxAge: 86400000, // 24 hours
+      cacheMaxAge: 10 * 60 * 1000,
+      rateLimit: true,
+      jwksRequestsPerMinute: 10,
     });
   }
   return jwksClient;
 };
 
-/**
- * Extract JWT token from Authorization header
- *
- * Expected format: "Bearer <token>"
- *
- * @param req - Express request object
- * @returns JWT token or null if not found
- */
-const extractToken = (req: Request): string | null => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return null;
-  }
-
-  const parts = authHeader.split(' ');
-
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    return null;
-  }
-
-  return parts[1];
+export const extractBearerToken = (req: Request): string | null => {
+  const header = req.headers.authorization;
+  if (!header) return null;
+  const [scheme, token] = header.split(' ');
+  return scheme === 'Bearer' && token ? token : null;
 };
 
 /**
- * Decode JWT payload without verification (DEV MODE ONLY)
- * Used in development when signature verification is not available
+ * Verify a Supabase access token. Asymmetric tokens (with `kid`) are checked
+ * against the project JWKS; legacy HS256 tokens only against SUPABASE_JWT_SECRET.
  */
-const decodeJwtPayload = (token: string): SupabaseJwtPayload | null => {
-  try {
-    const decoded = decode(token) as SupabaseJwtPayload | null;
-    return decoded;
-  } catch (error) {
-    console.error('❌ Failed to decode JWT payload:', error);
-    return null;
-  }
-};
-
-/**
- * Ensure user exists in database (auto-sync from Supabase Auth)
- * Creates user if they exist in Supabase Auth but not in our users table
- * Returns the database user ID (not auth_user_id)
- * 
- * ENSURES ROLE CONSISTENCY:
- * - Supabase Auth is source of truth (immutable user_metadata)
- * - Database role is synced on every request
- * - If roles diverge, Supabase Auth takes precedence
- */
-const ensureUserExists = async (payload: SupabaseJwtPayload): Promise<string> => {
-  const authUserId = payload.sub;
-  const email = payload.email;
-  const userRole = payload.user_metadata?.role || 'student';
-
-  // Check if user exists and get their database ID
-  const checkSql = 'SELECT id, role FROM users WHERE auth_user_id = $1';
-  const result = await query(checkSql, [authUserId]);
-
-  if (result.rows.length > 0) {
-    // User exists - verify role consistency
-    const existingUser = result.rows[0];
-    
-    if (existingUser.role !== userRole) {
-      console.warn(
-        `⚠️ [ROLE-SYNC] Role mismatch detected for ${email}:`,
-        `DB: ${existingUser.role}, JWT: ${userRole}. Syncing to JWT value...`
-      );
-      
-      // Sync database role to match Supabase Auth (source of truth)
-      const syncSql = 'UPDATE users SET role = $1 WHERE id = $2';
-      await query(syncSql, [userRole, existingUser.id]);
-    }
-    
-    return existingUser.id;
+export const verifyAccessToken = async (token: string): Promise<SupabaseJwtPayload> => {
+  const decoded = decode(token, { complete: true });
+  if (!decoded || typeof decoded.payload === 'string') {
+    throw new Error('Malformed token');
   }
 
-  // User doesn't exist, create them
-  console.log(`🔄 [AUTO-SYNC] User ${email} exists in Supabase Auth but not in database. Creating...`);
+  const { kid, alg } = decoded.header;
+  const baseOptions = {
+    issuer: config.jwt.issuer || undefined,
+    audience: config.jwt.audience,
+    clockTolerance: config.jwt.clockToleranceSec,
+  };
 
-  const insertSql = `
-    INSERT INTO users (auth_user_id, email, role, display_name, status)
-    VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (auth_user_id) DO NOTHING
-    RETURNING id
-  `;
-
-  const displayName = email ? email.split('@')[0] : 'User';
-
-  const insertResult = await query(insertSql, [
-    authUserId,
-    email,
-    userRole,
-    displayName,
-    'active',
-  ]);
-
-  console.log(`✅ [AUTO-SYNC] Created user ${email} in database with role: ${userRole}`);
-  return insertResult.rows[0].id;
-};
-
-/**
- * Get signing key from JWKS endpoint
- */
-const getSigningKey = async (kid: string | undefined): Promise<string> => {
-  if (!kid) {
-    throw new Error('No key ID (kid) in JWT header');
-  }
-
-  const client = getJwksClient();
-  const key = await client.getSigningKey(kid);
-  return key.getPublicKey();
-};
-
-/**
- * Verify JWT signature with JWKS (PRODUCTION MODE)
- */
-const verifyJwtSignature = async (token: string): Promise<SupabaseJwtPayload> => {
-  try {
-    // Decode header to get kid
-    const decoded: any = decode(token, { complete: true });
-    if (!decoded || !decoded.header || !decoded.header.kid) {
-      throw new Error('Invalid JWT format or missing key ID');
-    }
-
-    // Get signing key from JWKS
-    const signingKey = await getSigningKey(decoded.header.kid);
-
-    // Verify signature
-    const verified = verify(token, signingKey, {
-      algorithms: ['RS256', 'HS256'],
-      issuer: config.jwt.issuer,
-      audience: config.jwt.audience,
-    }) as SupabaseJwtPayload;
-
-    return verified;
-  } catch (error: any) {
-    console.error('❌ JWT signature verification failed:', error.message);
-    throw new Error(`JWT verification failed: ${error.message}`);
-  }
-};
-
-/**
- * JWT Authentication Middleware (Required)
- *
- * Validates JWT token with signature verification and attaches user context to request.
- * Returns 401 if token is missing, invalid, or expired.
- *
- * Production: Uses JWKS for RS256 signature verification
- * Development: Falls back to decode-only if JWKS unavailable
- *
- * Usage:
- * app.use('/api/v1', jwtAuth); // All routes under /api/v1 require auth
- */
-export const jwtAuth = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  const token = extractToken(req);
-
-  if (!token) {
-    res.status(401).json({
-      success: false,
-      message: 'Authentication required',
-      errors: {
-        auth: 'Missing or invalid Authorization header. Expected format: Bearer <token>',
-      },
-      timestamp: new Date().toISOString(),
+  let payload: string | JwtPayload;
+  if (kid) {
+    const key = await getJwksClient().getSigningKey(kid);
+    payload = verify(token, key.getPublicKey(), {
+      ...baseOptions,
+      algorithms: [...config.jwt.algorithms] as Algorithm[],
     });
+  } else if (alg === 'HS256' && config.supabase.jwtSecret) {
+    payload = verify(token, config.supabase.jwtSecret, { ...baseOptions, algorithms: ['HS256'] });
+  } else {
+    throw new Error('Unsupported token signature');
+  }
+
+  if (typeof payload === 'string' || !payload.sub) {
+    throw new Error('Token has no subject');
+  }
+  return payload as SupabaseJwtPayload;
+};
+
+// ---------------------------------------------------------------------------
+// User resolution (database is the source of truth for authorization)
+// ---------------------------------------------------------------------------
+
+const USER_CACHE_TTL_MS = 30_000;
+const userCache = new Map<string, { user: DbUserRow; expiresAt: number }>();
+
+/** Drop cached auth data for a user after role/status/university changes. */
+export const invalidateAuthCache = (authUserId?: string | null): void => {
+  if (authUserId) userCache.delete(authUserId);
+  else userCache.clear();
+};
+
+const USER_COLUMNS = 'id::text AS id, role, university_id::text AS university_id, status, email';
+
+const findByAuthUserId = async (authUserId: string): Promise<DbUserRow | null> => {
+  const result = await query(`SELECT ${USER_COLUMNS} FROM users WHERE auth_user_id = $1`, [authUserId]);
+  return result.rows[0] || null;
+};
+
+/**
+ * First authenticated request for a Supabase user: link a pre-existing
+ * profile with the same email (legacy rows without auth_user_id), otherwise
+ * create a student profile. Self-service accounts are always students;
+ * university and admin accounts are provisioned by admins.
+ */
+const provisionUser = async (payload: SupabaseJwtPayload): Promise<DbUserRow> => {
+  const email = payload.email?.trim().toLowerCase() || null;
+
+  if (email) {
+    const linked = await query(
+      `UPDATE users SET auth_user_id = $1, updated_at = NOW()
+       WHERE lower(email) = $2 AND auth_user_id IS NULL AND role <> 'admin'
+       RETURNING ${USER_COLUMNS}`,
+      [payload.sub, email]
+    );
+    if (linked.rows[0]) {
+      log.info(`Linked existing profile ${linked.rows[0].id} to auth user`);
+      return linked.rows[0];
+    }
+  }
+
+  const displayName = (payload.user_metadata?.display_name as string | undefined)?.trim() || email?.split('@')[0] || 'User';
+
+  try {
+    await query(
+      `INSERT INTO users (auth_user_id, email, role, display_name, status)
+       VALUES ($1, $2, $3, $4, 'active')
+       ON CONFLICT (auth_user_id) DO NOTHING`,
+      [payload.sub, email, USER_TYPE.STUDENT, displayName]
+    );
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      // Email already belongs to a different auth identity.
+      throw Object.assign(new Error('This email is linked to another account'), { status: 409 });
+    }
+    throw error;
+  }
+
+  const created = await findByAuthUserId(payload.sub);
+  if (!created) throw new Error('Failed to provision user profile');
+  log.info(`Provisioned student profile ${created.id}`);
+  return created;
+};
+
+const resolveUser = async (payload: SupabaseJwtPayload): Promise<DbUserRow> => {
+  const cached = userCache.get(payload.sub);
+  if (cached && cached.expiresAt > Date.now()) return cached.user;
+
+  const user = (await findByAuthUserId(payload.sub)) || (await provisionUser(payload));
+  userCache.set(payload.sub, { user, expiresAt: Date.now() + USER_CACHE_TTL_MS });
+  return user;
+};
+
+// ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
+
+const deny = (res: Response, status: number, message: string, detail?: string): void => {
+  res.status(status).json({
+    success: false,
+    message,
+    ...(detail ? { errors: { auth: detail } } : {}),
+    timestamp: new Date().toISOString(),
+  });
+};
+
+/**
+ * Require a valid Supabase access token and attach `req.user`.
+ */
+export const jwtAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const token = extractBearerToken(req);
+  if (!token) {
+    deny(res, 401, 'Authentication required', 'Missing Authorization: Bearer <token> header');
+    return;
+  }
+
+  let payload: SupabaseJwtPayload;
+  try {
+    payload = await verifyAccessToken(token);
+  } catch (error: any) {
+    const expired = error?.name === 'TokenExpiredError';
+    log.debug(`Token rejected: ${error?.message}`);
+    deny(res, 401, expired ? 'Token expired' : 'Invalid authentication token', expired ? 'Your session has expired. Please sign in again.' : undefined);
     return;
   }
 
   try {
-    let payload: SupabaseJwtPayload;
-
-    // Try JWKS verification (production)
-    if (config.env === 'production') {
-      console.log('🔐 [PROD] Verifying JWT signature with JWKS...');
-      payload = await verifyJwtSignature(token);
-    } else {
-      // Development: Try JWKS first, fall back to decode-only
-      try {
-        console.log('🔐 [DEV] Attempting JWKS verification...');
-        payload = await verifyJwtSignature(token);
-      } catch (jwksError) {
-        console.warn('⚠️ [DEV] JWKS verification failed, falling back to decode-only:', jwksError);
-        const decodedPayload = decodeJwtPayload(token);
-        if (!decodedPayload || !decodedPayload.sub) {
-          throw new Error('Failed to decode JWT or extract user ID');
-        }
-        payload = decodedPayload;
-      }
-    }
-
-    // Check if token is expired
-    const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) {
-      res.status(401).json({
-        success: false,
-        message: 'Token expired',
-        errors: {
-          auth: 'Your session has expired. Please log in again.',
-        },
-        timestamp: new Date().toISOString(),
-      });
+    const user = await resolveUser(payload);
+    if (user.status !== 'active') {
+      deny(res, 403, 'Account suspended', 'Contact an administrator to restore access.');
       return;
     }
 
-    // Auto-sync user from Supabase Auth to database if needed
-    // This returns the database user ID (not auth_user_id)
-    const databaseUserId = await ensureUserExists(payload);
-
-    // Extract user context from verified token
-    const userRole = payload.user_metadata?.role || 'student';
-    let universityId = payload.user_metadata?.university_id || null;
-    const email = payload.email || null;
-
-    // For university users, fetch their university_id from database if university_id is missing
-    if (userRole === 'university' && !universityId && databaseUserId) {
-      const userSql = 'SELECT university_id::text as university_id FROM users WHERE id = $1';
-      const userResult = await query(userSql, [databaseUserId]);
-      if (userResult.rows.length > 0 && userResult.rows[0].university_id) {
-        universityId = userResult.rows[0].university_id;
-        console.log(`🔄 [JWT] Using database university_id for university user ${email}: ${universityId}`);
-      }
-    }
-
     req.user = {
-      id: databaseUserId, // Use database ID, not Supabase auth_user_id
-      role: userRole as 'student' | 'university' | 'admin',
-      university_id: universityId,
-      email: email,
-    } as UserContext;
-
-    console.log('✅ [JWT] User authenticated:', { 
-      userId: databaseUserId, 
-      userRole,
-      email,
-      endpoint: req.path,
-      method: req.method,
-      authUserId: payload.sub,
-    });
-    console.log('✅ [JWT] Full JWT payload:', {
-      sub: payload.sub,
-      email: payload.email,
-      iat: payload.iat,
-      exp: payload.exp,
-      user_metadata: payload.user_metadata,
-      app_metadata: payload.app_metadata,
-    });
+      id: user.id,
+      role: user.role,
+      university_id: user.university_id,
+      email: user.email || payload.email || null,
+      auth_user_id: payload.sub,
+    };
     next();
   } catch (error: any) {
-    console.error('❌ JWT validation error:', error.message);
-    res.status(401).json({
-      success: false,
-      message: 'Invalid authentication token',
-      errors: {
-        auth: error.message || 'Token validation failed',
-      },
-      timestamp: new Date().toISOString(),
-    });
+    if (error?.status === 409) {
+      deny(res, 409, error.message);
+      return;
+    }
+    next(error);
   }
 };
 
-/**
- * Optional JWT Authentication Middleware
- *
- * Attempts to validate JWT token if present, but allows request to proceed
- * even if token is missing or invalid. Useful for public endpoints that
- * behave differently for authenticated users.
- */
-export const optionalJwtAuth = async (
-  req: Request,
-  _res: Response,
-  next: NextFunction
-): Promise<void> => {
-  const token = extractToken(req);
-
-  if (!token) {
-    // No token - continue as guest
-    req.user = {
-      id: null,
-      role: 'guest',
-      university_id: null,
-    } as UserContext;
-    next();
-    return;
-  }
-
-  try {
-    let payload: SupabaseJwtPayload | null = null;
-
-    // Try to verify JWT
-    try {
-      payload = await verifyJwtSignature(token);
-    } catch {
-      // Fall back to decode-only
-      payload = decodeJwtPayload(token);
-    }
-
-    if (!payload || !payload.sub) {
-      throw new Error('Invalid token payload');
-    }
-
-    // Check expiration
-    const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) {
-      throw new Error('Token expired');
-    }
-
-    // Token is valid - attach user
-    req.user = {
-      id: payload.sub,
-      role: payload.user_metadata?.role || 'student',
-      university_id: payload.user_metadata?.university_id || null,
-      email: payload.email || null,
-    } as UserContext;
-
-    console.log('✅ Optional auth succeeded:', req.user.id);
-  } catch (error) {
-    console.warn('⚠️ Optional auth failed, continuing as guest');
-    // Error decoding token - continue as guest
-    req.user = {
-      id: null,
-      role: 'guest',
-      university_id: null,
-    } as UserContext;
-  }
-
-  next();
-};
+type AllowedRole = Exclude<UserContext['role'], 'guest'>;
 
 /**
- * Role-based Access Control Middleware Factory
- *
- * Creates middleware that checks if user has required role(s).
- * Must be used AFTER jwtAuth middleware.
+ * Restrict a route to specific roles. Must run after authentication.
  */
-export const requireRole = (allowedRoles: Array<'student' | 'university' | 'admin'>) => {
+export const requireRole = (allowedRoles: AllowedRole[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (!req.user) {
-      res.status(401).json({
-        success: false,
-        message: 'Authentication required',
-        timestamp: new Date().toISOString(),
-      });
+    if (!req.user?.id) {
+      deny(res, 401, 'Authentication required');
       return;
     }
-
-    if (!allowedRoles.includes(req.user.role as any)) {
-      res.status(403).json({
-        success: false,
-        message: 'Insufficient permissions',
-        errors: {
-          role: `This endpoint requires one of: ${allowedRoles.join(', ')}. Your role: ${req.user.role}`,
-        },
-        timestamp: new Date().toISOString(),
-      });
+    if (!allowedRoles.includes(req.user.role as AllowedRole)) {
+      deny(res, 403, 'Insufficient permissions', `Requires one of: ${allowedRoles.join(', ')}`);
       return;
     }
-
     next();
   };
 };

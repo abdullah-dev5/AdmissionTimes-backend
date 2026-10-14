@@ -7,6 +7,7 @@
 
 import { query } from '@db/connection';
 import { Recommendation, CreateRecommendationDTO, RecommendationWithAdmission } from '../types/recommendations.types';
+import { getRecommendationExpiresAt } from '../recommendations.constants';
 
 /**
  * Find recommendations for a user
@@ -27,6 +28,10 @@ export const findByUserId = async (
       json_build_object(
         'id', a.id,
         'university_id', a.university_id,
+        'university_name', u.name,
+        'university_logo_url', u.logo_url,
+        'university_city', u.city,
+        'university_country', u.country,
         'program_name', a.title,
         'degree_level', a.degree_level,
         'status', a.verification_status,
@@ -35,6 +40,7 @@ export const findByUserId = async (
       ) as admission
     FROM recommendations r
     INNER JOIN admissions a ON r.admission_id = a.id
+    LEFT JOIN universities u ON u.id = a.university_id
     WHERE r.user_id = $1
       AND r.score >= $2
       AND r.expires_at > NOW()
@@ -55,7 +61,7 @@ export const findByUserId = async (
  * @returns Created recommendation
  */
 export const create = async (data: CreateRecommendationDTO): Promise<Recommendation> => {
-  const expiresAt = data.expires_at || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days default
+  const expiresAt = data.expires_at || getRecommendationExpiresAt();
 
   const sql = `
     INSERT INTO recommendations (user_id, admission_id, score, reason, factors, expires_at)
@@ -96,7 +102,7 @@ export const bulkCreate = async (recommendations: CreateRecommendationDTO[]): Pr
   let paramIndex = 1;
 
   recommendations.forEach((rec) => {
-    const expiresAt = rec.expires_at || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const expiresAt = rec.expires_at || getRecommendationExpiresAt();
     placeholders.push(
       `($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5})`
     );

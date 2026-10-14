@@ -1,366 +1,104 @@
 /**
- * Admissions Domain - Controller Layer
- * 
- * HTTP request/response handlers for admissions endpoints.
- * 
- * Responsibilities:
- * - Extract request data (body, params, query)
- * - Call service methods
- * - Format responses using sendSuccess(), sendError(), sendPaginated()
- * - Set appropriate HTTP status codes
- * - Handle async errors with try-catch
- * 
- * NO business logic - that belongs in the service layer.
+ * Admissions Domain - Controllers (HTTP only; rules live in the services)
  */
 
-import { Request, Response, NextFunction } from 'express';
-import { sendSuccess, sendPaginated, sendError } from '@shared/utils/response';
+import { Request, Response } from 'express';
+import { sendSuccess, sendPaginated } from '@shared/utils/response';
+import { AppError } from '@shared/middleware/errorHandler';
+import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import * as admissionsService from '../services/admissions.service';
 import { parsePDFAndExtract } from '../services/pdf.service';
-import { calculatePagination, parsePagination } from '@shared/utils/pagination';
+import * as moderationService from '@domain/admin/services/admin.service';
+import { getByAdmissionId } from '@domain/deadlines/services/deadlines.service';
 import {
   CreateAdmissionDTO,
   UpdateAdmissionDTO,
-  VerifyAdmissionDTO,
   RejectAdmissionDTO,
-  SubmitAdmissionDTO,
-  AdminVerifyAdmissionDTO,
+  VerifyAdmissionDTO,
   AdmissionQueryParams,
-  UserContext,
 } from '../types/admissions.types';
+import type { AuthenticatedUserContext } from '@shared/types/auth';
 
-/**
- * Get single admission by ID
- * 
- * GET /api/v1/admissions/:id
- */
-export const getAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const userContext = req.user as UserContext | undefined;
+const PDF_MAGIC = Buffer.from('%PDF-');
 
-    const admission = await admissionsService.getById(id, userContext);
-
-    sendSuccess(res, admission, 'Admission retrieved successfully');
-  } catch (error) {
-    next(error);
-  }
+export const getAdmission = async (req: Request, res: Response): Promise<void> => {
+  const admission = await admissionsService.getById(req.params.id, req.user);
+  sendSuccess(res, admission, 'Admission retrieved successfully');
 };
 
-/**
- * Get multiple admissions with filters and pagination
- * 
- * GET /api/v1/admissions
- */
-export const getAdmissions = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const queryParams = req.validated as AdmissionQueryParams;
-    const userContext = req.user as UserContext | undefined;
-
-    // Parse pagination
-    const { page, limit } = parsePagination({
-      page: queryParams.page,
-      limit: queryParams.limit,
-    });
-
-    // Extract filters
-    const filters = {
-      search: queryParams.search,
-      program_type: queryParams.program_type,
-      degree_level: queryParams.degree_level,
-      field_of_study: queryParams.field_of_study,
-      location: queryParams.location,
-      delivery_mode: queryParams.delivery_mode,
-      verification_status: queryParams.verification_status,
-      created_by: queryParams.created_by,
-    };
-
-    // Extract sort and order
-    const sort = queryParams.sort || 'created_at';
-    const order = queryParams.order || 'desc';
-
-    // Get admissions
-    const { admissions, total } = await admissionsService.getMany(
-      filters,
-      page,
-      limit,
-      sort,
-      order,
-      userContext
-    );
-
-    // Calculate pagination metadata
-    const pagination = calculatePagination(total, page, limit);
-
-    sendPaginated(res, admissions, pagination, 'Success');
-  } catch (error) {
-    next(error);
-  }
+export const getAdmissions = async (req: Request, res: Response): Promise<void> => {
+  const params = req.validated as AdmissionQueryParams;
+  const { page, limit } = parsePagination({ page: params.page, limit: params.limit });
+  const { admissions, total } = await admissionsService.getMany(params, page, limit, req.user);
+  sendPaginated(res, admissions, calculatePagination(total, page, limit));
 };
 
-/**
- * Create a new admission
- * 
- * POST /api/v1/admissions
- */
-export const createAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const data = req.validated as CreateAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.create(data, userContext);
-
-    sendSuccess(res, admission, 'Admission created successfully', 201);
-  } catch (error) {
-    next(error);
-  }
+export const createAdmission = async (req: Request, res: Response): Promise<void> => {
+  const admission = await admissionsService.create(req.validated as CreateAdmissionDTO, req.user);
+  sendSuccess(res, admission, 'Admission created successfully', 201);
 };
 
-/**
- * Update an existing admission
- * 
- * PUT /api/v1/admissions/:id
- */
-export const updateAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as UpdateAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.update(id, data, userContext);
-
-    sendSuccess(res, admission, 'Admission updated successfully');
-  } catch (error) {
-    next(error);
-  }
+export const updateAdmission = async (req: Request, res: Response): Promise<void> => {
+  const admission = await admissionsService.update(req.params.id, req.validated as UpdateAdmissionDTO, req.user);
+  sendSuccess(res, admission, 'Admission updated successfully');
 };
 
-/**
- * Verify an admission (admin only)
- * 
- * PATCH /api/v1/admissions/:id/verify
- */
-export const verifyAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as VerifyAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.verify(id, data, userContext);
-
-    sendSuccess(res, admission, 'Admission verified successfully');
-  } catch (error) {
-    next(error);
-  }
+export const submitAdmission = async (req: Request, res: Response): Promise<void> => {
+  const admission = await admissionsService.submit(req.params.id, req.user);
+  sendSuccess(res, admission, 'Admission submitted for verification');
 };
 
-/**
- * Reject an admission (admin only)
- * 
- * PATCH /api/v1/admissions/:id/reject
- */
-export const rejectAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as RejectAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.reject(id, data, userContext);
-
-    sendSuccess(res, admission, 'Admission rejected successfully');
-  } catch (error) {
-    next(error);
-  }
+/** Legacy alias for POST /admin/admissions/:id/verify (admin-only route). */
+export const verifyAdmission = async (req: Request, res: Response): Promise<void> => {
+  const data = (req.validated || {}) as VerifyAdmissionDTO;
+  const admission = await moderationService.verifyAdmission(
+    req.params.id,
+    { verification_status: 'verified', admin_notes: data.notes || undefined },
+    req.user as AuthenticatedUserContext
+  );
+  sendSuccess(res, admission, 'Admission verified successfully');
 };
 
-/**
- * Submit an admission (university only)
- *
- * PATCH /api/v1/admissions/:id/submit
- */
-export const submitAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as SubmitAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.submit(id, data, userContext);
-
-    sendSuccess(res, admission, 'Admission submitted successfully');
-  } catch (error) {
-    next(error);
-  }
+/** Legacy alias for POST /admin/admissions/:id/verify with status=rejected. */
+export const rejectAdmission = async (req: Request, res: Response): Promise<void> => {
+  const data = req.validated as RejectAdmissionDTO;
+  const admission = await moderationService.verifyAdmission(
+    req.params.id,
+    { verification_status: 'rejected', rejection_reason: data.rejection_reason },
+    req.user as AuthenticatedUserContext
+  );
+  sendSuccess(res, admission, 'Admission rejected successfully');
 };
 
-/**
- * Admin verify/reject admission (alias endpoint)
- * 
- * POST /api/v1/admin/admissions/:id/verify
- */
-export const adminVerifyAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const data = req.validated as AdminVerifyAdmissionDTO;
-    const userContext = req.user as UserContext | undefined;
-
-    if (data.verification_status === 'rejected') {
-      const admission = await admissionsService.reject(
-        id,
-        {
-          rejection_reason: data.rejection_reason || 'Rejected by admin',
-          rejected_by: data.rejected_by,
-        },
-        userContext
-      );
-      sendSuccess(res, admission, 'Admission rejected successfully');
-      return;
-    }
-
-    const admission = await admissionsService.verify(
-      id,
-      { verified_by: data.verified_by },
-      userContext
-    );
-
-    sendSuccess(res, admission, 'Admission verified successfully');
-  } catch (error) {
-    next(error);
-  }
+export const deleteAdmission = async (req: Request, res: Response): Promise<void> => {
+  const admission = await admissionsService.remove(req.params.id, req.user);
+  sendSuccess(res, admission, 'Admission deleted successfully');
 };
 
-/**
- * Delete an admission (soft delete)
- * 
- * DELETE /api/v1/admissions/:id
- */
-export const deleteAdmission = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const userContext = req.user as UserContext | undefined;
-
-    const admission = await admissionsService.remove(id, userContext);
-
-    sendSuccess(res, admission, 'Admission deleted successfully');
-  } catch (error) {
-    next(error);
-  }
+export const getChangelogs = async (req: Request, res: Response): Promise<void> => {
+  const { page, limit } = parsePagination({
+    page: Number(req.query.page) || undefined,
+    limit: Number(req.query.limit) || undefined,
+  });
+  const { changelogs, total } = await admissionsService.getChangelogs(req.params.id, page, limit, req.user);
+  sendPaginated(res, changelogs, calculatePagination(total, page, limit));
 };
 
-/**
- * Get changelogs for an admission
- * 
- * GET /api/v1/admissions/:id/changelogs
- */
-export const getChangelogs = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const queryParams = req.query as { page?: number; limit?: number };
-    const userContext = req.user as UserContext | undefined;
-
-    // Parse pagination
-    const { page, limit } = parsePagination({
-      page: queryParams.page,
-      limit: queryParams.limit,
-    });
-
-    // Get changelogs
-    const { changelogs, total } = await admissionsService.getChangelogs(id, page, limit, userContext);
-
-    // Calculate pagination metadata
-    const pagination = calculatePagination(total, page, limit);
-
-    sendPaginated(res, changelogs, pagination, 'Success');
-  } catch (error) {
-    next(error);
-  }
+export const getAdmissionDeadlines = async (req: Request, res: Response): Promise<void> => {
+  // Same visibility rules as the admission itself.
+  await admissionsService.getById(req.params.id, req.user);
+  const deadlines = await getByAdmissionId(req.params.id);
+  sendSuccess(res, deadlines, 'Deadlines retrieved successfully');
 };
 
-/**
- * Get deadlines for an admission
- * 
- * GET /api/v1/admissions/:id/deadlines
- */
-export const getAdmissionDeadlines = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { id } = req.params;
-
-    // Import deadlines service
-    const { getByAdmissionId } = await import('@domain/deadlines/services/deadlines.service');
-    const deadlines = await getByAdmissionId(id);
-
-    sendSuccess(res, deadlines, 'Deadlines retrieved successfully');
-  } catch (error) {
-    next(error);
+export const parsePDF = async (req: Request, res: Response): Promise<void> => {
+  const file = req.file;
+  if (!file) {
+    throw new AppError('PDF file is required', 400, true, { file: 'PDF file is required' });
   }
-};
-
-/**
- * Parse PDF and extract admission data
- * 
- * POST /api/v1/admissions/parse-pdf
- */
-export const parsePDF = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const file = req.file;
-
-    if (!file) {
-      sendError(res, 'PDF file is required', 400, { file: 'PDF file is required' });
-      return;
-    }
-
-    // Parse PDF and extract data
-    const extractedData = await parsePDFAndExtract(file.buffer);
-
-    sendSuccess(res, extractedData, 'PDF parsed successfully');
-  } catch (error) {
-    next(error);
+  if (!file.buffer.subarray(0, PDF_MAGIC.length).equals(PDF_MAGIC)) {
+    throw new AppError('Uploaded file is not a valid PDF', 400, true, { file: 'Not a PDF document' });
   }
+  const extractedData = await parsePDFAndExtract(file.buffer);
+  sendSuccess(res, extractedData, 'PDF parsed successfully');
 };

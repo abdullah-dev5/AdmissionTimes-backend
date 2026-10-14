@@ -1,329 +1,136 @@
 /**
- * Scheduled Tasks Module
- * 
- * Manages periodic background jobs for the application.
- * Uses node-cron for production-grade scheduling.
- * 
- * Jobs:
- * - Generate recommendations (daily at 2 AM)
- * - Clean up expired recommendations (daily at 3 AM)
- * - Send deadline reminders (every hour at minute 5)
+ * Scheduled Tasks
+ *
+ * Background jobs run in-process with node-cron. Each job is guarded against
+ * overlapping runs and records health metrics for /api/v1/scheduler/health.
+ *
+ * Run the scheduler in exactly ONE process (SCHEDULER_ENABLED=false on extra
+ * API replicas); notification event keys make reminder dispatch idempotent,
+ * but other jobs would still do duplicate work.
  */
 
+import * as cron from 'node-cron';
 import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
 import * as deadlinesService from '@domain/deadlines/services/deadlines.service';
 import * as notificationsService from '@domain/notifications/services/notifications.service';
-import * as cron from 'node-cron';
+import { createLogger } from '@shared/utils/logger';
 
-/**
- * Runtime metrics for scheduler health monitoring
- */
+const log = createLogger('Scheduler');
+
 interface JobMetrics {
   lastRunAt: string | null;
   lastDurationMs: number | null;
-  lastStatus: 'success' | 'error' | null;
+  lastStatus: 'success' | 'error' | 'skipped' | null;
   totalRuns: number;
   totalFailures: number;
   lastError: string | null;
+  lastResult: unknown;
 }
 
-interface SchedulerMetrics {
-  recommendationGeneration: JobMetrics;
-  recommendationCleanup: JobMetrics;
-  deadlineReminders: JobMetrics;
-  emailRetryDispatch: JobMetrics;
-}
+type JobName =
+  | 'recommendationGeneration'
+  | 'recommendationCleanup'
+  | 'deadlineReminders'
+  | 'emailRetryDispatch';
 
-const schedulerMetrics: SchedulerMetrics = {
-  recommendationGeneration: {
-    lastRunAt: null,
-    lastDurationMs: null,
-    lastStatus: null,
-    totalRuns: 0,
-    totalFailures: 0,
-    lastError: null,
-  },
-  recommendationCleanup: {
-    lastRunAt: null,
-    lastDurationMs: null,
-    lastStatus: null,
-    totalRuns: 0,
-    totalFailures: 0,
-    lastError: null,
-  },
-  deadlineReminders: {
-    lastRunAt: null,
-    lastDurationMs: null,
-    lastStatus: null,
-    totalRuns: 0,
-    totalFailures: 0,
-    lastError: null,
-  },
-  emailRetryDispatch: {
-    lastRunAt: null,
-    lastDurationMs: null,
-    lastStatus: null,
-    totalRuns: 0,
-    totalFailures: 0,
-    lastError: null,
-  },
+const newMetrics = (): JobMetrics => ({
+  lastRunAt: null,
+  lastDurationMs: null,
+  lastStatus: null,
+  totalRuns: 0,
+  totalFailures: 0,
+  lastError: null,
+  lastResult: null,
+});
+
+const schedulerMetrics: Record<JobName, JobMetrics> = {
+  recommendationGeneration: newMetrics(),
+  recommendationCleanup: newMetrics(),
+  deadlineReminders: newMetrics(),
+  emailRetryDispatch: newMetrics(),
 };
 
-/**
- * Get current scheduler health metrics
- */
-export const getSchedulerMetrics = (): SchedulerMetrics => {
-  return { ...schedulerMetrics };
-};
+const running = new Set<JobName>();
+const tasks: cron.ScheduledTask[] = [];
+const timers: NodeJS.Timeout[] = [];
+
+export const getSchedulerMetrics = (): Record<JobName, JobMetrics> => ({ ...schedulerMetrics });
 
 /**
- * Generate recommendations for all users
- * Runs daily to keep recommendations fresh
+ * Run a job with overlap protection and metrics. Never throws.
  */
-export const runRecommendationGeneration = async (): Promise<void> => {
-  const startTime = Date.now();
-  console.log('[Scheduler] Starting recommendation generation...');
-  
-  schedulerMetrics.recommendationGeneration.totalRuns += 1;
-  schedulerMetrics.recommendationGeneration.lastRunAt = new Date().toISOString();
+const runJob = async (name: JobName, work: () => Promise<unknown>): Promise<void> => {
+  const metrics = schedulerMetrics[name];
+
+  if (running.has(name)) {
+    metrics.lastStatus = 'skipped';
+    log.warn(`${name} skipped: previous run still in progress`);
+    return;
+  }
+
+  running.add(name);
+  const startedAt = Date.now();
+  metrics.totalRuns += 1;
+  metrics.lastRunAt = new Date(startedAt).toISOString();
 
   try {
-    const result = await recommendationsService.generateRecommendationsForAllUsers(50);
-    const durationMs = Date.now() - startTime;
-
-    schedulerMetrics.recommendationGeneration.lastStatus = 'success';
-    schedulerMetrics.recommendationGeneration.lastDurationMs = durationMs;
-    schedulerMetrics.recommendationGeneration.lastError = null;
-
-    console.log(
-      `[Scheduler] ✅ Recommendation generation complete: ${result.usersProcessed} users, ${result.recommendationsCreated} recommendations (${durationMs}ms)`
-    );
+    const result = await work();
+    metrics.lastStatus = 'success';
+    metrics.lastError = null;
+    metrics.lastResult = result ?? null;
+    log.info(`${name} completed in ${Date.now() - startedAt}ms`, result ?? '');
   } catch (error) {
-    const durationMs = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    schedulerMetrics.recommendationGeneration.lastStatus = 'error';
-    schedulerMetrics.recommendationGeneration.lastDurationMs = durationMs;
-    schedulerMetrics.recommendationGeneration.totalFailures += 1;
-    schedulerMetrics.recommendationGeneration.lastError = errorMessage;
-
-    console.error('[Scheduler] ❌ Recommendation generation failed:', error);
+    metrics.lastStatus = 'error';
+    metrics.totalFailures += 1;
+    metrics.lastError = error instanceof Error ? error.message : String(error);
+    log.error(`${name} failed`, metrics.lastError);
+  } finally {
+    metrics.lastDurationMs = Date.now() - startedAt;
+    running.delete(name);
   }
 };
 
-/**
- * Clean up expired recommendations
- * Runs daily to keep the database clean
- */
-export const runRecommendationCleanup = async (): Promise<void> => {
-  const startTime = Date.now();
-  console.log('[Scheduler] Starting recommendation cleanup...');
-  
-  schedulerMetrics.recommendationCleanup.totalRuns += 1;
-  schedulerMetrics.recommendationCleanup.lastRunAt = new Date().toISOString();
+export const runRecommendationGeneration = (): Promise<void> =>
+  runJob('recommendationGeneration', () => recommendationsService.generateRecommendationsForAllUsers(50));
 
-  try {
-    const count = await recommendationsService.cleanupExpiredRecommendations();
-    const durationMs = Date.now() - startTime;
+export const runRecommendationCleanup = (): Promise<void> =>
+  runJob('recommendationCleanup', async () => ({
+    deleted: await recommendationsService.cleanupExpiredRecommendations(),
+  }));
 
-    schedulerMetrics.recommendationCleanup.lastStatus = 'success';
-    schedulerMetrics.recommendationCleanup.lastDurationMs = durationMs;
-    schedulerMetrics.recommendationCleanup.lastError = null;
+export const runDeadlineReminderDispatch = (): Promise<void> =>
+  runJob('deadlineReminders', () => deadlinesService.triggerDeadlineReminderNotifications([7, 3, 1]));
 
-    console.log(`[Scheduler] ✅ Cleanup complete: ${count} expired recommendations deleted (${durationMs}ms)`);
-  } catch (error) {
-    const durationMs = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    schedulerMetrics.recommendationCleanup.lastStatus = 'error';
-    schedulerMetrics.recommendationCleanup.lastDurationMs = durationMs;
-    schedulerMetrics.recommendationCleanup.totalFailures += 1;
-    schedulerMetrics.recommendationCleanup.lastError = errorMessage;
-
-    console.error('[Scheduler] ❌ Cleanup failed:', error);
-  }
-};
+export const runEmailRetryDispatch = (): Promise<void> =>
+  runJob('emailRetryDispatch', () =>
+    notificationsService.processEmailRetries({ limit: 50, maxFailedAttempts: 6, minAgeSeconds: 60 })
+  );
 
 /**
- * Trigger deadline reminders for threshold days (7, 3, 1)
- * Runs hourly to ensure timely dispatch.
- */
-export const runDeadlineReminderDispatch = async (): Promise<void> => {
-  const startTime = Date.now();
-  console.log('[Scheduler] Starting deadline reminder dispatch...');
-
-  schedulerMetrics.deadlineReminders.totalRuns += 1;
-  schedulerMetrics.deadlineReminders.lastRunAt = new Date().toISOString();
-
-  try {
-    const result = await deadlinesService.triggerDeadlineReminderNotifications([7, 3, 1]);
-    const durationMs = Date.now() - startTime;
-
-    schedulerMetrics.deadlineReminders.lastStatus = 'success';
-    schedulerMetrics.deadlineReminders.lastDurationMs = durationMs;
-    schedulerMetrics.deadlineReminders.lastError = null;
-
-    const successRate = result.attempted > 0
-      ? ((result.succeeded / result.attempted) * 100).toFixed(1)
-      : '100.0';
-
-    console.log(
-      `[Scheduler] ✅ Deadline reminders complete: targets=${result.targets}, attempted=${result.attempted}, succeeded=${result.succeeded}, deduped=${result.deduped}, failed=${result.failed} (${successRate}% success, ${durationMs}ms)`
-    );
-  } catch (error) {
-    const durationMs = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    schedulerMetrics.deadlineReminders.lastStatus = 'error';
-    schedulerMetrics.deadlineReminders.lastDurationMs = durationMs;
-    schedulerMetrics.deadlineReminders.totalFailures += 1;
-    schedulerMetrics.deadlineReminders.lastError = errorMessage;
-
-    console.error('[Scheduler] ❌ Deadline reminder dispatch failed:', error);
-  }
-};
-
-/**
- * Process failed email deliveries for retry/catch-up.
- * Runs every 5 minutes to recover from transient delivery failures.
- */
-export const runEmailRetryDispatch = async (): Promise<void> => {
-  const startTime = Date.now();
-  console.log('[Scheduler] Starting email retry dispatch...');
-
-  schedulerMetrics.emailRetryDispatch.totalRuns += 1;
-  schedulerMetrics.emailRetryDispatch.lastRunAt = new Date().toISOString();
-
-  try {
-    const result = await notificationsService.processEmailRetries({
-      limit: 50,
-      maxFailedAttempts: 6,
-      minAgeSeconds: 60,
-    });
-    const durationMs = Date.now() - startTime;
-
-    schedulerMetrics.emailRetryDispatch.lastStatus = 'success';
-    schedulerMetrics.emailRetryDispatch.lastDurationMs = durationMs;
-    schedulerMetrics.emailRetryDispatch.lastError = null;
-
-    console.log(
-      `[Scheduler] ✅ Email retry dispatch complete: backlog=${result.backlog}, queued=${result.queued}, attempted=${result.attempted} (${durationMs}ms)`
-    );
-  } catch (error) {
-    const durationMs = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    schedulerMetrics.emailRetryDispatch.lastStatus = 'error';
-    schedulerMetrics.emailRetryDispatch.lastDurationMs = durationMs;
-    schedulerMetrics.emailRetryDispatch.totalFailures += 1;
-    schedulerMetrics.emailRetryDispatch.lastError = errorMessage;
-
-    console.error('[Scheduler] ❌ Email retry dispatch failed:', error);
-  }
-};
-
-/**
- * Initialize all scheduled tasks using node-cron
- * Call this on application startup
+ * Register all cron jobs. Call once on startup.
  */
 export const initializeScheduler = (): void => {
-  console.log('[Scheduler] Initializing scheduled tasks with node-cron...');
+  tasks.push(
+    cron.schedule('5 * * * *', () => void runDeadlineReminderDispatch()),
+    cron.schedule('*/5 * * * *', () => void runEmailRetryDispatch()),
+    cron.schedule('0 1 * * *', () => void runRecommendationCleanup()),
+    cron.schedule('0 2 * * *', () => void runRecommendationGeneration()),
+    cron.schedule('30 4 * * *', () => void runRecommendationCleanup())
+  );
 
-  // ✅ Run deadline reminders every hour at minute 5
-  // Spreads load if multiple servers; gives job 55-minute SLA
-  const deadlineReminderTask = cron.schedule('5 * * * *', async () => {
-    console.log('[Scheduler] Deadline reminder job triggered...');
-    try {
-      await runDeadlineReminderDispatch();
-    } catch (error) {
-      console.error('[Scheduler] ❌ Deadline reminder failed:', error);
-    }
-  });
+  // Catch-up runs shortly after boot so a restart never skips a window.
+  timers.push(
+    setTimeout(() => void runDeadlineReminderDispatch(), 15_000),
+    setTimeout(() => void runEmailRetryDispatch(), 30_000)
+  );
 
-  // ✅ Run recommendations generation daily at 2 AM
-  const recommendationTask = cron.schedule('0 2 * * *', async () => {
-    console.log('[Scheduler] Recommendation generation job triggered...');
-    try {
-      await runRecommendationGeneration();
-    } catch (error) {
-      console.error('[Scheduler] ❌ Recommendation generation failed:', error);
-    }
-  });
-
-  // ✅ Clean up expired recommendations daily at 3 AM
-  const cleanupTask = cron.schedule('0 3 * * *', async () => {
-    console.log('[Scheduler] Cleanup job triggered...');
-    try {
-      await runRecommendationCleanup();
-    } catch (error) {
-      console.error('[Scheduler] ❌ Cleanup failed:', error);
-    }
-  });
-
-  // ✅ Retry failed email deliveries every 5 minutes
-  const emailRetryTask = cron.schedule('*/5 * * * *', async () => {
-    console.log('[Scheduler] Email retry job triggered...');
-    try {
-      await runEmailRetryDispatch();
-    } catch (error) {
-      console.error('[Scheduler] ❌ Email retry dispatch failed:', error);
-    }
-  });
-
-  // ✅ Run initial deadline reminder check on startup (15 seconds delay)
-  // Ensures reminders fire even if server starts just after hourly window
-  setTimeout(() => {
-    console.log('[Scheduler] Running initial deadline reminder on startup...');
-    runDeadlineReminderDispatch().catch((error) => {
-      console.error('[Scheduler] ❌ Initial deadline reminder failed:', error);
-    });
-  }, 15000);
-
-  // ✅ Run initial email retry catch-up on startup (30 seconds delay)
-  setTimeout(() => {
-    console.log('[Scheduler] Running initial email retry catch-up on startup...');
-    runEmailRetryDispatch().catch((error) => {
-      console.error('[Scheduler] ❌ Initial email retry catch-up failed:', error);
-    });
-  }, 30000);
-
-  console.log('[Scheduler] ✅ All scheduled tasks initialized (using node-cron)');
-  console.log('[Scheduler] 💡 Cron patterns:');
-  console.log('[Scheduler]   - Deadline reminders: "5 * * * *" (every hour at minute 5)');
-  console.log('[Scheduler]   - Email retries: "*/5 * * * *" (every 5 minutes)');
-  console.log('[Scheduler]   - Recommendations: "0 2 * * *" (daily at 2 AM)');
-  console.log('[Scheduler]   - Cleanup: "0 3 * * *" (daily at 3 AM)');
-  console.log('[Scheduler] 💡 Tips: Use POST /api/v1/recommendations/generate-all and POST /api/v1/scheduler/reminder for manual triggers');
-
-  // Graceful shutdown: stop all cron jobs
-  process.on('SIGTERM', () => {
-    console.log('[Scheduler] Stopping cron tasks...');
-    deadlineReminderTask.stop();
-    emailRetryTask.stop();
-    recommendationTask.stop();
-    cleanupTask.stop();
-  });
-
-  process.on('SIGINT', () => {
-    console.log('[Scheduler] Stopping cron tasks (SIGINT)...');
-    deadlineReminderTask.stop();
-    emailRetryTask.stop();
-    recommendationTask.stop();
-    cleanupTask.stop();
-  });
+  log.info(
+    'Jobs registered: reminders "5 * * * *", email retry "*/5 * * * *", ' +
+      'rec cleanup "0 1 * * *" + "30 4 * * *", rec generation "0 2 * * *"'
+  );
 };
 
-/**
- * Run initial recommendation generation on startup (optional)
- * Useful for fresh deployments or testing
- */
-export const runStartupJobs = async (): Promise<void> => {
-  console.log('[Scheduler] Running startup jobs...');
-  
-  // Check if recommendations table is empty and generate if needed
-  // This is optional - comment out if you want to wait for the scheduled time
-  
-  // await runRecommendationGeneration();
-  
-  console.log('[Scheduler] ✅ Startup jobs complete');
+export const stopScheduler = (): void => {
+  timers.splice(0).forEach(clearTimeout);
+  tasks.splice(0).forEach((task) => task.stop());
 };

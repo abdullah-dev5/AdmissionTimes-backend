@@ -17,7 +17,6 @@ import { AppError } from '@shared/middleware/errorHandler';
 import * as usersModel from '../models/users.model';
 import {
   User,
-  CreateUserDTO,
   UpdateUserDTO,
   UpdateUserRoleDTO,
   UpdateUniversityProfileDTO,
@@ -26,6 +25,7 @@ import {
   UserContext,
 } from '../types/users.types';
 import { USER_TYPE } from '@config/constants';
+import { invalidateAuthCache } from '@shared/middleware/jwtAuth';
 
 /**
  * Get user by ID
@@ -126,131 +126,82 @@ export const getMany = async (
  * @returns Created user record
  * @throws AppError if validation fails
  */
-export const create = async (data: CreateUserDTO): Promise<User> => {
-  // Validate required fields
-  if (!data.role) {
-    throw new AppError('Role is required', 400);
-  }
-
-  if (!data.display_name) {
-    throw new AppError('Display name is required', 400);
-  }
-
-  // If auth_user_id is provided, check if user already exists
-  if (data.auth_user_id) {
-    const existingUser = await usersModel.findByAuthUserId(data.auth_user_id);
-    if (existingUser) {
-      throw new AppError('User with this auth_user_id already exists', 409);
-    }
-  }
-
-  // Validate university_id for university users
-  if (data.role === USER_TYPE.UNIVERSITY && !data.university_id) {
-    // University ID is optional but recommended for university users
-    // We'll allow it to be null for now
-  }
-
-  // Validate university_id not set for non-university users
-  if (data.role !== USER_TYPE.UNIVERSITY && data.university_id) {
-    throw new AppError('University ID can only be set for university users', 400);
-  }
-
-  return await usersModel.create(data);
-};
-
 /**
- * Update current user profile
- * 
- * @param data - Partial user data to update
- * @param userContext - User context
- * @returns Updated user record
- * @throws AppError if not found or access denied
+ * Update the caller's own profile. Only the display name is self-service;
+ * role, university and status are admin-managed.
  */
-export const updateCurrentUser = async (
-  data: UpdateUserDTO,
-  userContext?: UserContext
-): Promise<User> => {
-  if (!userContext || !userContext.id) {
+export const updateCurrentUser = async (data: UpdateUserDTO, userContext?: UserContext): Promise<User> => {
+  if (!userContext?.id) {
     throw new AppError('User not authenticated', 401);
   }
 
-  const user = await usersModel.findById(userContext.id);
-
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
-
-  // Validate university_id for university users
-  if (user.role === USER_TYPE.UNIVERSITY && data.university_id !== undefined) {
-    // Allow university_id update for university users
-  }
-
-  // Validate university_id not set for non-university users
-  if (user.role !== USER_TYPE.UNIVERSITY && data.university_id) {
-    throw new AppError('University ID can only be set for university users', 400);
-  }
-
-  const updated = await usersModel.update(userContext.id, data);
-
+  const updated = await usersModel.update(userContext.id, { display_name: data.display_name });
   if (!updated) {
-    throw new AppError('User not found', 404);
+    const user = await usersModel.findById(userContext.id);
+    if (!user) throw new AppError('User not found', 404);
+    return user;
   }
-
   return updated;
 };
 
 /**
- * Update user role (admin only)
- * 
- * @param id - User UUID
- * @param data - Role update data
- * @param userContext - User context (must be admin)
- * @returns Updated user record
- * @throws AppError if not found or access denied
+ * Change a user's role (admin only). University roles must be linked to an
+ * existing university; other roles drop any university link.
  */
-export const updateRole = async (
-  id: string,
-  data: UpdateUserRoleDTO,
-  userContext?: UserContext
-): Promise<User> => {
-  // Access control: only admins can update roles
-  if (!userContext || userContext.role !== USER_TYPE.ADMIN) {
+export const updateRole = async (id: string, data: UpdateUserRoleDTO, userContext?: UserContext): Promise<User> => {
+  if (userContext?.role !== USER_TYPE.ADMIN) {
     throw new AppError('Forbidden', 403);
+  }
+  if (userContext.id === id && data.role !== USER_TYPE.ADMIN) {
+    throw new AppError('Admins cannot remove their own admin role', 409);
   }
 
   const user = await usersModel.findById(id);
-
   if (!user) {
     throw new AppError('User not found', 404);
   }
 
-  // Validate university_id for university users
-  if (data.role === USER_TYPE.UNIVERSITY && user.university_id === null) {
-    // University ID is optional but recommended
-    // We'll allow role change without university_id
+  if (data.role === USER_TYPE.UNIVERSITY) {
+    if (!data.university_id || !(await usersModel.findUniversityById(data.university_id))) {
+      throw new AppError('A valid university_id is required for the university role', 400);
+    }
   }
 
-  // Clear university_id if changing from university to non-university
-  if (user.role === USER_TYPE.UNIVERSITY && data.role !== USER_TYPE.UNIVERSITY) {
-    // Clear university_id when changing from university role
-    await usersModel.update(id, { university_id: null });
-  }
-
+  await usersModel.update(id, { university_id: data.role === USER_TYPE.UNIVERSITY ? data.university_id! : null });
   const updated = await usersModel.updateRole(id, data.role);
-
   if (!updated) {
     throw new AppError('User not found', 404);
   }
 
+  invalidateAuthCache(user.auth_user_id);
   return updated;
 };
 
 /**
- * Get university profile for current user
- * 
- * @param userContext - User context
- * @returns University profile
+ * Suspend or reactivate a user (admin only). Suspended users are rejected by
+ * the auth middleware and excluded from notifications.
  */
+export const updateStatus = async (
+  id: string,
+  status: 'active' | 'suspended',
+  userContext?: UserContext
+): Promise<User> => {
+  if (userContext?.role !== USER_TYPE.ADMIN) {
+    throw new AppError('Forbidden', 403);
+  }
+  if (userContext.id === id) {
+    throw new AppError('Admins cannot change their own status', 409);
+  }
+
+  const updated = await usersModel.updateStatus(id, status);
+  if (!updated) {
+    throw new AppError('User not found', 404);
+  }
+
+  invalidateAuthCache(updated.auth_user_id);
+  return updated;
+};
+
 export const getUniversityProfile = async (userContext?: UserContext): Promise<UniversityProfile> => {
   if (!userContext || !userContext.id) {
     throw new AppError('User not authenticated', 401);
@@ -354,26 +305,3 @@ export const updateUniversityProfile = async (
  * @param defaultDisplayName - Default display name if creating new user
  * @returns User record (existing or newly created)
  */
-export const findOrCreateByAuthUserId = async (
-  authUserId: string,
-  defaultRole: string = USER_TYPE.STUDENT,
-  defaultDisplayName: string = 'User'
-): Promise<User> => {
-  // Try to find existing user
-  let user = await usersModel.findByAuthUserId(authUserId);
-
-  if (user) {
-    return user;
-  }
-
-  // Create new user if not found
-  user = await usersModel.create({
-    auth_user_id: authUserId,
-    role: defaultRole as any,
-    display_name: defaultDisplayName,
-    university_id: null,
-    status: 'active',
-  });
-
-  return user;
-};

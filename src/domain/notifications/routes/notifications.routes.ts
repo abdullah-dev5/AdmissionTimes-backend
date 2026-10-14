@@ -15,6 +15,7 @@ import {
   createNotificationSchema,
   registerPushTokenSchema,
   unregisterPushTokenSchema,
+  broadcastSchema,
 } from '../validators/notifications.validators';
 import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
 import { requireRole } from '@shared/middleware/jwtAuth';
@@ -203,6 +204,7 @@ router.get(
 // POST /api/v1/notifications - Create notification
 router.post(
   '/',
+  requireRole(['admin']),
   validateBody(createNotificationSchema),
   notificationsController.createNotification
 );
@@ -592,6 +594,6 @@ router.delete(
  *         description: Unauthorized
  */
 // POST /api/v1/notifications/broadcast - Send broadcast notification (admin only)
-router.post('/broadcast', sendBroadcast);
+router.post('/broadcast', requireRole(['admin']), validateBody(broadcastSchema), sendBroadcast);
 
 export default router;

@@ -6,6 +6,7 @@
  */
 
 import { VerificationStatus } from '@config/constants';
+export type { UserContext } from '@shared/types/auth';
 
 /**
  * Core admission record interface
@@ -13,7 +14,8 @@ import { VerificationStatus } from '@config/constants';
  */
 export interface Admission {
   id: string;
-  university_id: string | null;
+  university_id: string;
+  university_name?: string | null;
   title: string;
   description: string | null;
   program_type: string | null;
@@ -36,6 +38,17 @@ export interface Admission {
   created_at: string; // ISO8601 timestamp
   updated_at: string; // ISO8601 timestamp
   is_active: boolean;
+  dispute_reason?: string | null;
+  admin_notes?: string | null;
+  verification_comments?: string | null;
+  needs_reverification?: boolean;
+  updated_by?: string | null;
+  data_origin?: string | null;
+  source_system?: string | null;
+  source_url?: string | null;
+  source_record_hash?: string | null;
+  source_last_seen_at?: string | null;
+  ingestion_run_id?: string | null;
 
   // Phase 0 additive normalized contract fields
   contract_version?: number;
@@ -73,7 +86,12 @@ export interface CreateAdmissionDTO {
   location?: string;
   delivery_mode?: string;
   requirements?: Record<string, any>;
-  verification_status?: 'draft' | 'pending' | 'verified' | 'rejected';
+  /**
+   * Submission intent from the client: 'draft' keeps the admission private,
+   * 'pending' submits it for admin review. Never written as-is.
+   */
+  verification_status?: 'draft' | 'pending';
+  /** Admin only: the university the admission belongs to. */
   university_id?: string;
 }
 
@@ -95,10 +113,13 @@ export interface AdmissionFilters {
   location?: string;
   delivery_mode?: string;
   verification_status?: VerificationStatus | VerificationStatus[];
+  university_id?: string;
   created_by?: string;
-  owner_user_ids?: string[];
-  owner_university_ids?: string[];
-  is_active?: boolean;
+  /** Hide admissions whose deadline has passed. */
+  exclude_closed?: boolean;
+  /** Deadline window (inclusive, ISO-8601). */
+  deadline_from?: string;
+  deadline_to?: string;
 }
 
 /**
@@ -110,13 +131,14 @@ export interface AdmissionQueryParams extends AdmissionFilters {
   limit?: number;
   sort?: string;
   order?: 'asc' | 'desc';
+  include_closed?: boolean;
 }
 
 /**
  * Verify admission request DTO
  */
 export interface VerifyAdmissionDTO {
-  verified_by?: string;
+  notes?: string;
 }
 
 /**
@@ -124,49 +146,4 @@ export interface VerifyAdmissionDTO {
  */
 export interface RejectAdmissionDTO {
   rejection_reason: string;
-  rejected_by?: string;
-}
-
-/**
- * Admin verify/reject request DTO (alias endpoint)
- */
-export interface AdminVerifyAdmissionDTO {
-  verification_status: 'verified' | 'rejected';
-  verified_by?: string;
-  rejected_by?: string;
-  rejection_reason?: string;
-  notes?: string;
-}
-
-/**
- * Submit admission request DTO (Draft → Pending)
- */
-export interface SubmitAdmissionDTO {
-  submitted_by?: string;
-}
-
-/**
- * Changelog entry interface
- * Used for creating changelog entries
- */
-export interface ChangelogEntry {
-  admission_id: string;
-  actor_type: 'admin' | 'university' | 'system';
-  changed_by: string | null;
-  action_type: 'created' | 'updated' | 'verified' | 'rejected' | 'status_changed';
-  field_name: string | null;
-  old_value: any;
-  new_value: any;
-  diff_summary: string;
-  metadata?: Record<string, any>;
-}
-
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-export interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
 }

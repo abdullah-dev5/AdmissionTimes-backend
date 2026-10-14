@@ -19,3 +19,12 @@ export const summarizeRequestSchema = Joi.object({
   source_type: Joi.string().valid('pdf', 'manual').optional(),
   admission_id: Joi.string().guid({ version: ['uuidv4', 'uuidv5'] }).optional(),
 });
+
+export const compareProgramsRequestSchema = Joi.object({
+  admission_ids: Joi.array()
+    .items(Joi.string().trim().min(8).max(120))
+    .min(2)
+    .max(4)
+    .required(),
+  focus: Joi.string().trim().max(500).optional(),
+});

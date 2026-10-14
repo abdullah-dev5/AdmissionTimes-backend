@@ -33,7 +33,12 @@ export const trackEvent = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const data = req.validated as CreateAnalyticsEventDTO;
+    // The actor is always the authenticated caller, never a client-supplied id.
+    const data: CreateAnalyticsEventDTO = {
+      ...(req.validated as CreateAnalyticsEventDTO),
+      user_id: req.user?.id ?? null,
+      user_type: (req.user?.role && req.user.role !== 'guest' ? req.user.role : null) as CreateAnalyticsEventDTO['user_type'],
+    };
 
     const event = await analyticsService.trackEvent(data);
 

@@ -287,7 +287,7 @@ function buildFindManyQuery(
 
   // Admission ID filter
   if (filters.admission_id) {
-    conditions.push(`admission_id = $${paramIndex++}`);
+    conditions.push(`c.admission_id = $${paramIndex++}`);
     params.push(filters.admission_id);
   }
 
@@ -295,10 +295,10 @@ function buildFindManyQuery(
   if (filters.actor_type) {
     if (Array.isArray(filters.actor_type)) {
       const placeholders = filters.actor_type.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`actor_type IN (${placeholders})`);
+      conditions.push(`c.actor_type IN (${placeholders})`);
       params.push(...filters.actor_type);
     } else {
-      conditions.push(`actor_type = $${paramIndex++}`);
+      conditions.push(`c.actor_type = $${paramIndex++}`);
       params.push(filters.actor_type);
     }
   }
@@ -307,34 +307,34 @@ function buildFindManyQuery(
   if (filters.action_type) {
     if (Array.isArray(filters.action_type)) {
       const placeholders = filters.action_type.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`action_type IN (${placeholders})`);
+      conditions.push(`c.action_type IN (${placeholders})`);
       params.push(...filters.action_type);
     } else {
-      conditions.push(`action_type = $${paramIndex++}`);
+      conditions.push(`c.action_type = $${paramIndex++}`);
       params.push(filters.action_type);
     }
   }
 
   // Changed by filter
   if (filters.changed_by) {
-    conditions.push(`changed_by = $${paramIndex++}`);
+    conditions.push(`c.changed_by = $${paramIndex++}`);
     params.push(filters.changed_by);
   }
 
   // Date range filters
   if (filters.date_from) {
-    conditions.push(`created_at >= $${paramIndex++}`);
+    conditions.push(`c.created_at >= $${paramIndex++}`);
     params.push(filters.date_from);
   }
 
   if (filters.date_to) {
-    conditions.push(`created_at <= $${paramIndex++}`);
+    conditions.push(`c.created_at <= $${paramIndex++}`);
     params.push(filters.date_to);
   }
 
   // Search filter (case-insensitive search in diff_summary)
   if (filters.search) {
-    conditions.push(`LOWER(diff_summary) LIKE LOWER($${paramIndex++})`);
+    conditions.push(`LOWER(c.diff_summary) LIKE LOWER($${paramIndex++})`);
     params.push(`%${filters.search}%`);
   }
 

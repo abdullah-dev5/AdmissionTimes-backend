@@ -10,11 +10,15 @@ import * as usersController from '../controllers/users.controller';
 import {
   updateUserSchema,
   updateUserRoleSchema,
+  updateUserStatusSchema,
   updateUniversityProfileSchema,
   userQuerySchema,
   uuidParamSchema,
 } from '../validators/users.validators';
 import { validateBody, validateQuery, validateParams } from '@shared/middleware/validation';
+import { requireRole } from '@shared/middleware/jwtAuth';
+
+const adminOnly = requireRole(['admin']);
 import userPreferencesRoutes from '../../user-preferences/routes/user-preferences.routes';
 
 const router: Router = Router();
@@ -217,6 +221,7 @@ router.use('/me/preferences', userPreferencesRoutes);
 // GET /api/v1/users - List users (admin only)
 router.get(
   '/',
+  adminOnly,
   validateQuery(userQuerySchema),
   usersController.getUsers
 );
@@ -340,9 +345,19 @@ router.get(
 // PATCH /api/v1/users/:id/role - Update user role (admin only)
 router.patch(
   '/:id/role',
+  adminOnly,
   validateParams(uuidParamSchema),
   validateBody(updateUserRoleSchema),
   usersController.updateUserRole
+);
+
+// PATCH /api/v1/users/:id/status - Suspend or reactivate a user (admin only)
+router.patch(
+  '/:id/status',
+  adminOnly,
+  validateParams(uuidParamSchema),
+  validateBody(updateUserStatusSchema),
+  usersController.updateUserStatus
 );
 
 /**
@@ -385,11 +400,6 @@ router.patch(
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// GET /api/v1/users/me/university-profile - Get current university profile
-router.get(
-  '/me/university-profile',
-  usersController.getCurrentUniversityProfile
-);
 
 /**
  * @swagger
@@ -483,11 +493,5 @@ router.get(
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// PUT /api/v1/users/me/university-profile - Update current university profile
-router.put(
-  '/me/university-profile',
-  validateBody(updateUniversityProfileSchema),
-  usersController.updateCurrentUniversityProfile
-);
 
 export default router;

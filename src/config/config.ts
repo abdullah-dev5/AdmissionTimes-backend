@@ -1,152 +1,171 @@
 /**
  * Configuration module
- * 
- * Handles all application configuration including environment variables,
- * database settings, and other configurable values.
+ *
+ * All runtime configuration comes from environment variables. Nothing
+ * project-specific (URLs, keys, project refs) is hardcoded here.
  */
 
 import dotenv from 'dotenv';
 
-// Load environment variables from .env file
 dotenv.config();
 
-const normalizeSupabaseUrl = (value?: string): string => {
-  return (value || '').trim().replace(/\/$/, '');
+const env = process.env.NODE_ENV || 'development';
+const isProduction = env === 'production';
+
+const normalizeUrl = (value?: string): string => (value || '').trim().replace(/\/+$/, '');
+
+const parseIntEnv = (name: string, fallback: number): number => {
+  const parsed = parseInt(process.env[name] || '', 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const defaultSupabaseUrl = normalizeSupabaseUrl(
-  process.env.SUPABASE_URL || 'https://lufhgsgubvxjrrcsevte.supabase.co'
-);
+const parseList = (value?: string): string[] =>
+  (value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 
-const defaultJwtIssuer = `${defaultSupabaseUrl}/auth/v1`;
-const defaultJwksUrl = `${defaultJwtIssuer}/.well-known/jwks.json`;
+const supabaseUrl = normalizeUrl(process.env.SUPABASE_URL);
+// Supabase serves auth (and its JWKS) under /auth/v1. Derive from SUPABASE_URL
+// unless explicitly overridden.
+const jwtIssuer = normalizeUrl(process.env.JWT_ISSUER) || (supabaseUrl ? `${supabaseUrl}/auth/v1` : '');
+const jwksUrl =
+  normalizeUrl(process.env.JWT_JWKS_URL) || (jwtIssuer ? `${jwtIssuer}/.well-known/jwks.json` : '');
 
 /**
  * Application configuration object
  */
 export const config = {
-  // Server configuration
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: parseIntEnv('PORT', 3000),
   host: process.env.HOST || '0.0.0.0',
-  env: process.env.NODE_ENV || 'development',
-  
-  // API configuration
+  env,
+  isProduction,
+
   apiVersion: process.env.API_VERSION || 'v1',
-  
-  // CORS configuration
-  corsOrigin: process.env.CORS_ORIGIN || '*',
-  
-  // Database configuration
-  // Supports: Supabase Local, Supabase Cloud (direct), Supabase Cloud (pooling)
+
+  /**
+   * Allowed browser origins. `*` is only honoured outside production.
+   */
+  corsOrigins: parseList(process.env.CORS_ORIGIN),
+
   database: {
     host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '54322', 10),
+    port: parseIntEnv('DB_PORT', 54322),
     name: process.env.DB_NAME || 'postgres',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
-    // Pool size: Match your Supabase plan limit (Nano=15, Pro=60, Team=120)
-    // Setting higher than plan limit will cause connection errors
-    poolMax: parseInt(process.env.DB_POOL_MAX || '20', 10),
+    poolMax: parseIntEnv('DB_POOL_MAX', 20),
+    /** Optional PEM CA bundle for TLS verification (e.g. Supabase root cert). */
+    sslCa: process.env.DB_SSL_CA || '',
+    /** Set DB_SSL_REJECT_UNAUTHORIZED=true once a CA bundle is configured. */
+    sslRejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
   },
-  
-  // Supabase Auth configuration (Phase 1: JWKS Verification)
+
   supabase: {
-    url: defaultSupabaseUrl,
+    url: supabaseUrl,
     anonKey: process.env.SUPABASE_ANON_KEY || '',
     serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     jwtSecret: process.env.SUPABASE_JWT_SECRET || '',
   },
-  
-  // JWT configuration (Phase 1: JWKS Signature Verification)
+
   jwt: {
-    algorithm: process.env.JWT_ALGORITHM || 'RS256',
-    issuer: process.env.JWT_ISSUER || defaultJwtIssuer,
+    issuer: jwtIssuer,
     audience: process.env.JWT_AUDIENCE || 'authenticated',
-    jwksUrl: process.env.JWT_JWKS_URL || defaultJwksUrl,
-    expiryTolerance: parseInt(process.env.JWT_EXPIRY_TOLERANCE || '300', 10),
+    jwksUrl,
+    /** Asymmetric algorithms accepted for JWKS-signed tokens. */
+    algorithms: ['ES256', 'RS256'] as const,
+    clockToleranceSec: parseIntEnv('JWT_EXPIRY_TOLERANCE', 30),
   },
 
-  // Email configuration (Phase 2: Nodemailer SMTP)
+  /**
+   * Development-only header auth (x-user-id). Off unless explicitly enabled,
+   * and never available in production regardless of the flag.
+   */
+  devHeaderAuthEnabled: !isProduction && process.env.ALLOW_DEV_HEADER_AUTH === 'true',
+
   email: {
     enabled:
       process.env.EMAIL_ENABLED === 'true' ||
       (process.env.EMAIL_ENABLED !== 'false' && !!process.env.SMTP_HOST && !!process.env.SMTP_USER && !!process.env.SMTP_PASS),
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587
+    host: process.env.SMTP_HOST || '',
+    port: parseIntEnv('SMTP_PORT', 587),
+    secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER || '',
     pass: process.env.SMTP_PASS || '',
-    from: process.env.EMAIL_FROM || 'admissiontimes@gmail.com',
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER || '',
   },
 
-  // Realtime configuration (Phase 2: Supabase Realtime)
   realtime: {
     enabled:
       process.env.REALTIME_ENABLED === 'true' ||
-      (process.env.REALTIME_ENABLED !== 'false' && !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY),
+      (process.env.REALTIME_ENABLED !== 'false' && !!supabaseUrl && !!process.env.SUPABASE_SERVICE_ROLE_KEY),
   },
 
-  // Push notification delivery configuration
   push: {
     enabled: process.env.PUSH_NOTIFICATIONS_ENABLED !== 'false',
   },
 
-  // AI configuration (Gemini)
+  /** Public base URL of the web app, used for links in emails. */
+  webAppUrl: normalizeUrl(process.env.WEB_APP_URL),
+
   ai: {
     enabled: process.env.AI_ENABLED === 'true' || (!!process.env.GEMINI_API_KEY && process.env.AI_ENABLED !== 'false'),
     provider: process.env.AI_PROVIDER || 'gemini',
     geminiApiKey: process.env.GEMINI_API_KEY || '',
     geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite',
-    geminiBaseUrl: process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta',
-    timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || '12000', 10),
-    maxInputChars: parseInt(process.env.AI_MAX_INPUT_CHARS || '16000', 10),
+    geminiBaseUrl: normalizeUrl(process.env.GEMINI_BASE_URL) || 'https://generativelanguage.googleapis.com/v1beta',
+    timeoutMs: parseIntEnv('AI_TIMEOUT_MS', 12000),
+    maxInputChars: parseIntEnv('AI_MAX_INPUT_CHARS', 16000),
   },
 
-  // Scraper integration configuration
   scraperIntegration: {
     enabled: process.env.SCRAPER_INTEGRATION_ENABLED === 'true',
     publishEnabled: process.env.SCRAPER_PUBLISH_ENABLED === 'true',
     internalServiceToken: process.env.SCRAPER_INTERNAL_SERVICE_TOKEN || '',
   },
+
+  scheduler: {
+    /** Run cron jobs in this process. Disable on extra API replicas. */
+    enabled: process.env.SCHEDULER_ENABLED !== 'false',
+  },
 };
 
 /**
- * Validates that all required environment variables are set
+ * Validates required environment variables. Fails fast so a misconfigured
+ * deployment never boots into a half-working (or insecure) state.
  */
 export const validateConfig = (): void => {
-  const requiredVars: string[] = [];
-  
-  // Core database variables (always required)
-  const coreRequired = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
-  coreRequired.forEach(varName => {
-    if (!process.env[varName]) {
-      requiredVars.push(varName);
-    }
+  const missing: string[] = [];
+  const problems: string[] = [];
+
+  ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'SUPABASE_URL'].forEach((name) => {
+    if (!process.env[name]) missing.push(name);
   });
-  
-  // Supabase/JWT variables required in production
-  if (process.env.NODE_ENV === 'production') {
-    const prodRequired = [
-      'SUPABASE_URL',
-      'SUPABASE_SERVICE_ROLE_KEY',
-      'SUPABASE_JWT_SECRET',
-      'JWT_ISSUER',
-      'JWT_JWKS_URL',
-    ];
-    prodRequired.forEach(varName => {
-      if (!process.env[varName]) {
-        requiredVars.push(varName);
-      }
+
+  if (isProduction) {
+    ['SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'CORS_ORIGIN'].forEach((name) => {
+      if (!process.env[name]) missing.push(name);
     });
+
+    if (config.corsOrigins.includes('*')) {
+      problems.push('CORS_ORIGIN must list explicit origins in production (not "*")');
+    }
   }
-  
-  if (requiredVars.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${requiredVars.join(', ')}\n` +
-      'Please check your .env file against env.example'
+
+  if (config.jwt.jwksUrl && !/\/auth\/v1\/\.well-known\/jwks\.json$/.test(config.jwt.jwksUrl)) {
+    problems.push(
+      `JWT_JWKS_URL looks wrong (${config.jwt.jwksUrl}). Supabase serves it at <SUPABASE_URL>/auth/v1/.well-known/jwks.json — remove JWT_JWKS_URL to derive it automatically.`
     );
+  }
+
+  if (missing.length > 0 || problems.length > 0) {
+    const lines = [
+      ...(missing.length ? [`Missing required environment variables: ${missing.join(', ')}`] : []),
+      ...problems,
+      'Check your .env against .env.example',
+    ];
+    throw new Error(lines.join('\n'));
   }
 };
 
-// Validate configuration on module load
 validateConfig();

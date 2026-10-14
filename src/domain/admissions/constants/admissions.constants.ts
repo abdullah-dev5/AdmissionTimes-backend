@@ -57,6 +57,8 @@ export const SORTABLE_FIELDS = [
 export const SEARCH_FIELDS = [
   'title',
   'description',
+  'program_type',
+  'degree_level',
   'field_of_study',
   'location',
 ] as const;

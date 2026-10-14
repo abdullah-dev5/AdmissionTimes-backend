@@ -8,15 +8,8 @@ import { Request, Response, NextFunction } from 'express';
 import { sendSuccess } from '@shared/utils/response';
 import * as recommendationsService from '../services/recommendations.service';
 import { AppError } from '@shared/middleware/errorHandler';
+import type { UserContext } from '@shared/types/auth';
 
-/**
- * User context interface
- */
-interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Get recommendations for authenticated user

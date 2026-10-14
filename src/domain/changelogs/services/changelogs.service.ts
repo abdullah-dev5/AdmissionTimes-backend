@@ -18,12 +18,8 @@ import {
   Changelog,
   ChangelogFilters,
 } from '../types/changelogs.types';
+import type { AuthenticatedUserContext as UserContextLike } from '@shared/types/auth';
 
-interface UserContextLike {
-  id: string;
-  role: 'admin' | 'student' | 'university' | 'guest';
-  university_id?: string | null;
-}
 
 const resolveUniversityScopeId = async (userContext: UserContextLike): Promise<string | null> => {
   if (userContext.university_id) {

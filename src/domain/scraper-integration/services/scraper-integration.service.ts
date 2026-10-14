@@ -1,7 +1,10 @@
 import crypto from 'crypto';
-import { query } from '@db/connection';
+import { query, withTransaction } from '@db/connection';
+import { syncApplicationDeadline } from '@domain/admissions/models/admissions.model';
+import { notifyWatchersOfUpdate } from '@domain/admissions/services/admissionEvents';
 import { config } from '@config/config';
 import { AppError } from '@shared/middleware/errorHandler';
+import { inferDegreeLabel } from '@shared/utils/admissionContract';
 import {
   ScraperIngestBatchRequestDTO,
   ScraperIngestionMode,
@@ -72,11 +75,38 @@ const expandUniversityCandidates = (sourceUniversityName: string): { rawCandidat
   };
 };
 
+const APP_UTC_OFFSET = process.env.APP_UTC_OFFSET || '+05:00';
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+/** Calendar day (YYYY-MM-DD) from a date-only string such as "2026-03-02" or "Monday, March 02, 2026". */
+const calendarDayOf = (text: string): string | null => {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (iso) return text;
+  const named = /^(?:[a-z]+,\s*)?([a-z]+)\s+(\d{1,2}),?\s+(\d{4})$/i.exec(text);
+  if (!named) return null;
+  const month = MONTHS.indexOf(named[1].toLowerCase()) + 1;
+  if (!month) return null;
+  return `${named[3]}-${String(month).padStart(2, '0')}-${named[2].padStart(2, '0')}`;
+};
+
+/** Calendar day of an instant in the app timezone, e.g. "+05:00" -> shift by 5h. */
+const appDayOf = (value: string | Date): string => {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(APP_UTC_OFFSET);
+  const offsetMs = match ? (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3])) * 60000 : 0;
+  return new Date(new Date(value).getTime() + offsetMs).toISOString().slice(0, 10);
+};
+
+/**
+ * Scraped deadlines are calendar days; like manually entered deadlines they
+ * close at the end of that day in the app's timezone (APP_UTC_OFFSET), not at
+ * UTC midnight. Strings that carry a time are parsed as-is.
+ */
 const toIsoDateOrNull = (value: string | null | undefined): string | null => {
   const text = normalizeText(value);
   if (!text) return null;
 
-  const parsed = new Date(text);
+  const day = calendarDayOf(text);
+  const parsed = new Date(day ? `${day}T23:59:59.000${APP_UTC_OFFSET}` : text);
   if (Number.isNaN(parsed.getTime())) {
     return null;
   }
@@ -84,32 +114,10 @@ const toIsoDateOrNull = (value: string | null | undefined): string | null => {
   return parsed.toISOString();
 };
 
-const inferDegreeLevelFromTitle = (title: string): string | null => {
-  const text = normalizeText(title).toLowerCase();
-  if (!text) return null;
-
-  if (/\bbba\b|bachelor of business administration/.test(text)) return 'BBA';
-  if (/\bmba\b|master of business administration/.test(text)) return 'MBA';
-  if (/\bphd\b|doctor of philosophy|doctorate/.test(text)) return 'PhD';
-  if (/\bmd\b|doctor of medicine/.test(text)) return 'MD';
-  if (/\bmphil\b|master of philosophy/.test(text)) return 'MPhil';
-  if (/\bms\b|master of science|\bmaster\b/.test(text)) return 'MS';
-  if (/\bbs\b|bachelor of science|\bbe\b|bachelor|undergraduate/.test(text)) return 'BS';
-
-  return null;
-};
-
-const buildFallbackDescription = (
-  title: string,
-  universityName: string,
-  degreeLevel: string | null,
-  location: string | null,
-): string => {
-  const degreeText = normalizeText(degreeLevel) || 'Degree Not Specified';
-  const locationText = normalizeText(location) || 'Location not specified';
-  return `${normalizeText(title)} at ${normalizeText(universityName)} is a ${degreeText} program located in ${locationText}.`;
-};
-
+/**
+ * Hash of the raw scraped record (including its date). Used only for the
+ * ingestion event log and replays, never as the admission identity.
+ */
 const computeSourceHash = (record: ScrapedAdmissionIngestDTO): string => {
   const payload = {
     source_university_name: normalizeText(record.source_university_name).toLowerCase(),
@@ -117,41 +125,26 @@ const computeSourceHash = (record: ScrapedAdmissionIngestDTO): string => {
     source_details_link: normalizeText(record.source_details_link),
     source_last_date: normalizeText(record.source_last_date),
   };
-
-  const blob = JSON.stringify(payload);
-  return crypto.createHash('md5').update(blob).digest('hex');
+  return crypto.createHash('md5').update(JSON.stringify(payload)).digest('hex');
 };
 
-const ensureUniversityExists = async (sourceUniversityName: string): Promise<string | null> => {
-  const name = normalizeText(sourceUniversityName);
-  if (!name) return null;
+const normalizeTitleKey = (title: string): string => normalizeText(title).toLowerCase().replace(/\s+/g, ' ');
 
-  const existing = await query(
-    `
-      SELECT id::text AS id
-      FROM universities
-      WHERE lower(name) = lower($1)
-      LIMIT 1
-    `,
-    [name]
-  );
+/**
+ * Stable admission identity: the same program at the same university maps to
+ * the same row even when its deadline or link changes. Must match the SQL in
+ * migration 20261007000001.
+ */
+const computeIdentityHash = (universityId: string, title: string): string =>
+  crypto.createHash('md5').update(`${universityId}|${normalizeTitleKey(title)}`).digest('hex');
 
-  if (existing.rows[0]?.id) {
-    return String(existing.rows[0].id);
-  }
-
-  const inserted = await query(
-    `
-      INSERT INTO universities (name, is_active)
-      VALUES ($1, true)
-      RETURNING id::text AS id
-    `,
-    [name]
-  );
-
-  return inserted.rows[0]?.id ? String(inserted.rows[0].id) : null;
-};
-
+/**
+ * Map a scraped university name to a university id using exact/normalized
+ * name matches and the alias table only. No prefix guessing (it attached
+ * records to the wrong institution) and no automatic creation unless
+ * SCRAPER_AUTO_CREATE_UNIVERSITIES=true — unknown names are skipped and shown
+ * in the admin scraper monitor instead.
+ */
 const resolveUniversityId = async (sourceUniversityName: string): Promise<string | null> => {
   const candidates = expandUniversityCandidates(sourceUniversityName);
   if (!candidates.rawCandidates.length) return null;
@@ -160,38 +153,28 @@ const resolveUniversityId = async (sourceUniversityName: string): Promise<string
     `
       SELECT id::text AS id
       FROM universities
-      WHERE lower(name) = ANY($1::text[])
-         OR regexp_replace(lower(name), '[^a-z0-9]+', ' ', 'g') = ANY($2::text[])
-         OR EXISTS (
-           SELECT 1
-           FROM unnest($1::text[]) AS c(candidate)
-           WHERE lower(name) LIKE c.candidate || '%'
-              OR c.candidate LIKE lower(name) || '%'
-         )
-         OR EXISTS (
-            SELECT 1
-            FROM unnest($2::text[]) AS c(candidate)
-            WHERE regexp_replace(lower(name), '[^a-z0-9]+', ' ', 'g') LIKE c.candidate || '%'
-               OR c.candidate LIKE regexp_replace(lower(name), '[^a-z0-9]+', ' ', 'g') || '%'
-         )
+      WHERE lower(btrim(name)) = ANY($1::text[])
+         OR btrim(regexp_replace(lower(name), '[^a-z0-9]+', ' ', 'g')) = ANY($2::text[])
       ORDER BY
-        CASE
-          WHEN lower(name) = ANY($1::text[]) THEN 0
-          WHEN regexp_replace(lower(name), '[^a-z0-9]+', ' ', 'g') = ANY($2::text[]) THEN 1
-          ELSE 2
-        END,
-        length(name) ASC
+        CASE WHEN lower(btrim(name)) = ANY($1::text[]) THEN 0 ELSE 1 END,
+        is_active DESC,
+        created_at ASC
       LIMIT 1
     `,
     [candidates.rawCandidates, candidates.normalizedCandidates]
   );
 
-  if (result.rows[0]?.id) {
-    return String(result.rows[0].id);
+  if (result.rows[0]?.id) return String(result.rows[0].id);
+
+  if (process.env.SCRAPER_AUTO_CREATE_UNIVERSITIES === 'true') {
+    const inserted = await query(
+      `INSERT INTO universities (name, is_active) VALUES ($1, true) RETURNING id::text AS id`,
+      [normalizeText(sourceUniversityName)]
+    );
+    return inserted.rows[0]?.id ? String(inserted.rows[0].id) : null;
   }
 
-  // Fallback: create missing university records so scraper-origin sources are not dropped.
-  return ensureUniversityExists(sourceUniversityName);
+  return null;
 };
 
 const createRun = async (
@@ -269,14 +252,57 @@ const logEvent = async (
   );
 };
 
-const publishRecord = async (
-  runId: string,
-  record: ScrapedAdmissionIngestDTO,
-  sourceHash: string
-): Promise<{ admissionId: string; status: 'inserted' | 'updated' | 'skipped'; reason?: string }> => {
+interface PublishResult {
+  admissionId: string;
+  status: 'inserted' | 'updated' | 'unchanged' | 'skipped';
+  reason?: string;
+  changedFields?: string[];
+}
+
+type Db = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+
+const insertChangelog = (
+  db: Db,
+  admissionId: string,
+  action: 'created' | 'updated' | 'status_changed',
+  field: string | null,
+  oldValue: unknown,
+  newValue: unknown,
+  summary: string,
+  metadata: Record<string, unknown>
+) =>
+  db.query(
+    `INSERT INTO changelogs (admission_id, actor_type, changed_by, action_type, field_name, old_value, new_value, diff_summary, metadata)
+     VALUES ($1, 'system', NULL, $2, $3, $4, $5, $6, $7)`,
+    [
+      admissionId,
+      action,
+      field,
+      oldValue === null || oldValue === undefined ? null : JSON.stringify(oldValue),
+      newValue === null || newValue === undefined ? null : JSON.stringify(newValue),
+      summary,
+      JSON.stringify(metadata),
+    ]
+  );
+
+/**
+ * Upsert one scraped record as a canonical admission.
+ *
+ * - New programs are created as `pending` (admin verification required).
+ * - A deadline change on a verified admission keeps it verified (it comes
+ *   from the official source) and notifies watching students; a changed
+ *   source URL sends it back for re-verification.
+ * - The `deadlines` row is kept in sync so reminders work for scraped data.
+ */
+const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, eventHash: string): Promise<PublishResult> => {
   const parsedDeadline = toIsoDateOrNull(record.source_last_date);
   if (!parsedDeadline) {
-    return { admissionId: '', status: 'skipped', reason: 'Record skipped because source_last_date is invalid or missing' };
+    return { admissionId: '', status: 'skipped', reason: 'source_last_date is invalid or missing' };
+  }
+
+  const title = normalizeText(record.source_program_title);
+  if (!title) {
+    return { admissionId: '', status: 'skipped', reason: 'source_program_title is missing' };
   }
 
   const universityId = await resolveUniversityId(record.source_university_name);
@@ -284,156 +310,148 @@ const publishRecord = async (
     return {
       admissionId: '',
       status: 'skipped',
-      reason: `Record skipped because source university could not be mapped: ${normalizeText(record.source_university_name)}`,
+      reason: `Unknown university "${normalizeText(record.source_university_name)}" (create it or add an alias)`,
     };
   }
 
-  const title = normalizeText(record.source_program_title);
+  const identityHash = computeIdentityHash(universityId, title);
   const sourceUrl = normalizeText(record.source_details_link) || null;
-  const degreeLevel = inferDegreeLevelFromTitle(title);
+  const scraperMetadata = {
+    source_university_name: normalizeText(record.source_university_name),
+    source_program_title: title,
+    source_publish_date: normalizeText(record.source_publish_date || ''),
+    source_last_date: normalizeText(record.source_last_date),
+    source_details_link: normalizeText(record.source_details_link),
+    programs_offered: Array.isArray(record.programs_offered) ? record.programs_offered : [],
+    programs_offered_count: Array.isArray(record.programs_offered) ? record.programs_offered.length : 0,
+    scraping_metadata: record.scraping_metadata || null,
+  };
+  const logMeta = { run_id: runId, event_hash: eventHash, source_system: 'AdmissionTimes-Scrapers' };
 
-  const universityResult = await query(
-    `
-      SELECT name, city, country
-      FROM universities
-      WHERE id = $1
-      LIMIT 1
-    `,
-    [universityId]
-  );
+  const outcome = await withTransaction(async (db) => {
+    // Identity match first; then adopt a legacy row (old date-based hash) for
+    // the same university + title, so no duplicate is created.
+    const existingResult = await db.query(
+      `
+        SELECT id::text AS id, title, deadline, source_url, verification_status
+        FROM admissions
+        WHERE is_active = true
+          AND (
+            source_record_hash = $1
+            OR (data_origin = 'scraper' AND university_id = $2
+                AND regexp_replace(lower(btrim(title)), '\\s+', ' ', 'g') = $3)
+          )
+        ORDER BY (source_record_hash = $1) DESC NULLS LAST, deadline DESC NULLS LAST
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [identityHash, universityId, normalizeTitleKey(title)]
+    );
+    const existing = existingResult.rows[0];
 
-  const universityName = normalizeText(universityResult.rows[0]?.name || record.source_university_name);
-  const location = [normalizeText(universityResult.rows[0]?.city), normalizeText(universityResult.rows[0]?.country)]
-    .filter(Boolean)
-    .join(', ') || null;
-  const fallbackDescription = buildFallbackDescription(title, universityName, degreeLevel, location);
+    if (!existing) {
+      // Store only what was scraped: no invented description, and the location
+      // is shown from the university record by the response contract.
+      const degreeLevel = inferDegreeLabel(title);
 
-  const result = await query(
-    `
-      INSERT INTO admissions (
-        university_id,
-        title,
-        description,
-        degree_level,
-        location,
-        deadline,
-        verification_status,
-        is_active,
-        data_origin,
-        source_system,
-        source_url,
-        source_record_hash,
-        source_last_seen_at,
-        ingestion_run_id,
-        requirements
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        'pending',
-        true,
-        'scraper',
-        'AdmissionTimes-Scrapers',
-        NOW(),
-        $6,
-        $7
-      )
-      ON CONFLICT (source_record_hash)
-      DO UPDATE SET
-        university_id = COALESCE(admissions.university_id, EXCLUDED.university_id),
-        title = EXCLUDED.title,
-        description = COALESCE(NULLIF(admissions.description, ''), EXCLUDED.description),
-        degree_level = COALESCE(NULLIF(admissions.degree_level, ''), EXCLUDED.degree_level),
-        location = COALESCE(NULLIF(admissions.location, ''), EXCLUDED.location),
-        deadline = EXCLUDED.deadline,
-        source_url = EXCLUDED.source_url,
-        source_last_seen_at = NOW(),
-        ingestion_run_id = EXCLUDED.ingestion_run_id,
-        requirements = COALESCE(admissions.requirements, '{}'::jsonb) || EXCLUDED.requirements,
-        verification_status = CASE
-          WHEN admissions.verification_status = 'verified'
-            AND (
-              admissions.title IS DISTINCT FROM EXCLUDED.title
-              OR admissions.deadline IS DISTINCT FROM EXCLUDED.deadline
-              OR COALESCE(admissions.source_url, '') IS DISTINCT FROM COALESCE(EXCLUDED.source_url, '')
-            )
-          THEN 'pending'::verification_status
-          ELSE admissions.verification_status
-        END,
-        needs_reverification = CASE
-          WHEN admissions.verification_status = 'verified'
-            AND (
-              admissions.title IS DISTINCT FROM EXCLUDED.title
-              OR admissions.deadline IS DISTINCT FROM EXCLUDED.deadline
-              OR COALESCE(admissions.source_url, '') IS DISTINCT FROM COALESCE(EXCLUDED.source_url, '')
-            )
-          THEN true
-          ELSE admissions.needs_reverification
-        END,
-        updated_at = NOW()
-      RETURNING id::text AS id, (xmax = 0) AS inserted
-    `,
-    [
-      universityId,
-      title,
-      fallbackDescription,
-      degreeLevel,
-      location,
-      parsedDeadline,
-      sourceUrl,
-      sourceHash,
-      runId,
-      JSON.stringify({
-        source_university_name: normalizeText(record.source_university_name),
-        source_program_title: normalizeText(record.source_program_title),
-        source_publish_date: normalizeText(record.source_publish_date || ''),
-        source_last_date: normalizeText(record.source_last_date),
-        source_details_link: normalizeText(record.source_details_link),
-        programs_offered: Array.isArray(record.programs_offered) ? record.programs_offered : [],
-        programs_offered_count: Array.isArray(record.programs_offered) ? record.programs_offered.length : 0,
-        scraping_metadata: record.scraping_metadata || null,
-      }),
-    ]
-  );
+      const inserted = await db.query(
+        `
+          INSERT INTO admissions (
+            university_id, title, description, degree_level, location, deadline,
+            verification_status, is_active, data_origin, source_system, source_url,
+            source_record_hash, source_last_seen_at, ingestion_run_id, requirements
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, 'pending', true, 'scraper', 'AdmissionTimes-Scrapers',
+                  $7, $8, NOW(), $9, $10)
+          RETURNING id::text AS id
+        `,
+        [
+          universityId,
+          title,
+          null,
+          degreeLevel,
+          null,
+          parsedDeadline,
+          sourceUrl,
+          identityHash,
+          runId,
+          JSON.stringify(scraperMetadata),
+        ]
+      );
+      const admissionId = String(inserted.rows[0].id);
 
-  const row = result.rows[0];
-  const admissionId = String(row.id);
-  const inserted = !!row.inserted;
+      await syncApplicationDeadline(db, admissionId, parsedDeadline);
+      await insertChangelog(db, admissionId, 'created', null, null, { title, deadline: parsedDeadline, source_url: sourceUrl }, 'Created from scraper; pending verification', logMeta);
+      return { admissionId, status: 'inserted' as const, changedFields: [] as string[], liveDeadlineChange: false };
+    }
 
+    const deadlineChanged = !existing.deadline || new Date(existing.deadline).toISOString() !== parsedDeadline;
+    const urlChanged = (existing.source_url || null) !== sourceUrl;
+    const wasVerified = existing.verification_status === 'verified';
+    const reverify = wasVerified && urlChanged;
+    const changedFields = [...(deadlineChanged ? ['deadline'] : []), ...(urlChanged ? ['source_url'] : [])];
+
+    await db.query(
+      `
+        UPDATE admissions
+        SET deadline = $2,
+            source_url = $3,
+            source_record_hash = $4,
+            data_origin = 'scraper',
+            -- Scraper writes are system updates (no user actor).
+            updated_by = NULL,
+            source_last_seen_at = NOW(),
+            ingestion_run_id = $5,
+            requirements = COALESCE(requirements, '{}'::jsonb) || $6::jsonb,
+            verification_status = CASE WHEN $7 THEN 'pending'::verification_status ELSE verification_status END,
+            needs_reverification = CASE WHEN $7 THEN true ELSE needs_reverification END,
+            updated_at = CASE WHEN $8 THEN NOW() ELSE updated_at END
+        WHERE id = $1
+      `,
+      [existing.id, parsedDeadline, sourceUrl, identityHash, runId, JSON.stringify(scraperMetadata), reverify, changedFields.length > 0]
+    );
+
+    if (deadlineChanged) {
+      await syncApplicationDeadline(db, existing.id, parsedDeadline);
+      await insertChangelog(db, existing.id, 'updated', 'deadline', existing.deadline, parsedDeadline, 'Scraper updated deadline', logMeta);
+    }
+    if (urlChanged) {
+      await insertChangelog(db, existing.id, 'updated', 'source_url', existing.source_url, sourceUrl, 'Scraper updated source link', logMeta);
+    }
+    if (reverify) {
+      await insertChangelog(db, existing.id, 'status_changed', 'verification_status', 'verified', 'pending', 'Source link changed; re-verification required', logMeta);
+    }
+
+    return {
+      admissionId: String(existing.id),
+      status: changedFields.length ? ('updated' as const) : ('unchanged' as const),
+      changedFields,
+      // Only a different calendar day is news for students (not a time-of-day correction).
+      liveDeadlineChange:
+        wasVerified && !reverify && deadlineChanged && (!existing.deadline || appDayOf(existing.deadline) !== appDayOf(parsedDeadline)),
+    };
+  });
+
+  // Students watching a live program learn about deadline changes right away.
+  if (outcome.liveDeadlineChange) {
+    const updated = await query(
+      `SELECT id::text AS id, title, university_id::text AS university_id, created_by::text AS created_by, updated_at FROM admissions WHERE id = $1`,
+      [outcome.admissionId]
+    );
+    if (updated.rows[0]) void notifyWatchersOfUpdate(updated.rows[0]);
+  }
+
+  return { admissionId: outcome.admissionId, status: outcome.status, changedFields: outcome.changedFields };
+};
+
+/** Mark runs stuck in 'running' (e.g. after a crash) as failed. */
+const failStaleRuns = async (): Promise<void> => {
   await query(
-    `
-      INSERT INTO changelogs (
-        admission_id,
-        actor_type,
-        changed_by,
-        action_type,
-        field_name,
-        old_value,
-        new_value,
-        diff_summary,
-        metadata
-      )
-      VALUES ($1, 'system', NULL, $2, 'deadline', NULL, $3, $4, $5)
-    `,
-    [
-      admissionId,
-      inserted ? 'created' : 'updated',
-      JSON.stringify({ title, deadline: parsedDeadline, source_url: sourceUrl }),
-      inserted
-        ? 'Scraper publish created canonical admission in pending verification state'
-        : 'Scraper publish updated canonical admission fields',
-      JSON.stringify({
-        run_id: runId,
-        source_record_hash: sourceHash,
-        source_system: 'AdmissionTimes-Scrapers',
-      }),
-    ]
+    `UPDATE scraper_ingestion_runs
+     SET status = 'failed', completed_at = NOW(), updated_at = NOW(),
+         error_log = COALESCE(error_log, '[]'::jsonb) || '["Run did not complete within 2 hours; marked failed"]'::jsonb
+     WHERE status = 'running' AND started_at < NOW() - INTERVAL '2 hours'`
   );
-
-  return { admissionId, status: inserted ? 'inserted' : 'updated' };
 };
 
 export const ingestBatch = async (
@@ -446,6 +464,8 @@ export const ingestBatch = async (
   if (!payload.records || payload.records.length === 0) {
     throw new AppError('records array is required', 400);
   }
+
+  await failStaleRuns();
 
   const canPublish = config.scraperIntegration.publishEnabled || !!payload.force_publish;
   const mode: ScraperIngestionMode = canPublish ? 'publish' : 'mirror';
@@ -479,6 +499,15 @@ export const ingestBatch = async (
         continue;
       }
 
+      if (published.status === 'unchanged') {
+        await logEvent(runId, 'skipped', record, sourceHash, {
+          canonicalAdmissionId: published.admissionId,
+          reason: 'No changes since last run',
+        });
+        skippedCount += 1;
+        continue;
+      }
+
       publishedCount += 1;
       if (published.status === 'updated') {
         updatedCount += 1;
@@ -486,6 +515,7 @@ export const ingestBatch = async (
 
       await logEvent(runId, published.status, record, sourceHash, {
         canonicalAdmissionId: published.admissionId,
+        metadata: published.changedFields?.length ? { changed_fields: published.changedFields } : undefined,
       });
     } catch (error: any) {
       failedCount += 1;

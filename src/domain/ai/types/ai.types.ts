@@ -23,6 +23,8 @@ export interface AdmissionChatFilters {
   program_type?: string;
   delivery_mode?: string;
   deadline_within_days?: number;
+  /** YYYY-MM-DD — programs closing on this calendar day (Asia/Karachi). */
+  deadline_on?: string;
 }
 
 export interface GeminiChatExtraction {
@@ -34,6 +36,7 @@ export interface GeminiChatExtraction {
   program_type?: string | null;
   delivery_mode?: string | null;
   deadline_within_days?: number | null;
+  deadline_on?: string | null;
   clarification_question?: string | null;
   refusal_reason?: string | null;
 }
@@ -94,4 +97,35 @@ export interface AiHealthResponse {
 
 export interface ChatExecutionContext {
   userContext?: UserContext;
+}
+
+export interface CompareProgramsRequestDTO {
+  admission_ids: string[];
+  focus?: string;
+}
+
+export interface CompareProgramInput {
+  id: string;
+  title: string;
+  university_name: string;
+  degree_level: string | null;
+  field_of_study: string | null;
+  location: string | null;
+  application_fee: number | null;
+  fee_display: string | null;
+  deadline: string | null;
+  delivery_mode: string | null;
+  program_type: string | null;
+  description: string | null;
+  eligibility_text: string | null;
+  verification_status: string;
+  days_remaining: number | null;
+}
+
+export interface CompareProgramsResponse {
+  summary: string;
+  highlights: string[];
+  method: 'ai' | 'fallback';
+  provider: 'gemini' | 'rules';
+  model?: string;
 }

@@ -18,16 +18,8 @@ import {
   UpdateUserPreferencesDTO,
 } from '../types/user-preferences.types';
 import { DEFAULTS } from '../constants/user-preferences.constants';
+import type { UserContext } from '@shared/types/auth';
 
-/**
- * User context interface
- * Attached to requests by auth middleware
- */
-interface UserContext {
-  id: string | null;
-  role: 'student' | 'university' | 'admin' | 'guest';
-  university_id?: string | null;
-}
 
 /**
  * Get default preferences

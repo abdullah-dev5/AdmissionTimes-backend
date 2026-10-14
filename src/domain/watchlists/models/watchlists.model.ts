@@ -89,8 +89,8 @@ export const findMany = async (
  */
 export const create = async (data: CreateWatchlistDTO & { user_id: string }): Promise<Watchlist> => {
   const sql = `
-    INSERT INTO watchlists (user_id, admission_id, notes)
-    VALUES ($1, $2, $3)
+    INSERT INTO watchlists (user_id, admission_id, notes, alert_opt_in)
+    VALUES ($1, $2, $3, $4)
     RETURNING *
   `;
 
@@ -98,6 +98,7 @@ export const create = async (data: CreateWatchlistDTO & { user_id: string }): Pr
     data.user_id,
     data.admission_id,
     data.notes || null,
+    data.alert_opt_in === true,
   ];
 
   const result = await query(sql, params);
@@ -113,9 +114,12 @@ export const create = async (data: CreateWatchlistDTO & { user_id: string }): Pr
 export const createOrGet = async (
   data: CreateWatchlistDTO & { user_id: string }
 ): Promise<Watchlist> => {
-  // Try to find existing
+  // Try to find existing; saving again with alerts on must turn alerts on.
   const existing = await findByUserAndAdmission(data.user_id, data.admission_id);
   if (existing) {
+    if (data.alert_opt_in === true && !existing.alert_opt_in) {
+      return (await update(existing.id, { alert_opt_in: true })) || existing;
+    }
     return existing;
   }
 

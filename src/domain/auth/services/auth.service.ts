@@ -1,138 +1,150 @@
 /**
  * Auth Domain - Service Layer
- * 
- * Business logic and orchestration for authentication.
- * 
- * Responsibilities:
- * - Implement business rules
- * - Validate user data
- * - Handle authentication logic
- * - Return formatted responses
- * 
- * NO HTTP concerns - that belongs in the controller layer.
+ *
+ * Supabase Auth owns credentials and sessions. This service:
+ * - creates the application profile for a newly registered Supabase user,
+ *   after proving that the supplied auth_user_id really belongs to the email;
+ * - offers password sign-in for API clients that cannot use the Supabase SDK;
+ * - returns the current profile.
  */
 
 import { AppError } from '@shared/middleware/errorHandler';
 import { query } from '@db/connection';
+import { getSupabaseAdminClient, getSupabaseAnonClient } from '@shared/supabase/clients';
+import { createLogger } from '@shared/utils/logger';
 import * as authModel from '../models/auth.model';
 import { SignUpDTO, SignInDTO, SignUpResponse, SignInResponse, AuthUser } from '../types/auth.types';
 
-/**
- * Sign up a new user
- * 
- * @param data - Sign up data
- * @returns Sign up response
- * @throws AppError if validation fails or email already exists
- */
-export const signUp = async (data: SignUpDTO): Promise<SignUpResponse> => {
-  // Check if email already exists
-  const emailExists = await authModel.emailExists(data.email);
-  if (emailExists) {
-    throw new AppError('Email already exists', 400);
-  }
+const log = createLogger('AuthService');
 
-  // Phase 2 enforcement: university accounts must be linked to an existing university.
-  if (data.user_type === 'university') {
-    if (!data.university_id) {
-      throw new AppError('University ID is required for university accounts', 400);
-    }
+/** Supabase identities may be at most this old when claimed via signup. */
+const SIGNUP_CLAIM_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-    const exists = await authModel.universityExists(data.university_id);
-    if (!exists) {
-      throw new AppError('Invalid university ID', 400);
-    }
-  }
+const DEFAULT_NOTIFICATION_CATEGORIES = { verification: true, deadline: true, system: true, update: true };
 
-  // Create user
-  const user = await authModel.createUser(data);
-
-  // Initialize email preferences for new user
+const initializePreferences = async (userId: string): Promise<void> => {
   try {
-    const defaultCategories = {
-      verification: true,
-      deadline: true,
-      system: true,
-      update: true,
-    };
-
     await query(
-      `INSERT INTO user_preferences (
-         user_id,
-         email_notifications_enabled,
-         push_notifications_enabled,
-         notification_categories
-       )
-       VALUES ($1, $2, $3, $4::jsonb)
+      `INSERT INTO user_preferences (user_id, email_notifications_enabled, push_notifications_enabled, notification_categories)
+       VALUES ($1, true, true, $2::jsonb)
        ON CONFLICT (user_id) DO NOTHING`,
-      [user.id, true, true, JSON.stringify(defaultCategories)]
+      [userId, JSON.stringify(DEFAULT_NOTIFICATION_CATEGORIES)]
     );
-
-    console.log(`✅ [Auth] Email preferences initialized for user ${user.id}`);
-  } catch (preferencesError: any) {
-    console.error(`⚠️ [Auth] Failed to initialize email preferences for user ${user.id}:`, {
-      error: preferencesError?.message || String(preferencesError),
-    });
-    // Don't throw - preferences initialization failure shouldn't block signup
+  } catch (error) {
+    // Preferences fall back to defaults when missing; never block signup.
+    log.warn(`Could not initialize preferences for ${userId}`, (error as Error)?.message);
   }
-
-  return {
-    user,
-    message: 'Account created successfully',
-  };
 };
 
 /**
- * Sign in a user
- * 
- * @param data - Sign in data
- * @returns Sign in response
- * @throws AppError if credentials are invalid
+ * Confirm via the Supabase Admin API that `authUserId` exists, belongs to
+ * `email`, and was created recently. Prevents claiming someone else's identity.
+ */
+const assertIdentityOwnership = async (authUserId: string, email: string): Promise<void> => {
+  const admin = getSupabaseAdminClient();
+  if (!admin) {
+    throw new AppError('Signup is unavailable: Supabase service role is not configured', 503);
+  }
+
+  const { data, error } = await admin.auth.admin.getUserById(authUserId);
+  const authUser = data?.user;
+  if (error || !authUser) {
+    throw new AppError('Unknown authentication identity', 400, true, { auth_user_id: 'No such Supabase user' });
+  }
+
+  if ((authUser.email || '').toLowerCase() !== email.toLowerCase()) {
+    throw new AppError('Email does not match the authentication identity', 400, true, {
+      email: 'Email does not match the Supabase account',
+    });
+  }
+
+  const createdAt = Date.parse(authUser.created_at);
+  if (Number.isFinite(createdAt) && Date.now() - createdAt > SIGNUP_CLAIM_WINDOW_MS) {
+    throw new AppError('This identity can no longer be claimed through signup. Sign in instead.', 409);
+  }
+};
+
+/**
+ * Create the student profile for a Supabase user created by the client.
+ */
+export const signUp = async (data: SignUpDTO): Promise<SignUpResponse> => {
+  const email = data.email.trim().toLowerCase();
+  await assertIdentityOwnership(data.auth_user_id, email);
+
+  const existingByIdentity = await authModel.findByAuthUserId(data.auth_user_id);
+  if (existingByIdentity) {
+    return { user: existingByIdentity, message: 'Account already exists' };
+  }
+
+  const existingByEmail = await authModel.findByEmail(email);
+  let user: AuthUser;
+
+  if (existingByEmail) {
+    if (existingByEmail.auth_user_id || existingByEmail.role === 'admin') {
+      throw new AppError('Email already exists', 409, true, { email: 'Email already exists' });
+    }
+    // Legacy profile without an auth identity: attach it.
+    const linked = await authModel.linkAuthIdentity(existingByEmail.id, data.auth_user_id);
+    if (!linked) throw new AppError('Email already exists', 409, true, { email: 'Email already exists' });
+    user = linked;
+  } else {
+    user = await authModel.createStudentProfile({
+      auth_user_id: data.auth_user_id,
+      email,
+      display_name: data.display_name?.trim() || email.split('@')[0],
+    });
+  }
+
+  await initializePreferences(user.id);
+  return { user, message: 'Account created successfully' };
+};
+
+/**
+ * Password sign-in through Supabase for API clients (scripts, tests, tools).
+ * The web and mobile apps sign in with the Supabase SDK directly.
  */
 export const signIn = async (data: SignInDTO): Promise<SignInResponse> => {
-  // Verify credentials
-  const user = await authModel.verifyCredentials(data.email, data.password);
+  const supabase = getSupabaseAnonClient();
+  if (!supabase) {
+    throw new AppError('Sign-in is unavailable: Supabase is not configured', 503);
+  }
 
+  const { data: authData, error } = await supabase.auth.signInWithPassword({
+    email: data.email.trim().toLowerCase(),
+    password: data.password,
+  });
+
+  if (error || !authData.session || !authData.user) {
+    const unconfirmed = error?.message?.toLowerCase().includes('email not confirmed');
+    throw new AppError(
+      unconfirmed ? 'Please verify your email before signing in' : 'Invalid email or password',
+      unconfirmed ? 403 : 401
+    );
+  }
+
+  const user = await authModel.findByAuthUserId(authData.user.id);
   if (!user) {
-    throw new AppError('Invalid email or password', 401);
+    // First sign-in for a self-registered user whose profile was never created:
+    // the JWT middleware provisions it on the first authenticated request.
+    throw new AppError('Profile not initialized yet. Call GET /auth/me with the access token.', 409);
+  }
+  if (user.status !== 'active') {
+    throw new AppError('Account suspended', 403);
   }
 
   return {
     user,
     message: 'Signed in successfully',
+    access_token: authData.session.access_token,
+    refresh_token: authData.session.refresh_token,
+    expires_at: authData.session.expires_at,
   };
 };
 
-/**
- * Sign out a user
- * 
- * For basic auth, this is just a placeholder.
- * In future, will invalidate JWT tokens.
- * 
- * @returns Success message
- */
-export const signOut = async (): Promise<{ message: string }> => {
-  // For basic auth, just return success
-  // In future, will invalidate JWT tokens
-  return {
-    message: 'Signed out successfully',
-  };
-};
-
-/**
- * Get current user
- * 
- * @param userId - User ID from JWT middleware (database ID, not auth_user_id)
- * @returns User data
- * @throws AppError if user not found
- */
 export const getCurrentUser = async (userId: string): Promise<AuthUser> => {
-  // JWT middleware now returns database ID, not auth_user_id
-  // Use findUserById instead of findUserByAuthUserId
   const user = await authModel.findUserById(userId);
-
   if (!user) {
     throw new AppError('User not found', 401);
   }
-
   return user;
 };
