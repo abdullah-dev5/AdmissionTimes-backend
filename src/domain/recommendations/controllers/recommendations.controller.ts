@@ -29,8 +29,10 @@ export const getMyRecommendations = async (
     }
 
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
-    const minScore = parseInt(req.query.min_score as string) || 50;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 10, 1), 50);
+    // `|| 50` would turn an explicit min_score=0 into 50.
+    const parsedMinScore = parseInt(req.query.min_score as string, 10);
+    const minScore = Number.isFinite(parsedMinScore) ? Math.min(Math.max(parsedMinScore, 0), 100) : 50;
 
     const recommendations = await recommendationsService.getRecommendations(
       userContext.id,
