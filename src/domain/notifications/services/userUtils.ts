@@ -6,6 +6,9 @@
  */
 
 import { query } from '@db/connection';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('userUtils');
 
 /**
  * Fetch user's email address by user ID
@@ -21,7 +24,7 @@ export const getUserEmail = async (userId: string): Promise<string | null> => {
 
     return result.rows[0]?.email || null;
   } catch (error) {
-    console.error('[UserUtils] Error fetching user email:', error);
+    log.error('Error fetching user email:', error);
     return null;
   }
 };
@@ -55,7 +58,7 @@ export const getUserEmailPreferences = async (
       emailEnabled: result.rows[0].email_enabled !== false,
     };
   } catch (error) {
-    console.error('[UserUtils] Error fetching user email preferences:', error);
+    log.error('Error fetching user email preferences:', error);
     return { email: null, emailEnabled: false };
   }
 };
@@ -117,7 +120,7 @@ export const getUserNotificationPreferences = async (
       },
     };
   } catch (error) {
-    console.error('[UserUtils] Error fetching user notification preferences:', error);
+    log.error('Error fetching user notification preferences:', error);
     return {
       email: null,
       emailEnabled: false,

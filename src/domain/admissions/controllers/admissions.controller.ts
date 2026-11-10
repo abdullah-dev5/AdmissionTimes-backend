@@ -8,16 +8,12 @@ import { AppError } from '@shared/middleware/errorHandler';
 import { calculatePagination, parsePagination } from '@shared/utils/pagination';
 import * as admissionsService from '../services/admissions.service';
 import { parsePDFAndExtract } from '../services/pdf.service';
-import * as moderationService from '@domain/admin/services/admin.service';
 import { getByAdmissionId } from '@domain/deadlines/services/deadlines.service';
 import {
   CreateAdmissionDTO,
   UpdateAdmissionDTO,
-  RejectAdmissionDTO,
-  VerifyAdmissionDTO,
   AdmissionQueryParams,
 } from '../types/admissions.types';
-import type { AuthenticatedUserContext } from '@shared/types/auth';
 
 const PDF_MAGIC = Buffer.from('%PDF-');
 
@@ -48,27 +44,7 @@ export const submitAdmission = async (req: Request, res: Response): Promise<void
   sendSuccess(res, admission, 'Admission submitted for verification');
 };
 
-/** Legacy alias for POST /admin/admissions/:id/verify (admin-only route). */
-export const verifyAdmission = async (req: Request, res: Response): Promise<void> => {
-  const data = (req.validated || {}) as VerifyAdmissionDTO;
-  const admission = await moderationService.verifyAdmission(
-    req.params.id,
-    { verification_status: 'verified', admin_notes: data.notes || undefined },
-    req.user as AuthenticatedUserContext
-  );
-  sendSuccess(res, admission, 'Admission verified successfully');
-};
 
-/** Legacy alias for POST /admin/admissions/:id/verify with status=rejected. */
-export const rejectAdmission = async (req: Request, res: Response): Promise<void> => {
-  const data = req.validated as RejectAdmissionDTO;
-  const admission = await moderationService.verifyAdmission(
-    req.params.id,
-    { verification_status: 'rejected', rejection_reason: data.rejection_reason },
-    req.user as AuthenticatedUserContext
-  );
-  sendSuccess(res, admission, 'Admission rejected successfully');
-};
 
 export const deleteAdmission = async (req: Request, res: Response): Promise<void> => {
   const admission = await admissionsService.remove(req.params.id, req.user);

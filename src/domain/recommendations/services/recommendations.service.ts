@@ -18,6 +18,9 @@ import {
   RECOMMENDATION_CACHE_TTL_HOURS,
   getRecommendationExpiresAt,
 } from '../recommendations.constants';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('recommendations.service');
 
 export { getRecommendationExpiresAt };
 
@@ -171,14 +174,14 @@ export const getRecommendations = async (
       recommendationMetrics.async_refresh_triggered_total += 1;
       void generateRecommendationsForUser(userId).catch((error) => {
         recommendationMetrics.async_refresh_failed_total += 1;
-        console.warn(`[Recommendations] Async refresh skipped for user ${userId}:`, error);
+        log.warn(`Async refresh skipped for user ${userId}:`, error);
       });
     } else {
       recommendationMetrics.async_refresh_skipped_total += 1;
     }
   } catch (error) {
     recommendationMetrics.async_refresh_failed_total += 1;
-    console.warn(`[Recommendations] Failed to evaluate refresh signal for user ${userId}:`, error);
+    log.warn(`Failed to evaluate refresh signal for user ${userId}:`, error);
   }
 
   return recommendations;
@@ -211,7 +214,7 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
 
   // If no watchlist, show popular programs
   if (watchlistCount === 0) {
-    console.log(`[Recommendations] User ${userId} has no watchlist, showing popular programs...`);
+    log.debug(`User ${userId} has no watchlist, showing popular programs...`);
     const created = await generatePopularRecommendations(userId);
     recommendationMetrics.generation_mode_counts.popular += 1;
     recommendationMetrics.generation_created_total += created;
@@ -278,7 +281,8 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
       WHERE a.verification_status = 'verified'
         AND a.deadline > NOW()
         AND a.is_active = true
-      ORDER BY score DESC
+      -- Ties: soonest deadline first, then newest (stable, not table order).
+      ORDER BY score DESC, a.deadline ASC, a.created_at DESC
       LIMIT 20  -- Generate top 20 recommendations
     )
     SELECT * FROM scored_recommendations WHERE score >= 50;  -- Align with API min_score default
@@ -288,7 +292,7 @@ export const generateRecommendationsForUser = async (userId: string): Promise<nu
   
   // If no collaborative recommendations, use content-based fallback
   if (result.rows.length === 0) {
-    console.log(`[Recommendations] No collaborative recommendations for user ${userId}, using fallback...`);
+    log.debug(`No collaborative recommendations for user ${userId}, using fallback...`);
     const created = await generateFallbackRecommendations(userId);
     recommendationMetrics.generation_mode_counts.fallback += 1;
     recommendationMetrics.generation_created_total += created;
@@ -330,11 +334,12 @@ const generateFallbackRecommendations = async (userId: string): Promise<number> 
     user_preferences AS (
       -- Extract patterns from user's watchlist
       SELECT 
-        array_agg(DISTINCT a.degree_level) as preferred_degrees,
-        array_agg(DISTINCT a.location) as preferred_locations,
+        array_agg(DISTINCT a.degree_level) FILTER (WHERE a.degree_level IS NOT NULL) as preferred_degrees,
+        array_agg(DISTINCT COALESCE(a.location, u.city)) FILTER (WHERE COALESCE(a.location, u.city) IS NOT NULL) as preferred_locations,
         AVG(a.application_fee) as avg_fee
       FROM watchlists w
       INNER JOIN admissions a ON w.admission_id = a.id
+      LEFT JOIN universities u ON u.id = a.university_id
       WHERE w.user_id = $1
     ),
     fallback_recommendations AS (
@@ -346,7 +351,7 @@ const generateFallbackRecommendations = async (userId: string): Promise<number> 
           -- Degree level match (40 points)
           CASE WHEN a.degree_level = ANY(up.preferred_degrees) THEN 40 ELSE 20 END +
           -- Location match (30 points)
-          CASE WHEN a.location = ANY(up.preferred_locations) THEN 30 ELSE 10 END +
+          CASE WHEN COALESCE(a.location, uc.city) = ANY(up.preferred_locations) THEN 30 ELSE 10 END +
           -- Fee similarity (20 points)
           CASE 
             WHEN up.avg_fee IS NULL THEN 10
@@ -362,27 +367,29 @@ const generateFallbackRecommendations = async (userId: string): Promise<number> 
           END
         ) as score,
         CASE 
-          WHEN a.degree_level = ANY(up.preferred_degrees) AND a.location = ANY(up.preferred_locations) THEN
+          WHEN a.degree_level = ANY(up.preferred_degrees) AND COALESCE(a.location, uc.city) = ANY(up.preferred_locations) THEN
             'Similar to programs you saved'
           WHEN a.degree_level = ANY(up.preferred_degrees) THEN
             'Same degree level as your saved programs'
-          WHEN a.location = ANY(up.preferred_locations) THEN
+          WHEN COALESCE(a.location, uc.city) = ANY(up.preferred_locations) THEN
             'Same location as your saved programs'
           ELSE
             'You might be interested in this'
         END as reason,
         json_build_object(
           'degree_match', CASE WHEN a.degree_level = ANY(up.preferred_degrees) THEN true ELSE false END,
-          'location_match', CASE WHEN a.location = ANY(up.preferred_locations) THEN true ELSE false END,
+          'location_match', CASE WHEN COALESCE(a.location, uc.city) = ANY(up.preferred_locations) THEN true ELSE false END,
           'algorithm', 'content_based_fallback'
         ) as factors
       FROM admissions a
+      LEFT JOIN universities uc ON uc.id = a.university_id
       CROSS JOIN user_preferences up
       WHERE a.id NOT IN (SELECT admission_id FROM user_watchlist)
         AND a.verification_status = 'verified'
         AND a.deadline > NOW()
         AND a.is_active = true
-      ORDER BY score DESC
+      -- Ties: soonest deadline first, then newest (stable, not table order).
+      ORDER BY score DESC, a.deadline ASC, a.created_at DESC
       LIMIT 20
     )
     SELECT * FROM fallback_recommendations WHERE score >= 50;
@@ -391,7 +398,7 @@ const generateFallbackRecommendations = async (userId: string): Promise<number> 
   const result = await query(sql, [userId]);
 
   if (result.rows.length === 0) {
-    console.log(`[Recommendations] No fallback recommendations found for user ${userId}`);
+    log.debug(`No fallback recommendations found for user ${userId}`);
     return 0;
   }
 
@@ -405,7 +412,7 @@ const generateFallbackRecommendations = async (userId: string): Promise<number> 
     expires_at: getRecommendationExpiresAt()
   }));
 
-  console.log(`[Recommendations] Generated ${recommendations.length} fallback recommendations`);
+  log.debug(`Generated ${recommendations.length} fallback recommendations`);
   
   return await recommendationsModel.bulkCreate(recommendations);
 };
@@ -458,7 +465,8 @@ const generatePopularRecommendations = async (userId: string): Promise<number> =
         AND a.deadline > NOW()
         AND a.is_active = true
       GROUP BY a.id
-      ORDER BY score DESC
+      -- Ties: soonest deadline first, then newest (stable, not table order).
+      ORDER BY score DESC, a.deadline ASC, a.created_at DESC
       LIMIT 20
     )
     SELECT * FROM popular_programs WHERE score >= 50;
@@ -467,7 +475,7 @@ const generatePopularRecommendations = async (userId: string): Promise<number> =
   const result = await query(sql, [userId]);
 
   if (result.rows.length === 0) {
-    console.log(`[Recommendations] No popular programs found for user ${userId}`);
+    log.debug(`No popular programs found for user ${userId}`);
     return 0;
   }
 
@@ -481,7 +489,7 @@ const generatePopularRecommendations = async (userId: string): Promise<number> =
     expires_at: getRecommendationExpiresAt()
   }));
 
-  console.log(`[Recommendations] Generated ${recommendations.length} popular recommendations`);
+  log.debug(`Generated ${recommendations.length} popular recommendations`);
   
   return await recommendationsModel.bulkCreate(recommendations);
 };
@@ -513,7 +521,7 @@ export const generateRecommendationsForAllUsers = async (
   let totalRecommendations = 0;
   let usersProcessed = 0;
 
-  console.log(`[Recommendations] Starting batch generation for ${userIds.length} users...`);
+  log.debug(`Starting batch generation for ${userIds.length} users...`);
 
   // Process users in batches
   for (let i = 0; i < userIds.length; i += batchSize) {
@@ -526,7 +534,7 @@ export const generateRecommendationsForAllUsers = async (
           const count = await generateRecommendationsForUser(userId);
           return count;
         } catch (error) {
-          console.error(`[Recommendations] Error generating for user ${userId}:`, error);
+          log.error(`Error generating for user ${userId}:`, error);
           return 0;
         }
       })
@@ -536,10 +544,10 @@ export const generateRecommendationsForAllUsers = async (
     totalRecommendations += batchTotal;
     usersProcessed += batch.length;
 
-    console.log(`[Recommendations] Batch ${Math.ceil(i / batchSize) + 1}: ${batch.length} users, ${batchTotal} recommendations`);
+    log.debug(`Batch ${Math.ceil(i / batchSize) + 1}: ${batch.length} users, ${batchTotal} recommendations`);
   }
 
-  console.log(`[Recommendations] Batch generation complete: ${usersProcessed} users, ${totalRecommendations} recommendations`);
+  log.debug(`Batch generation complete: ${usersProcessed} users, ${totalRecommendations} recommendations`);
 
   return {
     usersProcessed,
@@ -555,7 +563,7 @@ export const generateRecommendationsForAllUsers = async (
  */
 export const cleanupExpiredRecommendations = async (): Promise<number> => {
   const count = await recommendationsModel.deleteExpired();
-  console.log(`[Recommendations] Cleaned up ${count} expired recommendations`);
+  log.debug(`Cleaned up ${count} expired recommendations`);
   return count;
 };
 

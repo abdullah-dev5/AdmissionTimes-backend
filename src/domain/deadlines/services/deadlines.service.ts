@@ -26,6 +26,10 @@ import { URGENCY_THRESHOLDS } from '../constants/deadlines.constants';
 import * as admissionsModel from '@domain/admissions/models/admissions.model';
 import { NOTIFICATION_PRIORITY, NOTIFICATION_TYPE, USER_TYPE } from '@config/constants';
 import { enqueueNotificationJob } from '@domain/notifications/services/notificationJobQueue';
+import { createLogger } from '@shared/utils/logger';
+import { calculateDaysRemaining as calculateContractDaysRemaining } from '@shared/utils/admissionContract';
+
+const log = createLogger('deadlines.service');
 
 const RETRY_BACKOFF_MS = [1000, 2000, 4000];
 
@@ -35,12 +39,9 @@ const RETRY_BACKOFF_MS = [1000, 2000, 4000];
  * @param deadlineDate - Deadline date (ISO8601)
  * @returns Days remaining (negative if overdue)
  */
-function calculateDaysRemaining(deadlineDate: string): number {
-  const deadline = new Date(deadlineDate);
-  const now = new Date();
-  const diffTime = deadline.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  return diffDays;
+/** Calendar days left in app time (same rule as the response contract and the apps); -1 when passed. */
+function calculateDaysRemaining(deadlineDate: string | Date): number {
+  return calculateContractDaysRemaining(new Date(deadlineDate).toISOString());
 }
 
 /**
@@ -296,7 +297,7 @@ export const triggerDeadlineReminderNotifications = async (
   ).sort((a, b) => b - a);
   const maxLookAhead = normalizedThresholds.length > 0 ? normalizedThresholds[0] : 7;
 
-  const targets = await deadlinesModel.findReminderTargets(maxLookAhead);
+  const targets = await deadlinesModel.findReminderTargets(maxLookAhead + 1);
   const forceRunKey = forceRun
     ? `manual-${new Date().toISOString().replace(/[:.]/g, '-')}`
     : null;
@@ -312,16 +313,10 @@ export const triggerDeadlineReminderNotifications = async (
   };
 
   for (const target of targets) {
-    const daysRemainingRaw = Number(target.days_remaining_precise);
-    const daysRemaining = Number.isFinite(daysRemainingRaw)
-      ? daysRemainingRaw
-      : calculateDaysRemaining(target.deadline_date);
-
-    // Threshold windows prevent misses from hourly scheduling jitter.
-    // Example: threshold 7 matches when daysRemaining is in (6, 7].
-    const matchedThreshold = normalizedThresholds.find(
-      (threshold) => daysRemaining > threshold - 1 && daysRemaining <= threshold
-    );
+    // Remind on the calendar day the apps show "7/3/1 days left". The hourly
+    // job may see a target several times that day; the event key dedupes.
+    const daysRemaining = calculateDaysRemaining(target.deadline_date);
+    const matchedThreshold = normalizedThresholds.find((threshold) => daysRemaining === threshold);
 
     if (!matchedThreshold) {
       continue;
@@ -339,7 +334,10 @@ export const triggerDeadlineReminderNotifications = async (
         notification_type: NOTIFICATION_TYPE.DEADLINE_NEAR,
         priority,
         title: `Deadline Approaching: ${target.admission_title}`,
-        message: `Your saved program has an upcoming ${target.deadline_type} deadline in ${matchedThreshold} day(s).`,
+        message:
+          matchedThreshold === 1
+            ? `The ${target.deadline_type} deadline for this saved program is tomorrow.`
+            : `The ${target.deadline_type} deadline for this saved program is in ${matchedThreshold} days.`,
         related_entity_type: 'deadline',
         related_entity_id: target.deadline_id,
         action_url: `/program/${target.admission_id}`,
@@ -386,7 +384,7 @@ export const triggerDeadlineReminderNotifications = async (
       failed += 1;
       const eventKey = reminderEventKey(target, matchedThreshold, forceRunKey);
 
-      console.error('❌ [DEADLINE-REMINDER] Failed to publish deadline reminder:', {
+      log.error('Failed to publish deadline reminder:', {
         deadline_id: target.deadline_id,
         recipient_id: target.recipient_id,
         error: error instanceof Error ? error.message : String(error),

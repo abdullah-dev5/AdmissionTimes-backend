@@ -106,13 +106,6 @@ router.post(
  *       403:
  *         description: Admin access required
  */
-// GET /api/v1/admin/dashboard - Get admin dashboard
-// NOTE: Commented out to use the comprehensive dashboard route in dashboard.routes.ts
-// which includes university name joins and proper CTE formatting
-// router.get(
-//   '/dashboard',
-//   adminController.getAdminDashboard
-// );
 
 /**
  * @swagger

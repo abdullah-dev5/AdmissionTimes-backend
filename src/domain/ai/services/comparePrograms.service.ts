@@ -8,6 +8,9 @@ import {
   CompareProgramsResponse,
 } from '../types/ai.types';
 import { generateJson, getGeminiUsageMetadata, isGeminiConfigured } from './gemini.client';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('comparePrograms.service');
 
 const resolveBackendAdmissionId = (id: string): string => id.split('::program::')[0].trim();
 
@@ -206,7 +209,7 @@ export const compareProgramsWithFallback = async (
       return buildRuleBasedProgramComparison(programs);
     }
 
-    console.warn('[AI Compare] Gemini failed, using rule-based fallback:', error);
+    log.warn('Gemini failed, using rule-based fallback:', error);
     const fallback = buildRuleBasedProgramComparison(programs);
     return {
       ...fallback,

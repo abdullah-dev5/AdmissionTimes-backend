@@ -7,6 +7,9 @@
 
 import { create } from './notifications.service';
 import { NotificationPriority, NotificationType, UserType } from '@config/constants';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('notificationPublisher');
 
 export interface NotificationRecipient {
   id: string;
@@ -38,18 +41,18 @@ export const publishNotification = async (input: PublishNotificationInput) => {
     event_key,
   } = input;
 
-  console.log(`📨 [PUBLISHER] publishNotification() called with:
+  log.debug(`publishNotification() called with:
    notification_type: ${notification_type}
    recipients count: ${recipients.length}
    recipients: [${recipients.map(r => `${r.role}(${r.id.substring(0,8)}...)`).join(', ')}]
    event_key: ${event_key}`);
 
   if (!recipients.length) {
-    console.log(`📨 [PUBLISHER] No recipients provided, returning empty array`);
+    log.debug(`No recipients provided, returning empty array`);
     return [];
   }
 
-  console.log(`📨 [PUBLISHER] Creating ${recipients.length} notifications...`);
+  log.debug(`Creating ${recipients.length} notifications...`);
   
   // Create notifications sequentially with detailed error logging
   const results: any[] = [];
@@ -57,7 +60,7 @@ export const publishNotification = async (input: PublishNotificationInput) => {
   let dedupedCount = 0;
   for (const recipient of recipients) {
     try {
-      console.log(`   → Creating for ${recipient.role} (${recipient.id.substring(0,8)}...)`);
+      log.debug(`   → Creating for ${recipient.role} (${recipient.id.substring(0,8)}...)`);
       const result = await create({
         recipient_id: recipient.id,
         role_type: recipient.role,
@@ -76,13 +79,13 @@ export const publishNotification = async (input: PublishNotificationInput) => {
 
       if (wasExisting) {
         dedupedCount += 1;
-        console.log(`   ⏭️ Deduped existing notification for ${recipient.role} (${recipient.id})`);
+        log.debug(`   ⏭️ Deduped existing notification for ${recipient.role} (${recipient.id})`);
       } else {
         createdCount += 1;
-        console.log(`   ✅ Created notification for ${recipient.role} (${recipient.id})`);
+        log.debug(`   ✅ Created notification for ${recipient.role} (${recipient.id})`);
       }
     } catch (error: any) {
-      console.error(`   ❌ Failed to create notification for ${recipient.role} (${recipient.id}):`, {
+      log.error(`   ❌ Failed to create notification for ${recipient.role} (${recipient.id}):`, {
         error: error?.message || String(error),
         recipient_id: recipient.id,
         recipient_role: recipient.role,
@@ -93,6 +96,6 @@ export const publishNotification = async (input: PublishNotificationInput) => {
   }
 
   const successCount = results.filter(r => r !== null).length;
-  console.log(`📨 [PUBLISHER] Completed. total_success=${successCount}/${recipients.length}, created=${createdCount}, deduped=${dedupedCount}`);
+  log.debug(`Completed. total_success=${successCount}/${recipients.length}, created=${createdCount}, deduped=${dedupedCount}`);
   return results;
 };

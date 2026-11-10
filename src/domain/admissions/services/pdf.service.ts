@@ -14,6 +14,7 @@ import { AppError } from '@shared/middleware/errorHandler';
 import { summarizeAdmissionTextWithFallback } from '@domain/ai/services/ai.service';
 
 // Support both legacy function export and v2 class export from pdf-parse.
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS-only module shape differs between versions
 const pdfParseModule = require('pdf-parse');
 const pdfParseFn = typeof pdfParseModule === 'function'
   ? pdfParseModule
@@ -106,8 +107,8 @@ export const extractFields = async (text: string): Promise<ExtractedPDFData> => 
   // Extract deadline
   // Look for date patterns: "Deadline:", "Application Deadline:", dates in various formats
   const deadlinePatterns = [
-    /(?:Deadline|Application Deadline|Last Date)[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
-    /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/g,
+    /(?:Deadline|Application Deadline|Last Date)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i,
+    /(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/g,
     /(?:Deadline|Application Deadline)[:\s]+([A-Z][a-z]+\s+\d{1,2},?\s+\d{4})/i,
   ];
   

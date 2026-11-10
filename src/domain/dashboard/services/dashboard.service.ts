@@ -21,6 +21,10 @@ import {
 } from '../types/dashboard.types';
 import * as recommendationsService from '@domain/recommendations/services/recommendations.service';
 import { withAdmissionContract, calculateDaysRemaining } from '@shared/utils/admissionContract';
+import { createLogger } from '@shared/utils/logger';
+import { sqlDaysLeft } from '@shared/utils/sqlDates';
+
+const log = createLogger('dashboard.service');
 
 const deriveActionLabel = (field: string | null | undefined, oldValue: string | null | undefined, newValue: string | null | undefined): 'Verified' | 'Rejected' | 'Updated' => {
   const normalizedField = String(field || '').toLowerCase();
@@ -149,11 +153,11 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
           COALESCE(u.name, 'Unknown University') as university_name,
           a.title as program_title,
           d.deadline_date::text as deadline,
-          EXTRACT(DAY FROM (d.deadline_date - NOW()))::int as days_remaining,
+          ${sqlDaysLeft('d.deadline_date')} as days_remaining,
           CASE 
-            WHEN EXTRACT(DAY FROM (d.deadline_date - NOW())) <= 3 THEN 'urgent'
-            WHEN EXTRACT(DAY FROM (d.deadline_date - NOW())) <= 7 THEN 'high'
-            WHEN EXTRACT(DAY FROM (d.deadline_date - NOW())) <= 14 THEN 'medium'
+            WHEN ${sqlDaysLeft('d.deadline_date')} <= 3 THEN 'urgent'
+            WHEN ${sqlDaysLeft('d.deadline_date')} <= 7 THEN 'high'
+            WHEN ${sqlDaysLeft('d.deadline_date')} <= 14 THEN 'medium'
             ELSE 'low'
           END as urgency_level,
           CASE WHEN w.id IS NOT NULL THEN true ELSE false END as saved,
@@ -225,7 +229,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
     let recommendedPrograms = row.recommended_programs || [];
     if (recommendedPrograms.length === 0) {
       try {
-        console.log(`[Dashboard] No recommendations found for user ${userId}, generating...`);
+        log.debug(`No recommendations found for user ${userId}, generating...`);
         await recommendationsService.generateRecommendationsForUser(userId);
         
         // Re-fetch recommendations after generation
@@ -265,9 +269,9 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
         `;
         const recsResult = await query(recsQuery, [userId]);
         recommendedPrograms = recsResult.rows;
-        console.log(`[Dashboard] Generated ${recommendedPrograms.length} recommendations`);
+        log.debug(`Generated ${recommendedPrograms.length} recommendations`);
       } catch (genError) {
-        console.warn('[Dashboard] Failed to generate recommendations:', genError);
+        log.warn('Failed to generate recommendations:', genError);
         // Continue without recommendations rather than failing the entire dashboard
       }
     }
@@ -306,7 +310,7 @@ export const getStudentDashboard = async (userId: string): Promise<StudentDashbo
 
     return dashboardData;
   } catch (error: any) {
-    console.error('Error fetching student dashboard:', error);
+    log.error('Error fetching student dashboard:', error);
     throw new AppError(
       `Failed to fetch student dashboard: ${error.message}`,
       500
@@ -379,7 +383,7 @@ export const getUniversityDashboard = async (
     // University IDs should ONLY contain organization IDs, NOT auth_user_ids
     const combinedUniversityIds = allUniversityIds;
 
-    console.log('🔵 [dashboardService] Linked identities resolved:', {
+    log.debug('Linked identities resolved:', {
       userId,
       universityId,
       combinedUserIds,
@@ -667,7 +671,7 @@ export const getUniversityDashboard = async (
 
     return dashboardData;
   } catch (error: any) {
-    console.error('Error fetching university dashboard:', error);
+    log.error('Error fetching university dashboard:', error);
     throw new AppError(
       `Failed to fetch university dashboard: ${error.message}`,
       500
@@ -763,7 +767,8 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
         SELECT DISTINCT
           d.id::text AS deadline_id,
           w.user_id::text AS recipient_id,
-          CEIL(EXTRACT(EPOCH FROM (d.deadline_date - NOW())) / 86400.0)::int AS days_remaining
+          -- Calendar days in Pakistan time: the same rule the reminder job uses.
+          ${sqlDaysLeft('d.deadline_date')} AS days_remaining
         FROM deadlines d
         JOIN admissions a ON a.id = d.admission_id
         JOIN watchlists w ON w.admission_id = a.id
@@ -844,7 +849,7 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
         ), '[]'::json) AS scraper_activity;
     `;
 
-    console.log('🔍 [getAdminDashboard] Executing dashboard query...');
+    log.debug('Executing dashboard query...');
     const [result, coverageResult] = await Promise.all([
       query(dashboardQuery, []),
       query(reminderCoverageQuery, []),
@@ -861,7 +866,7 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
       scraperJobsRunning = parseInt(scraperRow.scraper_jobs_running || 0, 10);
       scraperActivity = scraperRow.scraper_activity || [];
     } catch (scraperError: any) {
-      console.warn('[getAdminDashboard] Scraper activity query fallback:', scraperError?.message || scraperError);
+      log.warn('Scraper activity query fallback:', scraperError?.message || scraperError);
     }
 
     const byThreshold = coverageRows.map((coverage: any) => ({
@@ -876,7 +881,7 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
     const totalSentNow = byThreshold.reduce((sum, item) => sum + item.sent_targets, 0);
     const totalMissingNow = byThreshold.reduce((sum, item) => sum + item.missing_targets, 0);
 
-    console.log('🔍 [getAdminDashboard] Raw pending_verifications:', JSON.stringify(row.pending_verifications, null, 2));
+    log.debug('Raw pending_verifications:', JSON.stringify(row.pending_verifications, null, 2));
 
     // Transform the result to match the expected structure
     // Ensure all fields use snake_case and proper types
@@ -919,7 +924,7 @@ export const getAdminDashboard = async (userId: string): Promise<AdminDashboardD
 
     return dashboardData;
   } catch (error: any) {
-    console.error('Error fetching admin dashboard:', error);
+    log.error('Error fetching admin dashboard:', error);
     throw new AppError(
       `Failed to fetch admin dashboard: ${error.message}`,
       500

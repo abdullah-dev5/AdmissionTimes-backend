@@ -13,6 +13,11 @@ import { config } from '@config/config';
 import type { Notification } from '@domain/notifications/types/notifications.types';
 import { createEmailDeliveryLog } from '@domain/notifications/models/notifications.model';
 import { emailTemplates } from '@shared/email/emailTemplates';
+import { createLogger } from '@shared/utils/logger';
+import { query } from '@db/connection';
+import { calculateDaysRemaining } from '@shared/utils/admissionContract';
+
+const log = createLogger('emailDelivery');
 
 let transporter: Transporter | null = null;
 const MAX_EMAIL_SEND_ATTEMPTS = 3;
@@ -56,7 +61,7 @@ const safeWriteEmailLog = async (input: {
       provider_message_id: input.providerMessageId || null,
     });
   } catch (logError) {
-    console.error('[EmailDelivery] Failed to write email delivery log (non-blocking):', logError);
+    log.error('Failed to write email delivery log (non-blocking):', logError);
   }
 };
 
@@ -65,7 +70,7 @@ const safeWriteEmailLog = async (input: {
  */
 const getTransporter = (): Transporter | null => {
   if (!config.email.enabled) {
-    console.log('[EmailDelivery] Email disabled, skipping transport initialization');
+    log.debug('Email disabled, skipping transport initialization');
     emailReadiness.enabled = false;
     emailReadiness.ready = false;
     emailReadiness.lastVerifyError = 'Email disabled by configuration';
@@ -73,7 +78,7 @@ const getTransporter = (): Transporter | null => {
   }
 
   if (!config.email.user || !config.email.pass) {
-    console.error('[EmailDelivery] Email is enabled but SMTP credentials are incomplete (SMTP_USER/SMTP_PASS required)');
+    log.error('Email is enabled but SMTP credentials are incomplete (SMTP_USER/SMTP_PASS required)');
     emailReadiness.enabled = true;
     emailReadiness.ready = false;
     emailReadiness.lastVerifyError = 'SMTP credentials incomplete';
@@ -94,9 +99,9 @@ const getTransporter = (): Transporter | null => {
         maxConnections: 5,
         maxMessages: 100,
       });
-      console.log('[EmailDelivery] SMTP transport initialized:', config.email.host);
+      log.debug('SMTP transport initialized:', config.email.host);
     } catch (error) {
-      console.error('[EmailDelivery] Failed to initialize SMTP transport:', error);
+      log.error('Failed to initialize SMTP transport:', error);
       emailReadiness.enabled = true;
       emailReadiness.ready = false;
       emailReadiness.lastVerifyError = error instanceof Error ? error.message : String(error);
@@ -125,11 +130,11 @@ export const verifyEmailTransport = async (): Promise<EmailReadinessState> => {
     await transport.verify();
     emailReadiness.ready = true;
     emailReadiness.lastVerifyError = null;
-    console.log('[EmailDelivery] SMTP transport verified successfully');
+    log.debug('SMTP transport verified successfully');
   } catch (error) {
     emailReadiness.ready = false;
     emailReadiness.lastVerifyError = error instanceof Error ? error.message : String(error);
-    console.error('[EmailDelivery] SMTP transport verification failed:', error);
+    log.error('SMTP transport verification failed:', error);
   }
 
   return { ...emailReadiness };
@@ -140,50 +145,73 @@ export const getEmailDeliveryReadiness = (): EmailReadinessState => {
 };
 
 /**
- * Generate email subject and body from notification
+ * Links in notifications are app paths ("/program/<id>"). Email clients need
+ * absolute URLs, so they are joined with WEB_APP_URL; without it the button
+ * is omitted rather than sending a broken link.
  */
-const formatEmailContent = (notification: Notification): { subject: string; html: string; text: string } => {
-  const typeLabels: Record<string, string> = {
-    admission_verified: 'Admission Verified',
-    admission_rejected: 'Admission Rejected',
-    admission_updated_saved: 'Admission Updated',
-    deadline_near: 'Deadline Reminder',
-    admission_submitted: 'New Admission Submitted',
-    system_broadcast: 'System Announcement',
-  };
+export const toAbsoluteAppUrl = (link: string | null | undefined): string | undefined => {
+  if (!link) return undefined;
+  if (/^https?:\/\//i.test(link)) return link;
+  if (!config.webAppUrl || !link.startsWith('/')) return undefined;
+  return `${config.webAppUrl}${link}`;
+};
 
-  const subject = typeLabels[notification.notification_type] || 'New Notification';
+const formatDeadlineDate = (value: Date): string =>
+  new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Karachi' }).format(value);
 
-  // Use branded template for deadline reminders
+/** Real details for a deadline reminder (the notification only references the deadline row). */
+const loadReminderDetails = async (notification: Notification) => {
+  if (!notification.related_entity_id) return null;
+  const result = await query(
+    `SELECT d.deadline_date, a.title, u.name AS university_name, r.display_name AS recipient_name
+       FROM deadlines d
+       JOIN admissions a ON a.id = d.admission_id
+       LEFT JOIN universities u ON u.id = a.university_id
+       LEFT JOIN users r ON r.id = $2
+      WHERE d.id = $1`,
+    [notification.related_entity_id, notification.recipient_id]
+  );
+  return result.rows[0] || null;
+};
+
+const SUBJECTS: Record<string, string> = {
+  admission_verified: 'Admission Verified',
+  admission_rejected: 'Admission Rejected',
+  admission_updated_saved: 'Admission Updated',
+  deadline_near: 'Deadline Reminder',
+  admission_submitted: 'New Admission Submitted',
+  system_broadcast: 'System Announcement',
+};
+
+/** Subject and body for a notification email. */
+const formatEmailContent = async (notification: Notification): Promise<{ subject: string; html: string; text: string }> => {
+  const subject = SUBJECTS[notification.notification_type] || 'New Notification';
+  const link = toAbsoluteAppUrl(notification.action_url);
+
   if (notification.notification_type === 'deadline_near') {
-    // Extract deadline info from notification title/message or use defaults
-    const programName = notification.title || 'Application';
-    const universityName = notification.university_name || 'University';
-    
-    const { html, text } = emailTemplates.deadlineReminder({
-      user_name: 'Student',
-      program_name: programName,
-      university_name: universityName,
-      deadline_date: 'upcoming',
-      days_left: '7', // Default, can be updated if stored in message parsing
-      portal_url: notification.action_url || 'https://admissiontimes.local',
-    });
-    
-    return {
-      subject: `Admission Times | Deadline reminder: ${programName}`,
-      html,
-      text,
-    };
+    const details = await loadReminderDetails(notification).catch(() => null);
+    if (details?.deadline_date) {
+      const deadline = new Date(details.deadline_date);
+      const days = calculateDaysRemaining(deadline.toISOString());
+      const programName = details.title || notification.title;
+      const { html, text } = emailTemplates.deadlineReminder({
+        user_name: details.recipient_name || 'there',
+        program_name: programName,
+        university_name: details.university_name || 'the university',
+        deadline_date: formatDeadlineDate(deadline),
+        days_left: days <= 0 ? 'less than a day' : days === 1 ? '1 day' : `${days} days`,
+        portal_url: link,
+      });
+      return { subject: `Admission Times | Deadline reminder: ${programName}`, html, text };
+    }
   }
 
-  // Generic branded template for other notifications
   const { html, text } = emailTemplates.notification(
-    subject,
+    notification.title || subject,
     notification.message,
-    notification.action_url ? 'View Details' : undefined,
-    notification.action_url || undefined
+    link ? 'View details' : undefined,
+    link
   );
-
   return { subject, html, text };
 };
 
@@ -196,11 +224,11 @@ export const sendNotificationEmail = async (
   notification: Notification,
   recipientEmail: string
 ): Promise<void> => {
-  const { subject, html, text } = formatEmailContent(notification);
+  const { subject, html, text } = await formatEmailContent(notification);
   const transport = getTransporter();
 
   if (!transport) {
-    console.log('[EmailDelivery] Skipping email send - transport not available');
+    log.debug('Skipping email send - transport not available');
     await safeWriteEmailLog({
       notificationId: notification.id,
       recipientEmail: recipientEmail || 'unknown',
@@ -213,7 +241,7 @@ export const sendNotificationEmail = async (
   }
 
   if (!recipientEmail) {
-    console.warn('[EmailDelivery] Skipping email send - no recipient email provided');
+    log.warn('Skipping email send - no recipient email provided');
     await safeWriteEmailLog({
       notificationId: notification.id,
       recipientEmail: 'unknown',
@@ -248,10 +276,9 @@ export const sendNotificationEmail = async (
         providerMessageId: info.messageId || null,
       });
 
-      console.log('[EmailDelivery] Email sent successfully:', {
+      log.debug('Email sent successfully:', {
         messageId: info.messageId,
         notificationId: notification.id,
-        recipient: recipientEmail,
         type: notification.notification_type,
         attempt,
       });
@@ -277,12 +304,11 @@ export const sendNotificationEmail = async (
         errorMessage: composedErrorMessage,
       });
 
-      console.error('[EmailDelivery] Failed to send email:', {
+      log.error('Failed to send email:', {
         error: errorMessage,
         code: errorCode,
         response: providerResponse,
         notificationId: notification.id,
-        recipient: recipientEmail,
         attempt,
         maxAttempts: MAX_EMAIL_SEND_ATTEMPTS,
       });
@@ -302,6 +328,6 @@ export const closeTransport = async (): Promise<void> => {
   if (transporter) {
     await transporter.close();
     transporter = null;
-    console.log('[EmailDelivery] SMTP transport closed');
+    log.debug('SMTP transport closed');
   }
 };

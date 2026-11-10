@@ -37,10 +37,6 @@ export const getStudentDashboard = async (
       return;
     }
 
-    if (userContext.role !== 'student') {
-      sendError(res, 'Access denied. Student role required.', 403);
-      return;
-    }
 
     const dashboardData = await dashboardService.getStudentDashboard(userContext.id);
 
@@ -68,10 +64,6 @@ export const getUniversityDashboard = async (
       return;
     }
 
-    if (userContext.role !== 'university') {
-      sendError(res, 'Access denied. University role required.', 403);
-      return;
-    }
 
     const dashboardData = await dashboardService.getUniversityDashboard(
       userContext.id,
@@ -102,10 +94,6 @@ export const getAdminDashboard = async (
       return;
     }
 
-    if (userContext.role !== 'admin') {
-      sendError(res, 'Access denied. Admin role required.', 403);
-      return;
-    }
 
     const dashboardData = await dashboardService.getAdminDashboard(userContext.id);
 
@@ -133,10 +121,6 @@ export const getStudentRecommendations = async (
       return;
     }
 
-    if (userContext.role !== 'student') {
-      sendError(res, 'Access denied. Student role required.', 403);
-      return;
-    }
 
     // Get query parameters
     const limit = parseInt(req.query.limit as string, 10) || 10;

@@ -99,7 +99,7 @@ export interface CreateAdmissionDTO {
  * Update admission DTO
  * All fields optional for partial updates
  */
-export interface UpdateAdmissionDTO extends Partial<CreateAdmissionDTO> {}
+export type UpdateAdmissionDTO = Partial<CreateAdmissionDTO>;
 
 /**
  * Admission filter parameters
@@ -134,16 +134,4 @@ export interface AdmissionQueryParams extends AdmissionFilters {
   include_closed?: boolean;
 }
 
-/**
- * Verify admission request DTO
- */
-export interface VerifyAdmissionDTO {
-  notes?: string;
-}
 
-/**
- * Reject admission request DTO
- */
-export interface RejectAdmissionDTO {
-  rejection_reason: string;
-}

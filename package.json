@@ -16,7 +16,8 @@
     "smoke:ai": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-test-ai.ps1",
     "smoke:pdf": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-test-parse-pdf.ps1",
     "db:introspect": "node scripts/introspect-db-schema.js",
-    "test:e2e": "node tests/e2e/flows.e2e.js"
+    "test:e2e": "node tests/e2e/flows.e2e.js",
+    "lint": "eslint src tests"
   },
   "keywords": [
     "admission",
@@ -45,6 +46,7 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
@@ -55,6 +57,8 @@
     "@types/supertest": "^6.0.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
+    "eslint": "^9.39.5",
+    "globals": "^17.14.0",
     "jest": "^30.2.0",
     "jest-mock-extended": "^4.0.0",
     "nodemon": "^3.1.11",
@@ -63,6 +67,7 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.2"
   }
 }

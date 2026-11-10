@@ -62,9 +62,7 @@ const addUniversityScopeCondition = (
 export const findById = async (id: string, scope?: ViewerScope): Promise<Changelog | null> => {
   const conditions: string[] = ['c.id = $1'];
   const params: any[] = [id];
-  let paramIndex = 2;
-
-  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'c');
+  addUniversityScopeCondition(conditions, params, 2, scope, 'c');
 
   const sql = `
     SELECT c.*
@@ -147,8 +145,7 @@ export const findByAdmissionId = async (
 export const countByAdmissionId = async (admissionId: string, scope?: ViewerScope): Promise<number> => {
   const conditions: string[] = ['c.admission_id = $1'];
   const params: any[] = [admissionId];
-  let paramIndex = 2;
-  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'c');
+  addUniversityScopeCondition(conditions, params, 2, scope, 'c');
 
   const sql = `SELECT COUNT(*) as count FROM changelogs c WHERE ${conditions.join(' AND ')}`;
   const result = await query(sql, params);

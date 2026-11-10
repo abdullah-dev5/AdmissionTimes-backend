@@ -95,11 +95,6 @@ export const config = {
     from: process.env.EMAIL_FROM || process.env.SMTP_USER || '',
   },
 
-  realtime: {
-    enabled:
-      process.env.REALTIME_ENABLED === 'true' ||
-      (process.env.REALTIME_ENABLED !== 'false' && !!supabaseUrl && !!process.env.SUPABASE_SERVICE_ROLE_KEY),
-  },
 
   push: {
     enabled: process.env.PUSH_NOTIFICATIONS_ENABLED !== 'false',
@@ -143,7 +138,8 @@ export const validateConfig = (): void => {
   });
 
   if (isProduction) {
-    ['SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'CORS_ORIGIN'].forEach((name) => {
+    // WEB_APP_URL turns notification links into absolute URLs for emails.
+    ['SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'CORS_ORIGIN', ...(config.email.enabled ? ['WEB_APP_URL'] : [])].forEach((name) => {
       if (!process.env[name]) missing.push(name);
     });
 

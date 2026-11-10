@@ -104,8 +104,13 @@ describe('Authorization rules', () => {
   });
 
   it('forbids students from creating admissions', async () => {
-    const res = await request(app).post('/api/v1/admissions').set(as('auth-student')).send({ title: 'Fake program' });
+    const res = await request(app).post('/api/v1/university/admissions').set(as('auth-student')).send({ title: 'Fake program' });
     expect(res.status).toBe(403);
+  });
+
+  it('serves /admissions read-only (writes go through university/admin routes)', async () => {
+    const res = await request(app).post('/api/v1/admissions').set(as('auth-uni-a')).send({ title: 'BS AI' });
+    expect(res.status).toBe(404);
   });
 
   it('rejects client-supplied verified status', async () => {
@@ -125,7 +130,10 @@ describe('Authorization rules', () => {
   });
 
   it('forbids non-admins from verifying admissions', async () => {
-    const res = await request(app).patch(`/api/v1/admissions/${ADMISSION_OF_B}/verify`).set(as('auth-uni-a')).send({});
+    const res = await request(app)
+      .post(`/api/v1/admin/admissions/${ADMISSION_OF_B}/verify`)
+      .set(as('auth-uni-a'))
+      .send({ verification_status: 'verified' });
     expect(res.status).toBe(403);
   });
 

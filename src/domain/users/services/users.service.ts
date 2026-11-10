@@ -275,22 +275,17 @@ export const updateUniversityProfile = async (
     throw new AppError('University ID not set for university user', 400);
   }
 
-  const name = data.name || user.display_name;
+  // Partial update: only fields the client sent are changed (an empty string
+  // clears an optional field; the university name can never be blanked).
+  if (data.name !== undefined && !String(data.name).trim()) {
+    throw new AppError('University name cannot be empty', 400);
+  }
+  const updated = await usersModel.updateUniversityProfile(user.university_id, data);
+  if (!updated) {
+    throw new AppError('University not found', 404);
+  }
 
-  const updated = await usersModel.upsertUniversityProfile(user.university_id, {
-    name,
-    city: data.city ?? null,
-    country: data.country ?? null,
-    website: data.website ?? null,
-    logo_url: data.logo_url ?? null,
-    description: data.description ?? null,
-    address: data.address ?? null,
-    contact_name: data.contact_name ?? null,
-    contact_email: data.contact_email ?? null,
-    contact_phone: data.contact_phone ?? null,
-  });
-
-  return updated as UniversityProfile;
+  return updated;
 };
 
 /**

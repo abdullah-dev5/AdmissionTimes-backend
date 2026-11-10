@@ -8,6 +8,29 @@
 import Joi from 'joi';
 import { FIELD_LIMITS, VALIDATION_RULES, DEFAULTS } from '../constants/admissions.constants';
 
+/** Links are rendered as clickable hrefs: only http(s) is allowed. */
+const httpUrl = Joi.string().trim().uri({ scheme: ['http', 'https'] }).max(2048).allow('', null).messages({
+  'string.uri': 'Links must be http(s) URLs',
+  'string.uriCustomScheme': 'Links must be http(s) URLs',
+});
+
+const linkFields = {
+  websiteUrl: httpUrl,
+  website_url: httpUrl,
+  officialWebsite: httpUrl,
+  admissionPortalLink: httpUrl,
+  admission_portal_link: httpUrl,
+  portalLink: httpUrl,
+  portalUrl: httpUrl,
+  officialLinks: Joi.array().items(httpUrl).max(20),
+};
+
+/** Free-form JSON, but known link fields (top level and under `links`) must be http(s). */
+const requirementsSchema = Joi.object({
+  ...linkFields,
+  links: Joi.object(linkFields).unknown(true).allow(null),
+}).unknown(true);
+
 /**
  * Create admission validation schema
  */
@@ -115,7 +138,7 @@ export const createAdmissionSchema = Joi.object({
       'any.only': `Delivery mode must be one of: ${DEFAULTS.DELIVERY_MODE_OPTIONS.join(', ')}`,
     }),
 
-  requirements: Joi.object()
+  requirements: requirementsSchema
     .allow(null)
     .optional()
     .messages({
@@ -140,29 +163,7 @@ export const updateAdmissionSchema = createAdmissionSchema.fork(
   (schema) => schema.optional()
 );
 
-/**
- * Verify admission (admin) validation schema
- */
-export const verifyAdmissionSchema = Joi.object({
-  notes: Joi.string().max(FIELD_LIMITS.REJECTION_REASON_MAX).allow(null, '').optional(),
-});
 
-/**
- * Reject admission (admin) validation schema
- */
-export const rejectAdmissionSchema = Joi.object({
-  rejection_reason: Joi.string()
-    .trim()
-    .min(FIELD_LIMITS.REJECTION_REASON_MIN)
-    .max(FIELD_LIMITS.REJECTION_REASON_MAX)
-    .required()
-    .messages({
-      'string.empty': 'Rejection reason is required',
-      'string.min': `Rejection reason must be at least ${FIELD_LIMITS.REJECTION_REASON_MIN} characters`,
-      'string.max': `Rejection reason must not exceed ${FIELD_LIMITS.REJECTION_REASON_MAX} characters`,
-      'any.required': 'Rejection reason is required',
-    }),
-});
 
 /**
  * Query parameters validation schema

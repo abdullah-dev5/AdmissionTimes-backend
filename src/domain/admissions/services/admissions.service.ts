@@ -17,7 +17,7 @@
 
 import { AppError } from '@shared/middleware/errorHandler';
 import { withTransaction } from '@db/connection';
-import { VERIFICATION_STATUS, CHANGE_TYPE, USER_TYPE } from '@config/constants';
+import { VERIFICATION_STATUS, CHANGE_TYPE, USER_TYPE, ACTIVITY_TYPE, type UserType } from '@config/constants';
 import { withAdmissionContract } from '@shared/utils/admissionContract';
 import { createLogger } from '@shared/utils/logger';
 import * as admissionsModel from '../models/admissions.model';
@@ -37,6 +37,8 @@ import {
   notifyWatchersOfUpdate,
   type ChangelogEntry,
 } from './admissionEvents';
+import { create as createActivity } from '@domain/user-activity/services/user-activity.service';
+import { ENTITY_TYPES } from '@domain/user-activity/constants/user-activity.constants';
 
 const log = createLogger('Admissions');
 
@@ -448,13 +450,9 @@ export const getChangelogs = async (
 
 async function trackAdmissionView(admissionId: string, ctx: UserContext): Promise<void> {
   try {
-    const { create: createActivity } = await import('@domain/user-activity/services/user-activity.service');
-    const { ACTIVITY_TYPE } = await import('@config/constants');
-    const { ENTITY_TYPES } = await import('@domain/user-activity/constants/user-activity.constants');
-
     await createActivity({
       user_id: ctx.id,
-      user_type: (ctx.role === 'guest' ? USER_TYPE.STUDENT : ctx.role) as any,
+      user_type: ctx.role as UserType,
       activity_type: ACTIVITY_TYPE.VIEWED,
       entity_type: ENTITY_TYPES.ADMISSION,
       entity_id: admissionId,

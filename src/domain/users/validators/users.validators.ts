@@ -27,11 +27,12 @@ export const updateUserSchema = Joi.object({
  * Update university profile validation schema
  */
 export const updateUniversityProfileSchema = Joi.object({
-  name: Joi.string().min(2).max(255).optional(),
+  name: Joi.string().trim().min(2).max(255).optional(),
   city: Joi.string().max(100).allow(null, '').optional(),
   country: Joi.string().max(100).allow(null, '').optional(),
-  website: Joi.string().max(255).allow(null, '').optional(),
-  logo_url: Joi.string().max(2000).allow(null, '').optional(),
+  // Only http(s) links: these are rendered as clickable links and images.
+  website: Joi.string().trim().uri({ scheme: ['http', 'https'] }).max(255).allow(null, '').optional(),
+  logo_url: Joi.string().trim().uri({ scheme: ['http', 'https'] }).max(2000).allow(null, '').optional(),
   description: Joi.string().allow(null, '').optional(),
   address: Joi.string().allow(null, '').optional(),
   contact_name: Joi.string().max(255).allow(null, '').optional(),

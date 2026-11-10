@@ -8,6 +8,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@shared/middleware/errorHandler';
 import { UserContext } from '../types/admin.types';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('adminOnly');
 
 /**
  * Check if user is admin
@@ -21,7 +24,7 @@ export const adminOnly = (
   try {
     const userContext = req.user as UserContext | undefined;
 
-    console.log('[ADMIN-CHECK] Checking admin access:', {
+    log.debug('Checking admin access:', {
       hasUserContext: !!userContext,
       userId: userContext?.id,
       userRole: userContext?.role,
@@ -31,27 +34,24 @@ export const adminOnly = (
 
     // Check if user exists
     if (!userContext || !userContext.id) {
-      console.warn('[ADMIN-CHECK] ❌ No user context found');
+      log.warn('No user context found');
       throw new AppError('Authentication required', 401);
     }
 
     // Check if admin
     if (userContext.role !== 'admin') {
-      console.warn(`[ADMIN-CHECK] ❌ User is not admin:`, {
+      log.warn(`User is not admin:`, {
         userId: userContext.id,
         userRole: userContext.role,
-        email: userContext.email,
         endpoint: req.path,
         method: req.method,
-        ip: req.ip,
       });
 
       throw new AppError('Admin access required', 403);
     }
 
-    console.log('[ADMIN-CHECK] ✅ User is admin - access granted:', {
+    log.debug('User is admin - access granted:', {
       userId: userContext.id,
-      email: userContext.email,
     });
 
     // User is authenticated admin, proceed
@@ -73,10 +73,9 @@ export const logAdminAccess = (
   const userContext = req.user as UserContext | undefined;
 
   if (userContext) {
-    console.log(`[AUDIT] Admin endpoint access:`, {
+    log.debug(`Admin endpoint access:`, {
       userId: userContext.id,
       userRole: userContext.role,
-      email: userContext.email,
       endpoint: req.path,
       method: req.method,
     });

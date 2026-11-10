@@ -23,7 +23,6 @@ import {
   AdminFilterParams,
   UserContext,
   AdminAdmission,
-  AdminDashboard,
 } from '../types/admin.types';
 import {
   recordChangelog,
@@ -61,24 +60,8 @@ const buildTemporaryPassword = (): string => {
   return chars.join('');
 };
 
-const REDACTED_KEYS = new Set(['email', 'password', 'token', 'access_token', 'refresh_token', 'ip_address', 'user_agent', 'phone', 'contact_email', 'contact_phone']);
 
-const redact = (input: any): any => {
-  if (Array.isArray(input)) return input.map(redact);
-  if (input && typeof input === 'object') {
-    return Object.fromEntries(
-      Object.entries(input).map(([key, value]) => [key, REDACTED_KEYS.has(key.toLowerCase()) ? '[REDACTED]' : redact(value)])
-    );
-  }
-  return input;
-};
 
-const toActionLabel = (actionType: string | null | undefined): 'Verified' | 'Rejected' | 'Updated' => {
-  const value = String(actionType || '').toLowerCase();
-  if (value.includes('verify')) return 'Verified';
-  if (value.includes('reject')) return 'Rejected';
-  return 'Updated';
-};
 
 const normalizeAdminAdmission = (admission: any): AdminAdmission => {
   const normalized = withAdmissionContract(admission || {}) as any;
@@ -259,30 +242,6 @@ export const getAllAdmissions = async (filters: AdminFilterParams, limit: number
   return { data: rows.map(normalizeAdminAdmission), total };
 };
 
-export const getAdminDashboard = async (): Promise<AdminDashboard> => {
-  const [stats, pending, recentActions] = await Promise.all([
-    adminModel.getDashboardStats(),
-    adminModel.listAdmissions({ status: 'pending', sort: 'updated_at', order: 'desc' }, 5, 0),
-    adminModel.getRecentActions(10),
-  ]);
-
-  return {
-    stats,
-    pending_verifications: pending.rows.map(normalizeAdminAdmission),
-    recent_actions: recentActions.map((entry) => ({
-      ...entry,
-      ip_address: null,
-      user_agent: null,
-      old_values: redact(entry.old_values),
-      new_values: redact(entry.new_values),
-      created_by: entry.created_by ? 'admin' : 'System',
-      changed_at_iso: entry.created_at || undefined,
-      admission_title: entry.admission_title || 'Unknown',
-      action_label: toActionLabel(entry.action_type),
-      changed_by_label: entry.created_by ? 'Admin' : 'System',
-    })),
-  };
-};
 
 export const getAdmissionDetails = async (admissionId: string): Promise<AdminAdmission> =>
   normalizeAdminAdmission(await adminModel.getAdmissionById(admissionId));

@@ -18,6 +18,9 @@ import { Notification, NotificationFilters, CreateNotificationDTO } from '../typ
 import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/notifications.constants';
 import { DEFAULTS } from '../constants/notifications.constants';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('notifications.model');
 
 /**
  * Find notification by ID
@@ -73,7 +76,7 @@ export const findMany = async (
  * @returns Created notification record
  */
 export const create = async (data: CreateNotificationDTO): Promise<Notification> => {
-  console.log(`📊 [DB] Attempting to create notification:`, {
+  log.debug(`Attempting to create notification:`, {
     recipient_id: data.recipient_id,
     role_type: data.role_type,
     notification_type: data.notification_type,
@@ -109,11 +112,11 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
 
   const result = await query(sql, params);
   if (result.rows[0]) {
-    console.log(`✅ [DB] Notification created successfully:`, { id: result.rows[0].id, created_at: result.rows[0].created_at });
+    log.debug(`Notification created successfully:`, { id: result.rows[0].id, created_at: result.rows[0].created_at });
     return result.rows[0];
   }
 
-  console.log(`⚠️ [DB] INSERT returned no rows - checking if duplicate via constraint...`);
+  log.debug(`INSERT returned no rows - checking if duplicate via constraint...`);
 
   const fallbackSql = `
     SELECT * FROM notifications
@@ -131,15 +134,15 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
   ]);
   
   if (fallback.rows[0]) {
-    console.log(`✅ [DB] Found existing notification via fallback (duplicate suppressed):`, { id: fallback.rows[0].id, created_at: fallback.rows[0].created_at });
+    log.debug(`Found existing notification via fallback (duplicate suppressed):`, { id: fallback.rows[0].id, created_at: fallback.rows[0].created_at });
     return { ...fallback.rows[0], __existing: true } as Notification;
   }
   
   // This should never happen - either INSERT succeeds or constraint hits
-  console.error(`❌ [DB] CRITICAL: Notification not created and not found in fallback query`);
-  console.error(`   → recipient_id: ${data.recipient_id}`);
-  console.error(`   → notification_type: ${data.notification_type}`);
-  console.error(`   → event_key: ${data.event_key}`);
+  log.error(`CRITICAL: Notification not created and not found in fallback query`);
+  log.error(`   → recipient_id: ${data.recipient_id}`);
+  log.error(`   → notification_type: ${data.notification_type}`);
+  log.error(`   → event_key: ${data.event_key}`);
   
   throw new Error(`Failed to create or find notification: recipient=${data.recipient_id}, type=${data.notification_type}, event_key=${data.event_key}`);
 
