@@ -25,6 +25,7 @@ import dashboardRoutes from './dashboard/routes/dashboard.routes';
 import schedulerRoutes from './scheduler/routes/scheduler.routes';
 import recommendationsRoutes from './recommendations/routes/recommendations.routes';
 import aiRoutes from './ai/routes/ai.routes';
+import internalJobsRoutes from '@shared/scheduler/internalJobs.routes';
 import scraperIntegrationRoutes from './scraper-integration/routes/scraper-integration.routes';
 
 /**
@@ -67,6 +68,9 @@ export function registerDomains(app: Application): void {
 
   // Scheduler Domain (Phase 2 reminders)
   app.use('/api/v1/scheduler', schedulerRoutes);
+
+  // External scheduler trigger for idle-sleeping hosts (CRON_SECRET-protected)
+  app.use('/api/v1/internal/jobs', internalJobsRoutes);
 
   // Internal scraper ingestion (token-protected)
   app.use('/api/v1/internal/scraper', scraperIntegrationRoutes);

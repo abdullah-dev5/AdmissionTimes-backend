@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --exec ts-node -r tsconfig-paths/register src/index.ts",
     "build": "tsc",
-    "start": "node -r tsconfig-paths/register dist/index.js",
+    "start": "node -r ./register-paths.js dist/index.js",
     "start:dev": "pnpm dev",
     "type-check": "tsc --noEmit",
     "migrate": "ts-node -r tsconfig-paths/register scripts/run-migrations.ts",
@@ -43,7 +43,8 @@
     "pdf-parse": "^2.4.5",
     "pg": "^8.16.3",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "tsconfig-paths": "^4.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -66,8 +67,10 @@
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
-    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.72.2"
+  },
+  "engines": {
+    "node": ">=20 <23"
   }
 }

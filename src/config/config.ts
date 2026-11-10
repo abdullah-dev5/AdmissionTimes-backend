@@ -102,6 +102,8 @@ export const config = {
 
   /** Public base URL of the web app, used for links in emails. */
   webAppUrl: normalizeUrl(process.env.WEB_APP_URL),
+  /** Shared secret for POST /api/v1/internal/jobs/:job (external scheduler, e.g. cron-job.org). */
+  cronSecret: (process.env.CRON_SECRET || '').trim(),
 
   ai: {
     enabled: process.env.AI_ENABLED === 'true' || (!!process.env.GEMINI_API_KEY && process.env.AI_ENABLED !== 'false'),

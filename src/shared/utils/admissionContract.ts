@@ -41,6 +41,8 @@ export interface AdmissionContractFields {
   primary_apply_url: string | null;
   /** Programs covered by a scraped announcement (empty for single-program admissions). */
   programs_offered: string[];
+  /** Scraped programs: the announcement they were listed in. */
+  source_announcement_title: string | null;
   status_label: 'Verified' | 'Pending' | 'Closed' | 'Draft';
   match_label?: string;
 }
@@ -247,6 +249,11 @@ export const withAdmissionContract = <T extends Record<string, any>>(admission: 
     primary_apply_url: primaryApplyUrl,
     // Single-program announcements just repeat the title; only multi-program lists are useful.
     programs_offered: programsOffered.length > 1 ? programsOffered : [],
+    // Scraped announcements are split into one admission per program; this names the announcement.
+    source_announcement_title:
+      source === 'scraper' && readString(requirements.announcement_title) !== readString(admission.title)
+        ? readString(requirements.announcement_title)
+        : null,
     status_label: deriveStatusLabel(admission.verification_status),
     ...(matchLabel ? { match_label: matchLabel } : {}),
   };

@@ -19,6 +19,7 @@ import {
   ScraperRunEventItem,
   ScraperManualRunResult,
 } from '../types/scraper-integration.types';
+import { expandToProgramRecords } from './programTitles';
 const normalizeText = (value: unknown): string => String(value || '').trim();
 const normalizeUniversityKey = (value: unknown): string =>
   normalizeText(value)
@@ -135,7 +136,7 @@ const normalizeTitleKey = (title: string): string => normalizeText(title).toLowe
  * the same row even when its deadline or link changes. Must match the SQL in
  * migration 20261007000001.
  */
-const computeIdentityHash = (universityId: string, title: string): string =>
+export const computeIdentityHash = (universityId: string, title: string): string =>
   crypto.createHash('md5').update(`${universityId}|${normalizeTitleKey(title)}`).digest('hex');
 
 /**
@@ -145,7 +146,7 @@ const computeIdentityHash = (universityId: string, title: string): string =>
  * SCRAPER_AUTO_CREATE_UNIVERSITIES=true — unknown names are skipped and shown
  * in the admin scraper monitor instead.
  */
-const resolveUniversityId = async (sourceUniversityName: string): Promise<string | null> => {
+export const resolveUniversityId = async (sourceUniversityName: string): Promise<string | null> => {
   const candidates = expandUniversityCandidates(sourceUniversityName);
   if (!candidates.rawCandidates.length) return null;
 
@@ -305,6 +306,13 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
     return { admissionId: '', status: 'skipped', reason: 'source_program_title is missing' };
   }
 
+  // Students see one card per program. An announcement whose program list
+  // could not be read would be a card without programs, so it is reported
+  // in the scraper monitor instead of published.
+  if (record.scraping_metadata?.program_list_missing && /\b(admissions?|programs)\b/i.test(title)) {
+    return { admissionId: '', status: 'skipped', reason: "Announcement has no program list (fix the scraper's program extraction)" };
+  }
+
   const universityId = await resolveUniversityId(record.source_university_name);
   if (!universityId) {
     return {
@@ -333,7 +341,7 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
     // the same university + title, so no duplicate is created.
     const existingResult = await db.query(
       `
-        SELECT id::text AS id, title, deadline, source_url, verification_status
+        SELECT id::text AS id, title, deadline, source_url, verification_status, degree_level
         FROM admissions
         WHERE is_active = true
           AND (
@@ -350,6 +358,12 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
     const existing = existingResult.rows[0];
 
     if (!existing) {
+      // A program found for the first time with a deadline already behind us
+      // (an old announcement still online) would only add a closed card.
+      if (new Date(parsedDeadline).getTime() < Date.now()) {
+        return { admissionId: '', status: 'skipped' as const, reason: 'Deadline already passed; not published', changedFields: [] as string[], liveDeadlineChange: false };
+      }
+
       // Store only what was scraped: no invented description, and the location
       // is shown from the university record by the response contract.
       const degreeLevel = inferDegreeLabel(title);
@@ -386,7 +400,11 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
     }
 
     const deadlineChanged = !existing.deadline || new Date(existing.deadline).toISOString() !== parsedDeadline;
-    const urlChanged = (existing.source_url || null) !== sourceUrl;
+    // A missing link means the scraper did not capture it this time, not that it
+    // changed: keep the stored one (otherwise live programs lost their link and
+    // went back to review).
+    const effectiveUrl = sourceUrl || existing.source_url || null;
+    const urlChanged = (existing.source_url || null) !== effectiveUrl;
     const wasVerified = existing.verification_status === 'verified';
     const reverify = wasVerified && urlChanged;
     const changedFields = [...(deadlineChanged ? ['deadline'] : []), ...(urlChanged ? ['source_url'] : [])];
@@ -405,10 +423,12 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
             requirements = COALESCE(requirements, '{}'::jsonb) || $6::jsonb,
             verification_status = CASE WHEN $7 THEN 'pending'::verification_status ELSE verification_status END,
             needs_reverification = CASE WHEN $7 THEN true ELSE needs_reverification END,
+            -- Older rows were created without a degree level (cards showed none).
+            degree_level = COALESCE(NULLIF(btrim(degree_level), ''), $9),
             updated_at = CASE WHEN $8 THEN NOW() ELSE updated_at END
         WHERE id = $1
       `,
-      [existing.id, parsedDeadline, sourceUrl, identityHash, runId, JSON.stringify(scraperMetadata), reverify, changedFields.length > 0]
+      [existing.id, parsedDeadline, effectiveUrl, identityHash, runId, JSON.stringify(scraperMetadata), reverify, changedFields.length > 0, inferDegreeLabel(title)]
     );
 
     if (deadlineChanged) {
@@ -416,7 +436,7 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
       await insertChangelog(db, existing.id, 'updated', 'deadline', existing.deadline, parsedDeadline, 'Scraper updated deadline', logMeta);
     }
     if (urlChanged) {
-      await insertChangelog(db, existing.id, 'updated', 'source_url', existing.source_url, sourceUrl, 'Scraper updated source link', logMeta);
+      await insertChangelog(db, existing.id, 'updated', 'source_url', existing.source_url, effectiveUrl, 'Scraper updated source link', logMeta);
     }
     if (reverify) {
       await insertChangelog(db, existing.id, 'status_changed', 'verification_status', 'verified', 'pending', 'Source link changed; re-verification required', logMeta);
@@ -441,6 +461,9 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
     if (updated.rows[0]) void notifyWatchersOfUpdate(updated.rows[0]);
   }
 
+  if (outcome.status === 'skipped') {
+    return { admissionId: '', status: 'skipped', reason: (outcome as { reason?: string }).reason };
+  }
   return { admissionId: outcome.admissionId, status: outcome.status, changedFields: outcome.changedFields };
 };
 
@@ -467,9 +490,13 @@ export const ingestBatch = async (
 
   await failStaleRuns();
 
+  // Scrapers send announcements with a program list; the app keeps one
+  // admission per program (normalized titles, shared deadline and link).
+  const records = payload.records.flatMap(expandToProgramRecords);
+
   const canPublish = config.scraperIntegration.publishEnabled || !!payload.force_publish;
   const mode: ScraperIngestionMode = canPublish ? 'publish' : 'mirror';
-  const runId = await createRun(mode, payload);
+  const runId = await createRun(mode, { ...payload, records });
 
   let mirroredCount = 0;
   let publishedCount = 0;
@@ -477,7 +504,7 @@ export const ingestBatch = async (
   let skippedCount = 0;
   let failedCount = 0;
 
-  for (const record of payload.records) {
+  for (const record of records) {
     const sourceHash = computeSourceHash(record);
 
     try {
@@ -527,7 +554,7 @@ export const ingestBatch = async (
   }
 
   const finalStatus: 'completed' | 'failed' | 'partial' =
-    failedCount === 0 ? 'completed' : failedCount === payload.records.length ? 'failed' : 'partial';
+    failedCount === 0 ? 'completed' : failedCount === records.length ? 'failed' : 'partial';
 
   await query(
     `
@@ -549,7 +576,7 @@ export const ingestBatch = async (
   return {
     run_id: runId,
     mode,
-    fetched_count: payload.records.length,
+    fetched_count: records.length,
     mirrored_count: mirroredCount,
     published_count: publishedCount,
     updated_count: updatedCount,
