@@ -138,7 +138,8 @@ export const validateConfig = (): void => {
   });
 
   if (isProduction) {
-    ['SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'CORS_ORIGIN'].forEach((name) => {
+    // WEB_APP_URL turns notification links into absolute URLs for emails.
+    ['SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY', 'CORS_ORIGIN', ...(config.email.enabled ? ['WEB_APP_URL'] : [])].forEach((name) => {
       if (!process.env[name]) missing.push(name);
     });
 
