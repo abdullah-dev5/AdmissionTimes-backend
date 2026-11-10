@@ -87,7 +87,7 @@ export const createApp = (): Application => {
   // Everything else under the API requires authentication, except the
   // internal scraper routes which use their own service token.
   app.use(API_PREFIX, (req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith('/internal/scraper')) {
+    if (req.path.startsWith('/internal/scraper') || req.path.startsWith('/internal/jobs')) {
       next();
       return;
     }

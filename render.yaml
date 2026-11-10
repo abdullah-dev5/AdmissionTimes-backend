@@ -1,0 +1,107 @@
+# Render Blueprint: the AdmissionTimes API as one web service.
+# Render -> New -> Blueprint -> pick this repo. Values marked `sync: false`
+# are secrets: Render asks for them on first deploy (copy from your .env).
+# Full checklist: DEPLOYMENT.md.
+services:
+  - type: web
+    name: admissiontimes-api
+    runtime: node
+    plan: free
+    # Closest Render region to the Supabase database (ap-northeast-2, Seoul).
+    region: singapore
+    branch: main
+    # pnpm comes from package.json "packageManager" via corepack. Dev
+    # dependencies (TypeScript) are needed to build, so they are installed
+    # explicitly even though NODE_ENV=production.
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      # Render's proxy sits in front of the app (client IPs for rate limits).
+      - key: TRUST_PROXY
+        value: "true"
+      - key: LOG_LEVEL
+        value: info
+      - key: SWAGGER_ENABLED
+        value: "false"
+      - key: APP_UTC_OFFSET
+        value: "+05:00"
+
+      # Database (Supabase pooler)
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: postgres
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      # Leave room in the Supabase pooler for the scrapers and migrations.
+      - key: DB_POOL_MAX
+        value: "10"
+
+      # Supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # Browser origins allowed to call the API (comma separated, no "*"),
+      # e.g. https://admissiontimes.vercel.app
+      - key: CORS_ORIGIN
+        sync: false
+      # Web app URL used for links in emails, e.g. https://admissiontimes.vercel.app
+      - key: WEB_APP_URL
+        sync: false
+
+      # Email (Brevo SMTP). Brevo's "authorized IPs" must be OFF: Render's
+      # outgoing IPs change.
+      - key: EMAIL_ENABLED
+        value: "true"
+      - key: SMTP_HOST
+        value: smtp-relay.brevo.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+      # AI
+      - key: AI_ENABLED
+        value: "true"
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # Push (Expo)
+      - key: PUSH_NOTIFICATIONS_ENABLED
+        value: "true"
+
+      # Scheduled jobs run in-process; the external scheduler (cron-job.org)
+      # also calls /api/v1/internal/jobs/* so they run even after the free
+      # service has slept.
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: CRON_SECRET
+        generateValue: true
+
+      # Scraper pipeline (GitHub Actions) -> /api/v1/internal/scraper/ingest-batch
+      - key: SCRAPER_INTEGRATION_ENABLED
+        value: "true"
+      - key: SCRAPER_PUBLISH_ENABLED
+        value: "true"
+      - key: SCRAPER_INTERNAL_SERVICE_TOKEN
+        sync: false
