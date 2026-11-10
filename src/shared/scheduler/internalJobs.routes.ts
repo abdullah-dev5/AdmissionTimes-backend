@@ -13,6 +13,7 @@ import { requireCronSecret } from '@shared/middleware/internalServiceAuth';
 import { sendSuccess } from '@shared/utils/response';
 import { AppError } from '@shared/middleware/errorHandler';
 import { getSchedulerMetrics, runDeadlineReminderDispatch, runEmailRetryDispatch, runRecommendationCleanup, runRecommendationGeneration } from './index';
+import { runInBackground } from '@shared/utils/background';
 
 const JOBS: Record<string, () => Promise<void>> = {
   reminders: runDeadlineReminderDispatch,
@@ -26,8 +27,9 @@ const router: Router = Router();
 router.post('/:job', requireCronSecret, (req: Request, res: Response) => {
   const run = JOBS[String(req.params.job)];
   if (!run) throw new AppError(`Unknown job. Use one of: ${Object.keys(JOBS).join(', ')}`, 404);
-  // Answer at once (schedulers time out after ~30 s); the job keeps running.
-  void run();
+  // Answer at once (schedulers time out after ~30 s); the job keeps running
+  // (kept alive on Vercel until it finishes).
+  runInBackground(`job:${req.params.job}`, run);
   sendSuccess(res, { job: req.params.job, started: true }, 'Job started', 202);
 });
 

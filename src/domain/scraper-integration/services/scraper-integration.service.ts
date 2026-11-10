@@ -20,6 +20,7 @@ import {
   ScraperManualRunResult,
 } from '../types/scraper-integration.types';
 import { expandToProgramRecords } from './programTitles';
+import { runInBackground } from '@shared/utils/background';
 const normalizeText = (value: unknown): string => String(value || '').trim();
 const normalizeUniversityKey = (value: unknown): string =>
   normalizeText(value)
@@ -458,7 +459,7 @@ const publishRecord = async (runId: string, record: ScrapedAdmissionIngestDTO, e
       `SELECT id::text AS id, title, university_id::text AS university_id, created_by::text AS created_by, updated_at FROM admissions WHERE id = $1`,
       [outcome.admissionId]
     );
-    if (updated.rows[0]) void notifyWatchersOfUpdate(updated.rows[0]);
+    if (updated.rows[0]) runInBackground('notifyWatchers', notifyWatchersOfUpdate(updated.rows[0]));
   }
 
   if (outcome.status === 'skipped') {

@@ -104,6 +104,10 @@ export const config = {
   webAppUrl: normalizeUrl(process.env.WEB_APP_URL),
   /** Shared secret for POST /api/v1/internal/jobs/:job (external scheduler, e.g. cron-job.org). */
   cronSecret: (process.env.CRON_SECRET || '').trim(),
+  /** Running as Vercel functions (set by Vercel): no long-lived process. */
+  isServerless: Boolean(process.env.VERCEL),
+  /** Largest PDF upload. Vercel rejects request bodies over 4.5 MB, so keep 4 there. */
+  uploadMaxMb: Math.max(1, Number(process.env.UPLOAD_MAX_MB) || (process.env.VERCEL ? 4 : 10)),
 
   ai: {
     enabled: process.env.AI_ENABLED === 'true' || (!!process.env.GEMINI_API_KEY && process.env.AI_ENABLED !== 'false'),

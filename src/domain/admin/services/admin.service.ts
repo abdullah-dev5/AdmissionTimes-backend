@@ -29,6 +29,7 @@ import {
   notifyUniversityOfDecision,
   notifyWatchersOfUpdate,
 } from '@domain/admissions/services/admissionEvents';
+import { runInBackground } from '@shared/utils/background';
 
 const log = createLogger('AdminService');
 
@@ -140,9 +141,9 @@ export const verifyAdmission = async (
     return { before: current, after: updated };
   });
 
-  void notifyUniversityOfDecision(after, target, data.rejection_reason);
+  runInBackground('notifyUniversityOfDecision', notifyUniversityOfDecision(after, target, data.rejection_reason));
   if (target === 'verified' && before.verification_status !== 'verified') {
-    void notifyWatchersOfUpdate(after);
+    runInBackground('notifyWatchersOfUpdate', notifyWatchersOfUpdate(after));
   }
 
   return normalizeAdminAdmission({ ...after, university_name: (before as any).university_name });
@@ -199,7 +200,7 @@ export const requestRevision = async (admissionId: string, reason: string, admin
     return row;
   });
 
-  void notifyUniversityOfDecision(updated, 'revision_required', reason);
+  runInBackground('notifyUniversityOfDecision', notifyUniversityOfDecision(updated, 'revision_required', reason));
   return normalizeAdminAdmission(updated);
 };
 

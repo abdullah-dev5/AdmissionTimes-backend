@@ -87,7 +87,7 @@ const getTransporter = (): Transporter | null => {
 
   if (!transporter) {
     try {
-      transporter = nodemailer.createTransport({
+      const smtp = {
         host: config.email.host,
         port: config.email.port,
         secure: config.email.secure,
@@ -95,10 +95,12 @@ const getTransporter = (): Transporter | null => {
           user: config.email.user,
           pass: config.email.pass,
         },
-        pool: true, // Connection pooling for better performance
-        maxConnections: 5,
-        maxMessages: 100,
-      });
+      };
+      // Pooled SMTP connections go stale while a serverless function is
+      // frozen between requests; open one per message there instead.
+      transporter = config.isServerless
+        ? nodemailer.createTransport(smtp)
+        : nodemailer.createTransport({ ...smtp, pool: true, maxConnections: 5, maxMessages: 100 });
       log.debug('SMTP transport initialized:', config.email.host);
     } catch (error) {
       log.error('Failed to initialize SMTP transport:', error);
