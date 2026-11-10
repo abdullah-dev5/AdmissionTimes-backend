@@ -142,3 +142,17 @@ export const getChangelogs = async (
     next(error);
   }
 };
+
+/**
+ * Change-log counts for the dashboards
+ *
+ * GET /api/v1/changelogs/summary
+ */
+export const getChangelogSummary = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const summary = await changelogsService.getSummary(req.user as UserContextLike | undefined);
+    sendSuccess(res, summary, 'Change log summary retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};

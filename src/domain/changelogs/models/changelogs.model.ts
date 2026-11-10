@@ -119,7 +119,7 @@ export const findByAdmissionId = async (
         CASE
           WHEN c.actor_type = 'admin' THEN 'Administrator'
           WHEN c.actor_type = 'university' THEN 'University Representative'
-          WHEN c.actor_type = 'system' THEN 'Automated System'
+          WHEN c.actor_type = 'system' THEN 'Automated import'
           ELSE 'System'
         END
       ) as modified_by
@@ -189,87 +189,47 @@ export const findMany = async (
 };
 
 /**
- * Build COUNT query with filters
- * 
- * @param filters - Filter criteria
- * @returns SQL query and parameters
+ * WHERE clause shared by the list and count queries, so totals always match
+ * the rows a viewer can page through. Expects `c` (changelogs) and `a`
+ * (admissions, LEFT JOINed) in scope.
  */
-function buildCountQuery(filters: ChangelogFilters, scope?: ViewerScope): { sql: string; params: any[] } {
+function buildWhere(filters: ChangelogFilters, scope?: ViewerScope): { where: string; params: any[] } {
   const conditions: string[] = [];
   const params: any[] = [];
-  let paramIndex = 1;
+  const add = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+  const addList = (column: string, value: string | string[]) => {
+    const values = Array.isArray(value) ? value : [value];
+    conditions.push(`${column} IN (${values.map((v) => add(v)).join(', ')})`);
+  };
 
-  // Admission ID filter
-  if (filters.admission_id) {
-    conditions.push(`admission_id = $${paramIndex++}`);
-    params.push(filters.admission_id);
-  }
-
-  // Actor type filter
-  if (filters.actor_type) {
-    if (Array.isArray(filters.actor_type)) {
-      const placeholders = filters.actor_type.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`actor_type IN (${placeholders})`);
-      params.push(...filters.actor_type);
-    } else {
-      conditions.push(`actor_type = $${paramIndex++}`);
-      params.push(filters.actor_type);
-    }
-  }
-
-  // Action type filter
-  if (filters.action_type) {
-    if (Array.isArray(filters.action_type)) {
-      const placeholders = filters.action_type.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`action_type IN (${placeholders})`);
-      params.push(...filters.action_type);
-    } else {
-      conditions.push(`action_type = $${paramIndex++}`);
-      params.push(filters.action_type);
-    }
-  }
-
-  // Changed by filter
-  if (filters.changed_by) {
-    conditions.push(`changed_by = $${paramIndex++}`);
-    params.push(filters.changed_by);
-  }
-
-  // Date range filters
-  if (filters.date_from) {
-    conditions.push(`created_at >= $${paramIndex++}`);
-    params.push(filters.date_from);
-  }
-
-  if (filters.date_to) {
-    conditions.push(`created_at <= $${paramIndex++}`);
-    params.push(filters.date_to);
-  }
-
-  // Search filter (case-insensitive search in diff_summary)
+  if (filters.admission_id) conditions.push(`c.admission_id = ${add(filters.admission_id)}`);
+  if (filters.actor_type) addList('c.actor_type', filters.actor_type as string | string[]);
+  if (filters.action_type) addList('c.action_type', filters.action_type as string | string[]);
+  if (filters.changed_by) conditions.push(`c.changed_by = ${add(filters.changed_by)}`);
+  if (filters.date_from) conditions.push(`c.created_at >= ${add(filters.date_from)}`);
+  if (filters.date_to) conditions.push(`c.created_at <= ${add(filters.date_to)}`);
   if (filters.search) {
-    conditions.push(`LOWER(diff_summary) LIKE LOWER($${paramIndex++})`);
-    params.push(`%${filters.search}%`);
+    // Program title, field and summary (the pages search by program name).
+    const term = add(`%${filters.search}%`);
+    conditions.push(`(a.title ILIKE ${term} OR c.diff_summary ILIKE ${term} OR c.field_name ILIKE ${term})`);
   }
 
-  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'changelogs');
+  addUniversityScopeCondition(conditions, params, params.length + 1, scope, 'c');
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const sql = `SELECT COUNT(*) as count FROM changelogs ${whereClause}`;
-
-  return { sql, params };
+  return { where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '', params };
 }
 
-/**
- * Build FIND MANY query with filters, sorting, and pagination
- * 
- * @param filters - Filter criteria
- * @param sort - Field to sort by
- * @param order - Sort order
- * @param limit - Items per page
- * @param offset - Offset for pagination
- * @returns SQL query and parameters
- */
+function buildCountQuery(filters: ChangelogFilters, scope?: ViewerScope): { sql: string; params: any[] } {
+  const { where, params } = buildWhere(filters, scope);
+  return {
+    sql: `SELECT COUNT(*) as count FROM changelogs c LEFT JOIN admissions a ON a.id = c.admission_id ${where}`,
+    params,
+  };
+}
+
 function buildFindManyQuery(
   filters: ChangelogFilters,
   sort: string,
@@ -278,75 +238,13 @@ function buildFindManyQuery(
   offset: number,
   scope?: ViewerScope
 ): { sql: string; params: any[] } {
-  const conditions: string[] = [];
-  const params: any[] = [];
-  let paramIndex = 1;
-
-  // Admission ID filter
-  if (filters.admission_id) {
-    conditions.push(`c.admission_id = $${paramIndex++}`);
-    params.push(filters.admission_id);
-  }
-
-  // Actor type filter
-  if (filters.actor_type) {
-    if (Array.isArray(filters.actor_type)) {
-      const placeholders = filters.actor_type.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`c.actor_type IN (${placeholders})`);
-      params.push(...filters.actor_type);
-    } else {
-      conditions.push(`c.actor_type = $${paramIndex++}`);
-      params.push(filters.actor_type);
-    }
-  }
-
-  // Action type filter
-  if (filters.action_type) {
-    if (Array.isArray(filters.action_type)) {
-      const placeholders = filters.action_type.map(() => `$${paramIndex++}`).join(', ');
-      conditions.push(`c.action_type IN (${placeholders})`);
-      params.push(...filters.action_type);
-    } else {
-      conditions.push(`c.action_type = $${paramIndex++}`);
-      params.push(filters.action_type);
-    }
-  }
-
-  // Changed by filter
-  if (filters.changed_by) {
-    conditions.push(`c.changed_by = $${paramIndex++}`);
-    params.push(filters.changed_by);
-  }
-
-  // Date range filters
-  if (filters.date_from) {
-    conditions.push(`c.created_at >= $${paramIndex++}`);
-    params.push(filters.date_from);
-  }
-
-  if (filters.date_to) {
-    conditions.push(`c.created_at <= $${paramIndex++}`);
-    params.push(filters.date_to);
-  }
-
-  // Search filter (case-insensitive search in diff_summary)
-  if (filters.search) {
-    conditions.push(`LOWER(c.diff_summary) LIKE LOWER($${paramIndex++})`);
-    params.push(`%${filters.search}%`);
-  }
-
-  paramIndex = addUniversityScopeCondition(conditions, params, paramIndex, scope, 'c');
-
-  // Validate sort field
+  const { where, params } = buildWhere(filters, scope);
   const sortField = SORTABLE_FIELDS.includes(sort as any) ? sort : 'created_at';
   const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-
-  // Add pagination parameters
   params.push(limit, offset);
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const sql = `
-    SELECT 
+    SELECT
       c.*,
       a.title as program_title,
       a.title as admission_title,
@@ -362,17 +260,53 @@ function buildFindManyQuery(
         CASE
           WHEN c.actor_type = 'admin' THEN 'Administrator'
           WHEN c.actor_type = 'university' THEN 'University Representative'
-          WHEN c.actor_type = 'system' THEN 'Automated System'
+          WHEN c.actor_type = 'system' THEN 'Automated import'
           ELSE 'System'
         END
       ) as modified_by
     FROM changelogs c
     LEFT JOIN admissions a ON c.admission_id = a.id
     LEFT JOIN users u ON c.changed_by = u.id
-    ${whereClause}
-    ORDER BY c.${sortField} ${sortOrder}
-    LIMIT $${paramIndex++} OFFSET $${paramIndex}
+    ${where}
+    ORDER BY c.${sortField} ${sortOrder}, c.id
+    LIMIT $${params.length - 1} OFFSET $${params.length}
   `;
 
   return { sql, params };
 }
+
+export interface ChangelogSummary {
+  total: number;
+  by_actor: { admin: number; university: number; system: number };
+  reviews: number;
+  today: number;
+  last_7_days: number;
+}
+
+/** Counts for the change-log pages (all entries the viewer may see, not one page). */
+export const getSummary = async (scope?: ViewerScope): Promise<ChangelogSummary> => {
+  const { where, params } = buildWhere({} as ChangelogFilters, scope);
+  const result = await query(
+    `SELECT
+       COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE c.actor_type = 'admin')::int AS admin,
+       COUNT(*) FILTER (WHERE c.actor_type = 'university')::int AS university,
+       COUNT(*) FILTER (WHERE c.actor_type = 'system')::int AS system,
+       COUNT(*) FILTER (WHERE c.actor_type = 'admin' AND c.action_type IN ('verified', 'rejected', 'status_changed'))::int AS reviews,
+       -- "Today" is the Pakistan calendar day, like everywhere else in the app.
+       COUNT(*) FILTER (WHERE c.created_at >= (date_trunc('day', NOW() AT TIME ZONE 'Asia/Karachi') AT TIME ZONE 'Asia/Karachi'))::int AS today,
+       COUNT(*) FILTER (WHERE c.created_at >= NOW() - INTERVAL '7 days')::int AS last_7_days
+     FROM changelogs c
+     LEFT JOIN admissions a ON a.id = c.admission_id
+     ${where}`,
+    params
+  );
+  const row = result.rows[0] || {};
+  return {
+    total: row.total || 0,
+    by_actor: { admin: row.admin || 0, university: row.university || 0, system: row.system || 0 },
+    reviews: row.reviews || 0,
+    today: row.today || 0,
+    last_7_days: row.last_7_days || 0,
+  };
+};

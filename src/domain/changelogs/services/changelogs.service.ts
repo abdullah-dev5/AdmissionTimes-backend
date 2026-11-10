@@ -131,3 +131,12 @@ export const getMany = async (
 
   return { changelogs, total };
 };
+
+/**
+ * Counts for the change-log pages, scoped like the list (admins: everything,
+ * university representatives: their university's admissions).
+ */
+export const getSummary = async (userContext?: UserContextLike): Promise<changelogsModel.ChangelogSummary> => {
+  const scope = await resolveViewerScope(userContext);
+  return changelogsModel.getSummary(scope);
+};
