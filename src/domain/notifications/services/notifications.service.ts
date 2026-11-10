@@ -20,7 +20,7 @@ import {
   NotificationFilters,
   UserContext,
 } from '../types/notifications.types';
-import { NOTIFICATION_TYPE } from '@config/constants';
+import { inferNotificationCategory } from './notificationCategories';
 import { sendNotificationEmail, getEmailDeliveryReadiness, verifyEmailTransport } from './emailDelivery';
 import { getUserNotificationPreferences } from './userUtils';
 import {
@@ -359,7 +359,8 @@ export const processEmailRetries = async (input?: {
   const backlog = failedBacklog + unattemptedBacklog;
 
   const readiness = await verifyEmailTransport();
-  if (readiness.enabled && !readiness.ready) {
+  // Email switched off by configuration: nothing to retry (and nothing to log).
+  if (!readiness.enabled || !readiness.ready) {
     return {
       backlog,
       backlog_failed: failedBacklog,
@@ -519,24 +520,6 @@ const classifyRetryFailure = (errorMessage?: string | null): RetryFailureClass =
   }
 
   return 'retryable';
-};
-
-const inferNotificationCategory = (notificationType: string): 'verification' | 'deadline' | 'system' | 'update' => {
-  if (notificationType === NOTIFICATION_TYPE.DEADLINE_NEAR) return 'deadline';
-  if (
-    notificationType === NOTIFICATION_TYPE.ADMISSION_VERIFIED ||
-    notificationType === NOTIFICATION_TYPE.ADMISSION_REJECTED ||
-    notificationType === NOTIFICATION_TYPE.ADMISSION_REVISION_REQUIRED
-  ) {
-    return 'verification';
-  }
-  if (
-    notificationType === NOTIFICATION_TYPE.SYSTEM_BROADCAST ||
-    notificationType === NOTIFICATION_TYPE.SYSTEM_ERROR
-  ) {
-    return 'system';
-  }
-  return 'update';
 };
 
 /**

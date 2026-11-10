@@ -1,4 +1,4 @@
-import { withAdmissionContract, calculateDaysRemaining, inferDegreeLabel } from '../../src/shared/utils/admissionContract';
+import { withAdmissionContract, calculateDaysRemaining, endOfAppDayIso, inferDegreeLabel } from '../../src/shared/utils/admissionContract';
 
 describe('admission response contract', () => {
   const base = { id: 'a1', title: 'BS Computer Science', verification_status: 'verified' };
@@ -9,6 +9,16 @@ describe('admission response contract', () => {
     expect(calculateDaysRemaining('2026-10-08T18:59:59Z', now)).toBe(0);
     expect(calculateDaysRemaining('2026-10-08T04:00:00Z', now)).toBe(-1);
     expect(calculateDaysRemaining(null, now)).toBe(-1);
+  });
+
+  it('ends a "within N days" window at the end of the Nth Pakistan calendar day', () => {
+    const now = Date.parse('2026-11-10T05:00:00Z'); // 10:00 PKT
+    expect(endOfAppDayIso(0, now)).toBe('2026-11-10T18:59:59.999Z');
+    expect(endOfAppDayIso(7, now)).toBe('2026-11-17T18:59:59.999Z');
+    // A deadline the apps show as "7 days left" falls inside the 7-day window.
+    const deadline = '2026-11-17T18:59:59Z';
+    expect(calculateDaysRemaining(deadline, now)).toBe(7);
+    expect(Date.parse(deadline)).toBeLessThanOrEqual(Date.parse(endOfAppDayIso(7, now)));
   });
 
   it('never shows an unknown fee as free', () => {

@@ -108,7 +108,8 @@ const callGemini = async (prompt: string, temperature: number, jsonMode: boolean
       return await requestOnce(prompt, temperature, jsonMode);
     } catch (error) {
       lastError = error as GeminiError;
-      const retryable = lastError.statusCode === 503 || lastError.statusCode === 504;
+      // Quota exhaustion will not clear in a few hundred ms; retrying only uses more quota.
+      const retryable = !lastError.quota && (lastError.statusCode === 503 || lastError.statusCode === 504);
       if (!retryable || attempt === MAX_ATTEMPTS) break;
       await sleep(400 * 2 ** (attempt - 1));
     }

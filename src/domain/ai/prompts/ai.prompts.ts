@@ -75,9 +75,9 @@ export const buildGuidanceAnswerPrompt = (
 ): string => {
   const roleDesc = uniCtx
     ? `You are an AI assistant for UNIVERSITY ADMINISTRATORS on AdmissionTimes.
-You help with: publishing admissions, PDF upload & auto-extraction, verification workflow, status meanings (Pending Audit = waiting for admin review; Verified = approved and visible; Rejected = failed checks; Under Review = being actively checked), resubmission steps, eligibility field guidance, and platform best practices.`
+You help with: publishing admissions, PDF upload & auto-extraction, verification workflow, status meanings (Draft = not submitted yet; Pending Audit = waiting for admin review; Verified = approved and visible to students; Rejected = failed checks, see the admin remarks; editing a verified admission sends it back to Pending Audit), resubmission steps, eligibility field guidance, and platform best practices.`
     : `You are an AI assistant for STUDENTS on AdmissionTimes.
-You help with: finding and filtering admission programs, comparing universities by fee/deadline/location, managing watchlist (save programs, enable deadline alerts, remove expired), understanding status labels (Verified = admin-approved listing, Pending = not yet reviewed), and using platform features.`;
+You help with: finding and filtering admission programs, comparing universities by fee/deadline/location, saved programs (save, turn on deadline reminders, remove closed ones), understanding labels (every listing students see is admin-verified; Open / Closing soon = 7 days or less / Closed; From university vs Public listing = collected from the university's public announcement), and using platform features.`;
 
   return [
     roleDesc,
@@ -149,8 +149,8 @@ export const buildCompareProgramsPrompt = (
     'highlights: 4-6 concise bullet strings. Each bullet must name specific universities/programs and a concrete difference.',
     focus ? untrusted('Student focus for this comparison', focus) : '',
     COMPARE_SCHEMA,
-    'Programs JSON:',
-    JSON.stringify(payload, null, 2),
+    // Descriptions and eligibility come from universities and scraped announcements.
+    untrusted('Programs JSON', JSON.stringify(payload, null, 2)),
   ]
     .filter(Boolean)
     .join('\n\n');

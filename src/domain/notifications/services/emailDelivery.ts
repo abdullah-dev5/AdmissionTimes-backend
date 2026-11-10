@@ -177,10 +177,13 @@ const loadReminderDetails = async (notification: Notification) => {
 const SUBJECTS: Record<string, string> = {
   admission_verified: 'Admission Verified',
   admission_rejected: 'Admission Rejected',
+  admission_revision_required: 'Revision Requested',
   admission_updated_saved: 'Admission Updated',
   deadline_near: 'Deadline Reminder',
   admission_submitted: 'New Admission Submitted',
+  admission_resubmitted: 'Admission Resubmitted',
   system_broadcast: 'System Announcement',
+  system_error: 'System Error',
 };
 
 /** Subject and body for a notification email. */
@@ -224,6 +227,10 @@ export const sendNotificationEmail = async (
   notification: Notification,
   recipientEmail: string
 ): Promise<void> => {
+  // Email switched off by configuration: not a delivery failure, so no log row
+  // (failed rows would make the retry job and the admin metrics report errors).
+  if (!config.email.enabled) return;
+
   const { subject, html, text } = await formatEmailContent(notification);
   const transport = getTransporter();
 

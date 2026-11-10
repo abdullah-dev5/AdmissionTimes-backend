@@ -433,7 +433,13 @@ async function publishWithRetry(input: any): Promise<any> {
 
   for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt += 1) {
     try {
-      return await enqueueNotificationJob(input);
+      const result = await enqueueNotificationJob(input);
+      // publishNotification never throws: it returns null for a recipient it
+      // could not notify. Treat that as a failure so it is retried and logged.
+      if (!Array.isArray(result) || result.some((notification) => !notification)) {
+        throw new Error('Reminder notification was not created');
+      }
+      return result;
     } catch (error) {
       lastError = error;
 

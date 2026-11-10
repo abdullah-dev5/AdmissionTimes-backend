@@ -79,14 +79,16 @@ export const createNotificationSchema = Joi.object({
       'string.guid': 'related_entity_id must be a valid UUID',
     }),
 
-  action_url: Joi.string()
-    .max(FIELD_LIMITS.ACTION_URL_MAX)
-    .uri()
+  // Notifications link to app paths ("/program/<id>"); absolute http(s) URLs are also accepted.
+  action_url: Joi.alternatives()
+    .try(
+      Joi.string().trim().max(FIELD_LIMITS.ACTION_URL_MAX).pattern(/^\/[A-Za-z0-9/_\-?=&.%]*$/),
+      Joi.string().trim().max(FIELD_LIMITS.ACTION_URL_MAX).uri({ scheme: ['http', 'https'] })
+    )
     .allow(null, '')
     .optional()
     .messages({
-      'string.max': `Action URL must not exceed ${FIELD_LIMITS.ACTION_URL_MAX} characters`,
-      'string.uri': 'Action URL must be a valid URI',
+      'alternatives.match': 'Action URL must be an app path (e.g. /program/<id>) or an http(s) URL',
     }),
 
   event_key: Joi.string()

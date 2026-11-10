@@ -9,10 +9,9 @@ import {
 } from '../types/ai.types';
 import { generateJson, getGeminiUsageMetadata, isGeminiConfigured } from './gemini.client';
 import { createLogger } from '@shared/utils/logger';
+import { calculateDaysRemaining } from '@shared/utils/admissionContract';
 
 const log = createLogger('comparePrograms.service');
-
-const resolveBackendAdmissionId = (id: string): string => id.split('::program::')[0].trim();
 
 const formatFee = (admission: Admission & Record<string, unknown>): string => {
   const feeDisplay = admission.fee_display as string | undefined;
@@ -26,17 +25,18 @@ const formatDeadlineLabel = (deadline: string | null): string => {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      timeZone: 'Asia/Karachi',
     });
   } catch {
     return deadline;
   }
 };
 
+/** Calendar days left in Pakistan time (same as the apps); null when undated or closed. */
 const daysUntilDeadline = (admission: Admission): number | null => {
   if (!admission.deadline) return null;
-  const ms = new Date(admission.deadline).getTime() - Date.now();
-  if (!Number.isFinite(ms)) return null;
-  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+  const days = calculateDaysRemaining(new Date(admission.deadline).toISOString());
+  return days >= 0 ? days : null;
 };
 
 const admissionToCompareInput = (admission: Admission & Record<string, unknown>): CompareProgramInput => {
@@ -50,7 +50,7 @@ const admissionToCompareInput = (admission: Admission & Record<string, unknown>)
     university_name: universityName,
     degree_level: admission.degree_level,
     field_of_study: admission.field_of_study,
-    location: admission.location,
+    location: (admission.location_display as string | null | undefined) || admission.location,
     application_fee: admission.application_fee,
     fee_display: formatFee(admission),
     deadline: admission.deadline,
@@ -149,7 +149,7 @@ const loadProgramsForCompare = async (
   admissionIds: string[],
   userContext?: UserContext
 ): Promise<CompareProgramInput[]> => {
-  const uniqueIds = [...new Set(admissionIds.map(resolveBackendAdmissionId))];
+  const uniqueIds = [...new Set(admissionIds)];
   const loaded: CompareProgramInput[] = [];
 
   for (const id of uniqueIds) {

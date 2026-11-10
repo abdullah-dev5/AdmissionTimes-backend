@@ -11,6 +11,11 @@ const SEARCH_NOISE_WORDS = new Set([
   'the', 'this', 'week', 'month', 'there', 'is', 'are', 'what', 'which', 'how', 'do', 'does',
   'can', 'could', 'would', 'tell', 'give', 'want', 'need', 'programs', 'program', 'closing',
   'close', 'closes', 'closed', 'available', 'offered', 'offer', 'offers',
+  // Date / sort wording is handled by the deadline window and sort, not keyword search
+  // ("show deadlines within 7 days" used to search for "within days" and find nothing).
+  'within', 'next', 'coming', 'upcoming', 'day', 'days', 'left', 'remaining', 'away', 'soon', 'due',
+  'today', 'tomorrow', 'before', 'by', 'until', 'on', 'of', 'to', 'at', 'an', 'current', 'date', 'dates',
+  'new', 'newest', 'recent', 'cheap', 'cheapest', 'lowest', 'low', 'affordable', 'fee', 'fees',
 ]);
 
 const PROGRAM_CODE_PATTERNS: Array<{ pattern: RegExp; token: string }> = [
@@ -132,6 +137,7 @@ const extractFreeTextTokens = (message: string): string[] => {
   return lower
     .split(/\s+/)
     .filter((token) => token.length >= 2)
+    .filter((token) => !/^\d+$/.test(token))
     .filter((token) => !SEARCH_NOISE_WORDS.has(token))
     .filter((token) => !CITY_HINTS.includes(token))
     .filter((token) => !Object.keys({ january: 1, february: 1, march: 1, april: 1, may: 1, june: 1, july: 1, august: 1, september: 1, october: 1, november: 1, december: 1 }).includes(token));
