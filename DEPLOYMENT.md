@@ -5,7 +5,7 @@
 | API (this repo) | Vercel Hobby, project `admissiontimes-api` | `vercel.json`, `api/index.js` |
 | Web app | Vercel Hobby, project `admissiontimes` | `admission-times-frontend/vercel.json` |
 | Database, auth, realtime | Supabase (existing project) | `supabase/migrations` |
-| Scheduled jobs | cron-job.org | calls `/api/v1/internal/jobs/*` |
+| Scheduled jobs | GitHub Actions (this repo) | `.github/workflows/scheduled-jobs.yml` |
 | Scrapers | GitHub Actions | `AdmissionTimes-Scrapers/.github/workflows/scraper.yml` |
 | Mobile app | Expo EAS | `AdmissionTimes-MobileApp/eas.json` |
 
@@ -17,7 +17,7 @@ Deploy the API first: the web app, the mobile app and the scrapers all need its 
 - `api/index.js` exports the Express app as one function, and `vercel.json` routes every path to it.
 - The function runs in Seoul (`icn1`), next to the Supabase database. The database is reached through Supabase's transaction pooler (port 6543), which is designed for serverless.
 - Notifications, emails and pushes finish after the response, using `waitUntil` (`src/shared/utils/background.ts`).
-- There is no long-running process, so the in-process scheduler does not run. cron-job.org calls the job endpoint instead (step 3).
+- There is no long-running process, so the in-process scheduler does not run. A GitHub Actions workflow calls the job endpoint instead (step 3).
 - PDF uploads are limited to 4 MB, because Vercel rejects request bodies over 4.5 MB.
 
 ## Before you start
@@ -51,18 +51,35 @@ If it fails, check **Deployments → the deployment → Logs** (build) or **Func
 
 `VITE_*` values are compiled in, so after changing one, redeploy the web project.
 
-## 3. Scheduled jobs (cron-job.org, free)
+## 3. Scheduled jobs (GitHub Actions, free for public repos)
 
-Every job uses method **POST** and an extra header `x-internal-service-token` set to the `CRON_SECRET` value from `.env.vercel`.
+`.github/workflows/scheduled-jobs.yml` calls the API on a schedule:
 
-| Title | URL | Schedule |
-|---|---|---|
-| Deadline reminders | `https://admissiontimes-api.vercel.app/api/v1/internal/jobs/reminders` | every hour (minute 5) |
-| Email retries | `https://admissiontimes-api.vercel.app/api/v1/internal/jobs/email-retries` | every 15 minutes |
-| Recommendations | `https://admissiontimes-api.vercel.app/api/v1/internal/jobs/recommendations` | daily at 02:00 |
-| Recommendation cleanup | `https://admissiontimes-api.vercel.app/api/v1/internal/jobs/recommendation-cleanup` | daily at 04:30 |
+| Job | When |
+|---|---|
+| reminders | every hour (minute 5) |
+| email-retries | every 15 minutes |
+| recommendations | daily, 02:00 Pakistan time |
+| recommendation-cleanup | daily, 04:30 Pakistan time |
 
-A correct call returns **202**. `GET /api/v1/internal/jobs` (same header) shows each job's last run. Reminders are sent once per program and threshold, however often the job runs.
+It needs two repository secrets (Settings → Secrets and variables → Actions):
+
+- `API_BASE_URL` = `https://admissiontimes-api.vercel.app`
+- `CRON_SECRET` = the `CRON_SECRET` value in `.env.vercel`
+
+Or set them from a terminal in this folder:
+
+```bash
+gh secret set API_BASE_URL --body "https://admissiontimes-api.vercel.app"
+grep "^CRON_SECRET=" .env.vercel | cut -d= -f2- | tr -d '
+' | gh secret set CRON_SECRET
+```
+
+Until the API is deployed and healthy, runs are skipped with a notice instead of failing. To run a job now: Actions → Scheduled jobs → Run workflow. `GET /api/v1/internal/jobs` (header `x-internal-service-token`) shows each job's last run.
+
+- GitHub may start scheduled runs a few minutes late. That's harmless, because each reminder is sent only once per program and threshold.
+- GitHub pauses scheduled workflows in a repository with no commits for 60 days. Re-enable it under Actions if that happens.
+- cron-job.org works too (POST, same header) if you prefer exact timing.
 
 ## 4. Scrapers (GitHub Actions)
 
@@ -84,7 +101,7 @@ npx eas build --profile preview --platform android
 ## After deploying
 
 - Sign in on the web URL as admin, university and student.
-- Run the reminders job once from cron-job.org (**Test run**). Check the admin Email Delivery Logs for a `sent` row.
+- Run the reminders job once (Actions → Scheduled jobs → Run workflow). Check the admin Email Delivery Logs for a `sent` row.
 
 ## Alternative host
 
