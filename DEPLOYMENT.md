@@ -67,7 +67,7 @@ It needs two repository secrets (Settings → Secrets and variables → Actions)
 - `API_BASE_URL` = `https://admissiontimes-api.vercel.app`
 - `CRON_SECRET` = the `CRON_SECRET` value in `.env.vercel`
 
-Or set them from a terminal in this folder:
+Or run `powershell -ExecutionPolicy Bypass -File scripts\set-deploy-secrets.ps1` (add `-IncludeScrapers` to also connect the scrapers, step 4). Or set them by hand from a terminal in this folder:
 
 ```bash
 gh secret set API_BASE_URL --body "https://admissiontimes-api.vercel.app"
