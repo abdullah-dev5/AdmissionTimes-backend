@@ -69,7 +69,7 @@ async function expandRecipients(payload: BroadcastPayload): Promise<Array<{ id: 
         throw new AppError('target_roles required for role-specific broadcast', 400);
       }
       const recipients: Array<{ id: string; role: UserType }> = [];
-      for (const role of payload.target_roles) {
+      for (const role of new Set(payload.target_roles)) {
         const users = await getUsersByRole(role);
         recipients.push(...users);
       }
@@ -136,11 +136,15 @@ export async function broadcastNotification(
     event_key: eventKey,
   });
 
-  log.debug(`Broadcast completed: sent to ${recipients.length} users, created ${created.length} notifications`);
+  // publishNotification returns null for recipients it could not notify.
+  const createdCount = created.filter(Boolean).length;
+  if (createdCount < recipients.length) {
+    log.warn(`Broadcast reached ${createdCount}/${recipients.length} recipients`);
+  }
 
   return {
     recipients_count: recipients.length,
-    success: created.length > 0,
-    created_count: created.length,
+    success: createdCount > 0,
+    created_count: createdCount,
   };
 }

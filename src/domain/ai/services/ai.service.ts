@@ -16,6 +16,7 @@ import { Admission } from '@domain/admissions/types/admissions.types';
 import { query } from '@db/connection';
 import { config } from '@config/config';
 import { createLogger } from '@shared/utils/logger';
+import { calculateDaysRemaining, endOfAppDayIso } from '@shared/utils/admissionContract';
 import { buildChatExtractionPrompt, buildGuidanceAnswerPrompt, buildSummarizationPrompt } from '../prompts/ai.prompts';
 import {
   AdmissionChatFilters,
@@ -37,8 +38,9 @@ const WINDOW_ESCALATION_DAYS = [30, 90];
 const APP_UTC_OFFSET = process.env.APP_UTC_OFFSET || '+05:00';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Whole words only: "footprint" contains "otp" and "secretarial" contains "secret".
 const SENSITIVE_QUERY_PATTERN =
-  /(password|passcode|credential|credentials|email list|all users|admin data|internal analytics|service role|token|refresh token|secret|api key|private key|otp|cnic|id card|identity number)/i;
+  /\b(passwords?|passcodes?|credentials?|email list|all users|admin data|internal analytics|service role|tokens?|refresh token|secrets?|api keys?|private keys?|otp|cnic|id card|identity number)\b/i;
 const SENSITIVE_HISTORY_PATTERN =
   /(password|passcode|credential|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer\s+[a-z0-9._-]+|(?:cnic|id\s*card|identity number)\s*[:#-]?\s*\d)/i;
 
@@ -245,17 +247,17 @@ const STUDENT_GUIDANCE: Array<{ test: RegExp; lines: string[] }> = [
     test: /\bcompare\b/,
     lines: [
       'How to compare programs:',
-      '- Open Compare and select two to four saved programs.',
-      '- Review fee, deadline, location and eligibility side by side.',
-      '- Keep the stronger option in your watchlist with alerts enabled.',
+      '- Tap the compare icon on two to four programs (in Search or Saved), then Compare.',
+      '- Review fee, deadline, location and eligibility side by side, plus an AI summary.',
+      '- Keep the stronger option saved with deadline reminders on.',
     ],
   },
   {
     test: /\b(alert|alerts|watchlist|reminder|reminders)\b/,
     lines: [
       'How deadline reminders work:',
-      '- Save a program to your watchlist and switch its alert on.',
-      '- You get reminders 7, 3 and 1 day before the deadline (in-app, plus email/push if enabled in Settings).',
+      '- Save a program and switch on its deadline reminders.',
+      '- You get reminders when 7, 3 and 1 day are left (in-app, plus email and phone push if enabled in Notifications).',
       '- If a university extends a deadline, reminders restart for the new date.',
     ],
   },
@@ -263,9 +265,10 @@ const STUDENT_GUIDANCE: Array<{ test: RegExp; lines: string[] }> = [
     test: /\b(status|verified|pending)\b/,
     lines: [
       'Status guide:',
-      '- Verified: checked and approved by an AdmissionTimes admin.',
-      '- Pending: being reviewed; saved programs stay visible to you during review.',
-      '- Closed: the application deadline has passed.',
+      '- Every program you see has been checked by an AdmissionTimes admin.',
+      '- Open: accepting applications. Closing soon: 7 days or less left. Closed: the deadline has passed.',
+      '- From university: entered by the university. Public listing: collected from its public announcement.',
+      '- If a university edits a program, it is re-checked; programs you saved stay visible meanwhile.',
     ],
   },
 ];
@@ -413,7 +416,8 @@ const runSearch = async (ctx: ChatExecutionContext, request: SearchRequest): Pro
     for (const days of windows) {
       const rows = await findAdmissions(
         ctx,
-        { ...base, deadline_from: now.toISOString(), deadline_to: new Date(now.getTime() + days * DAY_MS).toISOString() },
+        // Through the end of the Nth Pakistan calendar day, so "within 7 days" matches "7 days left" in the apps.
+        { ...base, deadline_from: now.toISOString(), deadline_to: endOfAppDayIso(days, now.getTime()) },
         { sort: 'deadline', order: 'asc', status: verificationStatus }
       );
       if (rows.length) {
@@ -542,11 +546,13 @@ const summarizeSavedAdmissions = async (ctx: ChatExecutionContext): Promise<{ an
     };
   }
 
-  const nowMs = Date.now();
-  const daysLeft = (item: AdmissionChatResultItem) => (item.deadline ? Math.ceil((new Date(item.deadline).getTime() - nowMs) / DAY_MS) : null);
-  const upcoming = results.filter((item) => (daysLeft(item) ?? -1) >= 0);
-  const urgent = upcoming.filter((item) => (daysLeft(item) as number) <= 3).length;
-  const thisWeek = upcoming.filter((item) => (daysLeft(item) as number) <= 7).length;
+  // Calendar days in Pakistan time, as shown in the apps.
+  const daysLeft = (item: AdmissionChatResultItem) => calculateDaysRemaining(item.deadline);
+  const undated = results.filter((item) => !item.deadline);
+  const upcoming = results.filter((item) => item.deadline && daysLeft(item) >= 0);
+  const urgent = upcoming.filter((item) => daysLeft(item) <= 3).length;
+  const thisWeek = upcoming.filter((item) => daysLeft(item) <= 7).length;
+  const daysLabel = (days: number) => (days === 0 ? 'closes today' : days === 1 ? '1 day left' : `${days} days left`);
 
   const lines = [
     `You have ${results.length} saved program${results.length === 1 ? '' : 's'}.`,
@@ -555,10 +561,11 @@ const summarizeSavedAdmissions = async (ctx: ChatExecutionContext): Promise<{ an
   ];
   if (upcoming.length) {
     lines.push('Next deadlines:');
-    upcoming.slice(0, 5).forEach((item, index) => lines.push(`${index + 1}. ${item.title} — ${formatDateLabel(item.deadline)} (${daysLeft(item)}d left)`));
+    upcoming.slice(0, 5).forEach((item, index) => lines.push(`${index + 1}. ${item.title} — ${formatDateLabel(item.deadline)} (${daysLabel(daysLeft(item))})`));
   }
-  const closed = results.length - upcoming.length;
-  if (closed > 0) lines.push(`${closed} saved program${closed === 1 ? ' has' : 's have'} passed or no deadline; consider removing them.`);
+  if (undated.length > 0) lines.push(`${undated.length} saved program${undated.length === 1 ? ' has' : 's have'} no announced deadline yet.`);
+  const closed = results.length - upcoming.length - undated.length;
+  if (closed > 0) lines.push(`${closed} saved program${closed === 1 ? ' has' : 's have'} closed; consider removing ${closed === 1 ? 'it' : 'them'}.`);
 
   return { answer: lines.join('\n'), results: results.slice(0, 20) };
 };

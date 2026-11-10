@@ -117,6 +117,10 @@ export const calculateDaysRemaining = (deadlineIso: string | null, now: number =
   return appDay(deadline) - appDay(now);
 };
 
+/** Last millisecond of the app-calendar day `daysAhead` days from now (ISO). */
+export const endOfAppDayIso = (daysAhead: number, now: number = Date.now()): string =>
+  new Date((appDay(now) + daysAhead + 1) * DAY_MS - offsetMs - 1).toISOString();
+
 const deriveProgramStatus = (daysRemaining: number, hasDeadline: boolean): 'Open' | 'Closing Soon' | 'Closed' => {
   if (!hasDeadline) return 'Open';
   if (daysRemaining < 0) return 'Closed';

@@ -1,5 +1,4 @@
 import { config } from '@config/config';
-import { NOTIFICATION_TYPE } from '@config/constants';
 import { query } from '@db/connection';
 import type { Notification } from '@domain/notifications/types/notifications.types';
 import crypto from 'crypto';
@@ -9,6 +8,7 @@ import {
   deactivatePushTokenForUser,
 } from '../models/push-tokens.model';
 import { createLogger } from '@shared/utils/logger';
+import { inferNotificationCategory } from './notificationCategories';
 
 const log = createLogger('pushDelivery');
 
@@ -69,24 +69,6 @@ const logPushDelivery = async (input: {
   } catch (error) {
     log.error('Failed to persist push delivery log:', error);
   }
-};
-
-const inferNotificationCategory = (notificationType: string): 'verification' | 'deadline' | 'system' | 'update' => {
-  if (notificationType === NOTIFICATION_TYPE.DEADLINE_NEAR) return 'deadline';
-  if (
-    notificationType === NOTIFICATION_TYPE.ADMISSION_VERIFIED ||
-    notificationType === NOTIFICATION_TYPE.ADMISSION_REJECTED ||
-    notificationType === NOTIFICATION_TYPE.ADMISSION_REVISION_REQUIRED
-  ) {
-    return 'verification';
-  }
-  if (
-    notificationType === NOTIFICATION_TYPE.SYSTEM_BROADCAST ||
-    notificationType === NOTIFICATION_TYPE.SYSTEM_ERROR
-  ) {
-    return 'system';
-  }
-  return 'update';
 };
 
 export const registerUserPushToken = async (input: RegisterPushTokenInput) => {

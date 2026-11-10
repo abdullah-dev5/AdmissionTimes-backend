@@ -22,7 +22,8 @@ export const summarizeRequestSchema = Joi.object({
 
 export const compareProgramsRequestSchema = Joi.object({
   admission_ids: Joi.array()
-    .items(Joi.string().trim().min(8).max(120))
+    .items(Joi.string().trim().guid())
+    .unique()
     .min(2)
     .max(4)
     .required(),

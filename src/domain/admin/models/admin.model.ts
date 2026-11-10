@@ -28,7 +28,9 @@ const buildAdminWhere = (filters: AdminFilterParams): { where: string; params: u
     return `$${params.length}`;
   };
 
+  // Drafts are private to their university: never listed unless asked for explicitly.
   if (filters.status) conditions.push(`a.verification_status = ${add(filters.status)}::verification_status`);
+  else conditions.push(`a.verification_status <> 'draft'`);
   if (filters.data_origin) conditions.push(`COALESCE(a.data_origin, 'manual') = ${add(filters.data_origin)}`);
   if (filters.university_id) conditions.push(`a.university_id = ${add(filters.university_id)}`);
   if (filters.verified_by) conditions.push(`a.verified_by = ${add(filters.verified_by)}`);

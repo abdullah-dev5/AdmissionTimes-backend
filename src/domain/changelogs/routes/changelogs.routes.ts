@@ -164,6 +164,9 @@ router.get(
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+// GET /api/v1/changelogs/summary - Counts for the change-log pages (before /:id)
+router.get('/summary', changelogsController.getChangelogSummary);
+
 // GET /api/v1/changelogs/:id - Get changelog by ID
 router.get(
   '/:id',

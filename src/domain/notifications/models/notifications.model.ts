@@ -19,6 +19,7 @@ import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/notifications.constants';
 import { DEFAULTS } from '../constants/notifications.constants';
 import { createLogger } from '@shared/utils/logger';
+import { EMAIL_ALLOWED_SQL } from '../services/notificationCategories';
 
 const log = createLogger('notifications.model');
 
@@ -404,6 +405,7 @@ export const findEmailRetryCandidates = async (input?: {
       da.last_failed_at
     FROM delivery_agg da
     JOIN notifications n ON n.id = da.notification_id
+    LEFT JOIN user_preferences up ON up.user_id = n.recipient_id
     JOIN LATERAL (
       SELECT recipient_email, error_message, attempt_number
       FROM email_delivery_logs l
@@ -416,6 +418,7 @@ export const findEmailRetryCandidates = async (input?: {
       AND da.failed_count > 0
       AND da.failed_count < $1
       AND da.last_failed_at <= NOW() - ($2::text || ' seconds')::interval
+      AND ${EMAIL_ALLOWED_SQL}
     ORDER BY da.last_failed_at ASC
     LIMIT $3
   `;
@@ -443,10 +446,13 @@ export const countEmailRetryBacklog = async (input?: {
     )
     SELECT COUNT(*)::int AS count
     FROM delivery_agg da
+    JOIN notifications n ON n.id = da.notification_id
+    LEFT JOIN user_preferences up ON up.user_id = n.recipient_id
     WHERE da.last_sent_at IS NULL
       AND da.failed_count > 0
       AND da.failed_count < $1
       AND da.last_failed_at <= NOW() - ($2::text || ' seconds')::interval
+      AND ${EMAIL_ALLOWED_SQL}
   `;
 
   const result = await query(sql, [maxFailedAttempts, minAgeSeconds]);
@@ -499,6 +505,7 @@ export const findEmailUnattemptedCandidates = async (input?: {
       u.email AS recipient_email
     FROM notifications n
     JOIN users u ON u.id = n.recipient_id
+    LEFT JOIN user_preferences up ON up.user_id = n.recipient_id
     LEFT JOIN LATERAL (
       SELECT 1 AS has_log
       FROM email_delivery_logs l
@@ -511,6 +518,8 @@ export const findEmailUnattemptedCandidates = async (input?: {
       AND log_ref.has_log IS NULL
       AND n.created_at <= NOW() - ($1::text || ' seconds')::interval
       AND n.created_at >= NOW() - ($2::text || ' hours')::interval
+      -- Never email what the recipient opted out of (the create path skipped it).
+      AND ${EMAIL_ALLOWED_SQL}
     ORDER BY n.created_at ASC
     LIMIT $3
   `;
@@ -530,6 +539,7 @@ export const countEmailUnattemptedBacklog = async (input?: {
     SELECT COUNT(*)::int AS count
     FROM notifications n
     JOIN users u ON u.id = n.recipient_id
+    LEFT JOIN user_preferences up ON up.user_id = n.recipient_id
     LEFT JOIN LATERAL (
       SELECT 1 AS has_log
       FROM email_delivery_logs l
@@ -542,6 +552,8 @@ export const countEmailUnattemptedBacklog = async (input?: {
       AND log_ref.has_log IS NULL
       AND n.created_at <= NOW() - ($1::text || ' seconds')::interval
       AND n.created_at >= NOW() - ($2::text || ' hours')::interval
+      -- Never email what the recipient opted out of (the create path skipped it).
+      AND ${EMAIL_ALLOWED_SQL}
   `;
 
   const result = await query(sql, [minAgeSeconds, maxAgeHours]);
