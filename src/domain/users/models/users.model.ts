@@ -332,73 +332,49 @@ export const findUniversityById = async (id: string): Promise<UniversityProfile 
   return result.rows[0] || null;
 };
 
+/** Columns a university representative may edit on their university. */
+const UNIVERSITY_PROFILE_COLUMNS = [
+  'name',
+  'city',
+  'country',
+  'website',
+  'logo_url',
+  'description',
+  'address',
+  'contact_name',
+  'contact_email',
+  'contact_phone',
+] as const;
+
 /**
- * Insert or update university profile
- * Uses UPSERT (INSERT ... ON CONFLICT ... DO UPDATE)
- * 
- * @param id - University UUID
- * @param data - University profile data to insert/update
- * @returns Updated university profile
+ * Update the profile of an existing university (reps never create universities;
+ * admins do when provisioning the rep).
+ *
+ * @returns The updated university, or null when it does not exist
  */
-export const upsertUniversityProfile = async (
+export const updateUniversityProfile = async (
   id: string,
   data: UpdateUniversityProfileDTO
-): Promise<UniversityProfile> => {
-  // Build dynamic SET clause based on provided fields
-  const updates: string[] = [];
-  const params: any[] = [id];
-  let paramIndex = 2;
+): Promise<UniversityProfile | null> => {
+  const sets: string[] = [];
+  const params: unknown[] = [];
 
-  // Map DTO fields to database column names
-  const fieldMapping = {
-    name: 'name',
-    city: 'city',
-    country: 'country',
-    website: 'website',
-    logo_url: 'logo_url',
-    description: 'description',
-    address: 'address',
-    contact_name: 'contact_name',
-    contact_email: 'contact_email',
-    contact_phone: 'contact_phone',
-  };
-
-  // Dynamically build UPDATE SET clause
-  for (const [key, dbColumn] of Object.entries(fieldMapping)) {
-    if (key in data && data[key as keyof UpdateUniversityProfileDTO] !== undefined) {
-      updates.push(`${dbColumn} = $${paramIndex}`);
-      params.push(data[key as keyof UpdateUniversityProfileDTO]);
-      paramIndex++;
+  for (const column of UNIVERSITY_PROFILE_COLUMNS) {
+    const value = data[column as keyof UpdateUniversityProfileDTO];
+    if (value !== undefined) {
+      params.push(value);
+      sets.push(`${column} = $${params.length}`);
     }
   }
 
-  // Always update the updated_at timestamp
-  updates.push(`updated_at = NOW()`);
-
-  if (updates.length === 1) {
-    // Only updated_at, so just do a simple INSERT or UPDATE
-    const sql = `
-      INSERT INTO universities (id, updated_at) VALUES ($1, NOW())
-      ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
-      RETURNING *;
-    `;
-    const result = await query(sql, [id]);
-    return result.rows[0];
+  if (sets.length === 0) {
+    return findUniversityById(id);
   }
 
-  // Build the INSERT INTO clause with the fields being updated
-  const insertFields = Object.values(fieldMapping).filter((_, idx) => {
-    return idx < params.length - 1; // Exclude timestamp
-  });
-
-  const sql = `
-    INSERT INTO universities (id, ${insertFields.join(', ')}, created_at, updated_at)
-    VALUES ($1, ${Array.from({ length: paramIndex - 2 }, (_, i) => `$${i + 2}`).join(', ')}, NOW(), NOW())
-    ON CONFLICT (id) DO UPDATE SET
-    ${updates.join(', ')}
-    RETURNING *;
-  `;
-
-  const result = await query(sql, params);
-  return result.rows[0];
+  params.push(id);
+  const result = await query(
+    `UPDATE universities SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length} RETURNING *`,
+    params
+  );
+  return result.rows[0] || null;
 };

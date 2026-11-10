@@ -28,9 +28,6 @@ export const getMyRecommendations = async (
       throw new AppError('Authentication required', 401);
     }
 
-    if (userContext.role !== 'student') {
-      throw new AppError('Access denied. Student role required.', 403);
-    }
 
     const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
     const minScore = parseInt(req.query.min_score as string) || 50;
@@ -67,9 +64,6 @@ export const refreshMyRecommendations = async (
       throw new AppError('Authentication required', 401);
     }
 
-    if (userContext.role !== 'student') {
-      throw new AppError('Access denied. Student role required.', 403);
-    }
 
     const count = await recommendationsService.refreshUserRecommendations(userContext.id);
 
@@ -93,12 +87,6 @@ export const generateAllRecommendations = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const userContext = req.user as UserContext | undefined;
-
-    if (!userContext || userContext.role !== 'admin') {
-      throw new AppError('Admin access required', 403);
-    }
-
     const batchSize = Math.min(parseInt(req.body.batch_size) || 50, 100);
 
     const result = await recommendationsService.generateRecommendationsForAllUsers(batchSize);
@@ -118,17 +106,11 @@ export const generateAllRecommendations = async (
  * DELETE /api/v1/recommendations/cleanup
  */
 export const cleanupRecommendations = async (
-  req: Request,
+  _req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const userContext = req.user as UserContext | undefined;
-
-    if (!userContext || userContext.role !== 'admin') {
-      throw new AppError('Admin access required', 403);
-    }
-
     const count = await recommendationsService.cleanupExpiredRecommendations();
 
     sendSuccess(res, {
@@ -157,9 +139,6 @@ export const getRecommendationCount = async (
       throw new AppError('Authentication required', 401);
     }
 
-    if (userContext.role !== 'student') {
-      throw new AppError('Access denied. Student role required.', 403);
-    }
 
     const count = await recommendationsService.getRecommendationCount(userContext.id);
 
@@ -175,17 +154,11 @@ export const getRecommendationCount = async (
  * GET /api/v1/recommendations/observability
  */
 export const getRecommendationsObservability = async (
-  req: Request,
+  _req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const userContext = req.user as UserContext | undefined;
-
-    if (!userContext || userContext.role !== 'admin') {
-      throw new AppError('Admin access required', 403);
-    }
-
     const metrics = recommendationsService.getRecommendationObservability();
 
     sendSuccess(res, metrics);

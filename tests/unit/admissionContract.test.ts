@@ -57,6 +57,11 @@ describe('admission response contract', () => {
     expect(withAdmissionContract({ ...base, title: 'Fall Intake' }).degree_label).toBe('Not specified');
   });
 
+  it('exposes the academic year from the university form', () => {
+    expect(withAdmissionContract({ ...base, requirements: { academicYear: '2026-2027' } }).academic_year).toBe('2026-2027');
+    expect(withAdmissionContract({ ...base }).academic_year).toBeNull();
+  });
+
   it('labels only real recommendation matches', () => {
     expect(withAdmissionContract({ ...base, match_score: 50 }).match_label).toBeUndefined();
     expect(withAdmissionContract({ ...base, match_score: 85 }).match_label).toBe('High Match');

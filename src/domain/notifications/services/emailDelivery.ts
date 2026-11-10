@@ -13,6 +13,9 @@ import { config } from '@config/config';
 import type { Notification } from '@domain/notifications/types/notifications.types';
 import { createEmailDeliveryLog } from '@domain/notifications/models/notifications.model';
 import { emailTemplates } from '@shared/email/emailTemplates';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('emailDelivery');
 
 let transporter: Transporter | null = null;
 const MAX_EMAIL_SEND_ATTEMPTS = 3;
@@ -56,7 +59,7 @@ const safeWriteEmailLog = async (input: {
       provider_message_id: input.providerMessageId || null,
     });
   } catch (logError) {
-    console.error('[EmailDelivery] Failed to write email delivery log (non-blocking):', logError);
+    log.error('Failed to write email delivery log (non-blocking):', logError);
   }
 };
 
@@ -65,7 +68,7 @@ const safeWriteEmailLog = async (input: {
  */
 const getTransporter = (): Transporter | null => {
   if (!config.email.enabled) {
-    console.log('[EmailDelivery] Email disabled, skipping transport initialization');
+    log.debug('Email disabled, skipping transport initialization');
     emailReadiness.enabled = false;
     emailReadiness.ready = false;
     emailReadiness.lastVerifyError = 'Email disabled by configuration';
@@ -73,7 +76,7 @@ const getTransporter = (): Transporter | null => {
   }
 
   if (!config.email.user || !config.email.pass) {
-    console.error('[EmailDelivery] Email is enabled but SMTP credentials are incomplete (SMTP_USER/SMTP_PASS required)');
+    log.error('Email is enabled but SMTP credentials are incomplete (SMTP_USER/SMTP_PASS required)');
     emailReadiness.enabled = true;
     emailReadiness.ready = false;
     emailReadiness.lastVerifyError = 'SMTP credentials incomplete';
@@ -94,9 +97,9 @@ const getTransporter = (): Transporter | null => {
         maxConnections: 5,
         maxMessages: 100,
       });
-      console.log('[EmailDelivery] SMTP transport initialized:', config.email.host);
+      log.debug('SMTP transport initialized:', config.email.host);
     } catch (error) {
-      console.error('[EmailDelivery] Failed to initialize SMTP transport:', error);
+      log.error('Failed to initialize SMTP transport:', error);
       emailReadiness.enabled = true;
       emailReadiness.ready = false;
       emailReadiness.lastVerifyError = error instanceof Error ? error.message : String(error);
@@ -125,11 +128,11 @@ export const verifyEmailTransport = async (): Promise<EmailReadinessState> => {
     await transport.verify();
     emailReadiness.ready = true;
     emailReadiness.lastVerifyError = null;
-    console.log('[EmailDelivery] SMTP transport verified successfully');
+    log.debug('SMTP transport verified successfully');
   } catch (error) {
     emailReadiness.ready = false;
     emailReadiness.lastVerifyError = error instanceof Error ? error.message : String(error);
-    console.error('[EmailDelivery] SMTP transport verification failed:', error);
+    log.error('SMTP transport verification failed:', error);
   }
 
   return { ...emailReadiness };
@@ -200,7 +203,7 @@ export const sendNotificationEmail = async (
   const transport = getTransporter();
 
   if (!transport) {
-    console.log('[EmailDelivery] Skipping email send - transport not available');
+    log.debug('Skipping email send - transport not available');
     await safeWriteEmailLog({
       notificationId: notification.id,
       recipientEmail: recipientEmail || 'unknown',
@@ -213,7 +216,7 @@ export const sendNotificationEmail = async (
   }
 
   if (!recipientEmail) {
-    console.warn('[EmailDelivery] Skipping email send - no recipient email provided');
+    log.warn('Skipping email send - no recipient email provided');
     await safeWriteEmailLog({
       notificationId: notification.id,
       recipientEmail: 'unknown',
@@ -248,7 +251,7 @@ export const sendNotificationEmail = async (
         providerMessageId: info.messageId || null,
       });
 
-      console.log('[EmailDelivery] Email sent successfully:', {
+      log.debug('Email sent successfully:', {
         messageId: info.messageId,
         notificationId: notification.id,
         recipient: recipientEmail,
@@ -277,7 +280,7 @@ export const sendNotificationEmail = async (
         errorMessage: composedErrorMessage,
       });
 
-      console.error('[EmailDelivery] Failed to send email:', {
+      log.error('Failed to send email:', {
         error: errorMessage,
         code: errorCode,
         response: providerResponse,
@@ -302,6 +305,6 @@ export const closeTransport = async (): Promise<void> => {
   if (transporter) {
     await transporter.close();
     transporter = null;
-    console.log('[EmailDelivery] SMTP transport closed');
+    log.debug('SMTP transport closed');
   }
 };

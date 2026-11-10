@@ -22,13 +22,15 @@ import {
 } from '../types/notifications.types';
 import { NOTIFICATION_TYPE } from '@config/constants';
 import { sendNotificationEmail, getEmailDeliveryReadiness, verifyEmailTransport } from './emailDelivery';
-import { publishNotificationToChannel } from './realtimePublisher';
 import { getUserNotificationPreferences } from './userUtils';
 import {
   registerUserPushToken,
   unregisterUserPushToken,
   sendPushNotificationToUser,
 } from './pushDelivery';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('notifications.service');
 
 interface EmailLogFilters {
   status?: 'sent' | 'failed';
@@ -88,7 +90,7 @@ export const getMany = async (
   // Apply access control filters
   const effectiveFilters = applyAccessControl(filters, userContext);
 
-  console.log(`📊 [FETCH] Getting notifications with filters:`, {
+  log.debug(`Getting notifications with filters:`, {
     recipient_id: effectiveFilters.recipient_id,
     role_type: effectiveFilters.role_type,
     notification_type: effectiveFilters.notification_type,
@@ -104,7 +106,7 @@ export const getMany = async (
     notificationsModel.count(effectiveFilters),
   ]);
 
-  console.log(`📊 [FETCH] Found ${notifications.length} notifications (total: ${total})`);
+  log.debug(`Found ${notifications.length} notifications (total: ${total})`);
 
   return { notifications, total };
 };
@@ -130,7 +132,7 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
   }
 
   if (!data.recipient_id) {
-    console.error('❌ [SERVICE] Recipient ID is required for notification:', {
+    log.error('Recipient ID is required for notification:', {
       notification_type: data.notification_type,
       event_key: data.event_key,
     });
@@ -146,7 +148,7 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
     const wasExisting = (result as Notification & { __existing?: boolean }).__existing === true;
 
     if (wasExisting) {
-      console.log(`⏭️ [SERVICE] Duplicate notification suppressed, skipping side-effects for event_key=${data.event_key}`);
+      log.debug(`Duplicate notification suppressed, skipping side-effects for event_key=${data.event_key}`);
       return result;
     }
 
@@ -158,7 +160,7 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
           // Respect the user's email opt-out for every notification type.
           if (preferences.email && preferences.emailEnabled && categoryEnabled) {
             sendNotificationEmail(result, preferences.email).catch((emailError) => {
-              console.error('[NotificationService] Email delivery failed (non-blocking):', emailError);
+              log.error('Email delivery failed (non-blocking):', emailError);
             });
           }
 
@@ -166,22 +168,20 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
             pushEnabled: preferences.pushEnabled,
             categoryEnabled,
           }).catch((pushError) => {
-            console.error('[NotificationService] Push delivery failed (non-blocking):', pushError);
+            log.error('Push delivery failed (non-blocking):', pushError);
           });
         })
         .catch((error) => {
-          console.error('[NotificationService] Preference lookup failed (non-blocking):', error);
+          log.error('Preference lookup failed (non-blocking):', error);
         });
     }
 
-    // Phase 2: Non-blocking realtime publish
-    publishNotificationToChannel(result).catch((error) => {
-      console.error('[NotificationService] Realtime publish failed (non-blocking):', error);
-    });
+    // Live delivery needs no publish step: clients subscribe to INSERTs on the
+    // notifications table (Supabase Realtime, RLS: own rows only).
 
     return result;
   } catch (error: any) {
-    console.error('❌ [SERVICE] Failed to create notification:', {
+    log.error('Failed to create notification:', {
       error: error?.message || String(error),
       data: {
         recipient_id: data.recipient_id,
@@ -391,7 +391,7 @@ export const processEmailRetries = async (input?: {
     try {
       await sendNotificationEmail(candidate as Notification, candidate.recipient_email);
     } catch (error) {
-      console.error('[NotificationService] Email unattempted catch-up send threw (non-blocking):', {
+      log.error('Email unattempted catch-up send threw (non-blocking):', {
         notification_id: candidate.id,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -430,7 +430,7 @@ export const processEmailRetries = async (input?: {
     try {
       await sendNotificationEmail(candidate as Notification, candidate.recipient_email);
     } catch (error) {
-      console.error('[NotificationService] Email retry send threw (non-blocking):', {
+      log.error('Email retry send threw (non-blocking):', {
         notification_id: candidate.id,
         error: error instanceof Error ? error.message : String(error),
       });

@@ -8,6 +8,9 @@ import {
   listActivePushTokensForUser,
   deactivatePushTokenForUser,
 } from '../models/push-tokens.model';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('pushDelivery');
 
 interface RegisterPushTokenInput {
   userId: string;
@@ -64,7 +67,7 @@ const logPushDelivery = async (input: {
       ]
     );
   } catch (error) {
-    console.error('[PushDelivery] Failed to persist push delivery log:', error);
+    log.error('Failed to persist push delivery log:', error);
   }
 };
 
@@ -173,7 +176,7 @@ export const sendPushNotificationToUser = async (
     const responseText = await response.text();
 
     if (!response.ok) {
-      console.error('[PushDelivery] Expo push request failed:', response.status, responseText);
+      log.error('Expo push request failed', { status: response.status, body: responseText.slice(0, 500) });
       for (const token of tokens) {
         await logPushDelivery({
           notificationId: notification.id,
@@ -233,14 +236,14 @@ export const sendPushNotificationToUser = async (
       if (ticket?.status === 'error' && (detailsError === 'DeviceNotRegistered' || ticketMessage.includes('DeviceNotRegistered'))) {
         try {
           await deactivatePushTokenForUser(notification.recipient_id, targetToken);
-          console.warn('[PushDelivery] Deactivated invalid Expo token for user:', notification.recipient_id);
+          log.warn('Deactivated invalid Expo token for user:', notification.recipient_id);
         } catch (deactivateError) {
-          console.error('[PushDelivery] Failed to deactivate invalid token:', deactivateError);
+          log.error('Failed to deactivate invalid token:', deactivateError);
         }
       }
     }
   } catch (error) {
-    console.error('[PushDelivery] Failed to send push notification:', error);
+    log.error('Failed to send push notification:', error);
     for (const token of tokens) {
       await logPushDelivery({
         notificationId: notification.id,

@@ -9,16 +9,7 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import { sendError } from '../utils/response';
 
-/**
- * Extend Express Request to include validated data
- */
-declare global {
-  namespace Express {
-    interface Request {
-      validated?: any;
-    }
-  }
-}
+import '../types/express';
 
 /**
  * Validate request body using Joi schema

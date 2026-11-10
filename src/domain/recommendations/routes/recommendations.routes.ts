@@ -6,6 +6,10 @@
 
 import { Router } from 'express';
 import * as recommendationsController from '../controllers/recommendations.controller';
+import { requireRole } from '@shared/middleware/jwtAuth';
+
+const studentOnly = requireRole(['student']);
+const adminOnly = requireRole(['admin']);
 
 const router: Router = Router();
 
@@ -16,6 +20,7 @@ const router: Router = Router();
  */
 router.get(
   '/',
+  studentOnly,
   recommendationsController.getMyRecommendations
 );
 
@@ -26,6 +31,7 @@ router.get(
  */
 router.get(
   '/count',
+  studentOnly,
   recommendationsController.getRecommendationCount
 );
 
@@ -36,6 +42,7 @@ router.get(
  */
 router.get(
   '/observability',
+  adminOnly,
   recommendationsController.getRecommendationsObservability
 );
 
@@ -46,6 +53,7 @@ router.get(
  */
 router.post(
   '/refresh',
+  studentOnly,
   recommendationsController.refreshMyRecommendations
 );
 
@@ -56,6 +64,7 @@ router.post(
  */
 router.post(
   '/generate-all',
+  adminOnly,
   recommendationsController.generateAllRecommendations
 );
 
@@ -66,6 +75,7 @@ router.post(
  */
 router.delete(
   '/cleanup',
+  adminOnly,
   recommendationsController.cleanupRecommendations
 );
 

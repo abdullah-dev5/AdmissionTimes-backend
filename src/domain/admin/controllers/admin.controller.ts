@@ -55,9 +55,6 @@ export const bulkVerifyAdmissions = async (req: Request, res: Response): Promise
   sendSuccess(res, result, `Bulk verification completed: ${result.succeeded.length} succeeded, ${result.failed.length} failed`);
 };
 
-export const getAdminDashboard = async (_req: Request, res: Response): Promise<void> => {
-  sendSuccess(res, await adminService.getAdminDashboard(), 'Admin dashboard retrieved successfully');
-};
 
 export const createUniversityRep = async (req: Request, res: Response): Promise<void> => {
   const result = await adminService.createUniversityRep(req.validated as AdminCreateUniversityRepDTO, req.user as UserContext);

@@ -7,6 +7,7 @@
 
 import { Router } from 'express';
 import * as dashboardController from '../controllers/dashboard.controller';
+import { requireRole } from '@shared/middleware/jwtAuth';
 
 const router: Router = Router();
 
@@ -77,7 +78,7 @@ const router: Router = Router();
  *               $ref: '#/components/schemas/Error'
  */
 // GET /api/v1/student/dashboard - Get student dashboard
-router.get('/student/dashboard', dashboardController.getStudentDashboard);
+router.get('/student/dashboard', requireRole(['student']), dashboardController.getStudentDashboard);
 
 /**
  * @swagger
@@ -165,7 +166,7 @@ router.get('/student/dashboard', dashboardController.getStudentDashboard);
  *               $ref: '#/components/schemas/Error'
  */
 // GET /api/v1/university/dashboard - Get university dashboard
-router.get('/university/dashboard', dashboardController.getUniversityDashboard);
+router.get('/university/dashboard', requireRole(['university']), dashboardController.getUniversityDashboard);
 
 /**
  * @swagger
@@ -230,7 +231,7 @@ router.get('/university/dashboard', dashboardController.getUniversityDashboard);
  *               $ref: '#/components/schemas/Error'
  */
 // GET /api/v1/admin/dashboard - Get admin dashboard
-router.get('/admin/dashboard', dashboardController.getAdminDashboard);
+router.get('/admin/dashboard', requireRole(['admin']), dashboardController.getAdminDashboard);
 
 /**
  * @swagger
@@ -309,6 +310,6 @@ router.get('/admin/dashboard', dashboardController.getAdminDashboard);
  *               $ref: '#/components/schemas/Error'
  */
 // GET /api/v1/student/recommendations - Get student recommendations
-router.get('/student/recommendations', dashboardController.getStudentRecommendations);
+router.get('/student/recommendations', requireRole(['student']), dashboardController.getStudentRecommendations);
 
 export default router;

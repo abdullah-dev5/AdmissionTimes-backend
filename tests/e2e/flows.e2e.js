@@ -113,7 +113,7 @@ const expectStatus = (name, r, status) =>
   expectStatus('edit draft', edit, 200);
   expect('draft stays draft after edit', edit.data?.verification_status === 'draft', edit.data?.verification_status);
 
-  const otherUniEdit = await call(T.otherUni, 'PUT', `/admissions/${A}`, { title: 'hijack' });
+  const otherUniEdit = await call(T.otherUni, 'PUT', `/university/admissions/${A}`, { title: 'hijack' });
   expectStatus("other university cannot edit (404)", otherUniEdit, 404);
 
   const studentDraftView = await call(T.student, 'GET', `/admissions/${A}`);
@@ -152,8 +152,10 @@ const expectStatus = (name, r, status) =>
   const sMe = await call(T.student, 'GET', '/auth/me');
   expect('student role', sMe.data?.role === 'student', sMe.data?.role);
 
-  const studentCreate = await call(T.student, 'POST', '/admissions', { title: 'student fake' });
+  const studentCreate = await call(T.student, 'POST', '/university/admissions', { title: 'student fake' });
   expectStatus('student cannot create admissions (403)', studentCreate, 403);
+  const legacyWrite = await call(T.uni, 'POST', '/admissions', { title: 'legacy route' });
+  expectStatus('/admissions is read-only (404 for writes)', legacyWrite, 404);
 
   const pendingBrowse = await call(T.student, 'GET', `/admissions?search=${encodeURIComponent('E2E TEST')}&limit=50`);
   expectStatus('browse admissions', pendingBrowse, 200);

@@ -3,6 +3,9 @@ import { publishNotification } from './notificationPublisher';
 import { NOTIFICATION_TYPE, NOTIFICATION_PRIORITY, NotificationPriority, UserType } from '@config/constants';
 import type { UserContext } from '../types/notifications.types';
 import { query } from '@db/connection';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('notifications.broadcast');
 
 export enum BroadcastTargetType {
   ALL_USERS = 'all',
@@ -31,9 +34,9 @@ export interface BroadcastResult {
  */
 async function getUsersByRole(role: string): Promise<Array<{ id: string; role: UserType }>> {
   const result = await query(`SELECT id::text as id, role FROM users WHERE role = $1 AND status = 'active'`, [role]);
-  console.log(`🔍 [BROADCAST] getUsersByRole('${role}'): Found ${result.rows.length} users`);
+  log.debug(`getUsersByRole('${role}'): Found ${result.rows.length} users`);
   if (result.rows.length > 0) {
-    result.rows.forEach(r => console.log(`   - ${r.role}: ${r.id.substring(0, 8)}...`));
+    result.rows.forEach(r => log.debug(`   - ${r.role}: ${r.id.substring(0, 8)}...`));
   }
   return result.rows.map((row) => ({ id: row.id, role: row.role as UserType }));
 }
@@ -43,8 +46,8 @@ async function getUsersByRole(role: string): Promise<Array<{ id: string; role: U
  */
 async function getAllUsers(): Promise<Array<{ id: string; role: UserType }>> {
   const result = await query(`SELECT id::text as id, role FROM users WHERE status = 'active'`, []);
-  console.log(`🔍 [BROADCAST] getAllUsers(): Found ${result.rows.length} total users`);
-  result.rows.forEach(r => console.log(`   - ${r.role.padEnd(12)}: ${r.id.substring(0, 8)}...`));
+  log.debug(`getAllUsers(): Found ${result.rows.length} total users`);
+  result.rows.forEach(r => log.debug(`   - ${r.role.padEnd(12)}: ${r.id.substring(0, 8)}...`));
   return result.rows.map((row) => ({ id: row.id, role: row.role as UserType }));
 }
 
@@ -55,12 +58,13 @@ async function expandRecipients(payload: BroadcastPayload): Promise<Array<{ id: 
   switch (payload.target_type) {
     case BroadcastTargetType.ALL_USERS:
     case BroadcastTargetType.MAINTENANCE_ALERT:
-    case BroadcastTargetType.EMERGENCY:
+    case BroadcastTargetType.EMERGENCY: {
       const allUsers = await getAllUsers();
-      console.log(`📢 [BROADCAST] Expanded target type '${payload.target_type}' to ${allUsers.length} users`);
+      log.debug(`Expanded target type '${payload.target_type}' to ${allUsers.length} users`);
       return allUsers;
+    }
 
-    case BroadcastTargetType.ROLE_SPECIFIC:
+    case BroadcastTargetType.ROLE_SPECIFIC: {
       if (!payload.target_roles || payload.target_roles.length === 0) {
         throw new AppError('target_roles required for role-specific broadcast', 400);
       }
@@ -69,8 +73,9 @@ async function expandRecipients(payload: BroadcastPayload): Promise<Array<{ id: 
         const users = await getUsersByRole(role);
         recipients.push(...users);
       }
-      console.log(`📢 [BROADCAST] Expanded target roles ${JSON.stringify(payload.target_roles)} to ${recipients.length} users`);
+      log.debug(`Expanded target roles ${JSON.stringify(payload.target_roles)} to ${recipients.length} users`);
       return recipients;
+    }
 
     default:
       throw new AppError(`Unknown broadcast target type: ${payload.target_type}`, 400);
@@ -84,7 +89,7 @@ export async function broadcastNotification(
   payload: BroadcastPayload,
   userContext?: UserContext
 ): Promise<BroadcastResult> {
-  console.log(`📢 [BROADCAST] Sending broadcast with target_type='${payload.target_type}'`);
+  log.debug(`Sending broadcast with target_type='${payload.target_type}'`);
   
   // Only admins can broadcast
   if (userContext?.role !== 'admin') {
@@ -92,12 +97,12 @@ export async function broadcastNotification(
   }
 
   // Expand recipients
-  console.log(`📢 [BROADCAST] Expanding recipients...`);
-  let recipients = await expandRecipients(payload);
-  console.log(`📢 [BROADCAST] Recipients expanded to ${recipients.length} users:`, recipients.map(r => `${r.role}(${r.id.substring(0, 8)}...)`));
+  log.debug(`Expanding recipients...`);
+  const recipients = await expandRecipients(payload);
+  log.debug(`Recipients expanded to ${recipients.length} users:`, recipients.map(r => `${r.role}(${r.id.substring(0, 8)}...)`));
 
   if (recipients.length === 0) {
-    console.warn('⚠️  No recipients found for broadcast');
+    log.warn('⚠️  No recipients found for broadcast');
     return {
       recipients_count: 0,
       success: false,
@@ -118,7 +123,7 @@ export async function broadcastNotification(
   const timestamp = Date.now();
   const eventKey = `broadcast:${payload.target_type}:${timestamp}`;
 
-  console.log(`📢 [BROADCAST] Publishing notifications to ${recipients.length} users...`);
+  log.debug(`Publishing notifications to ${recipients.length} users...`);
   const created = await publishNotification({
     recipients,
     notification_type: NOTIFICATION_TYPE.SYSTEM_BROADCAST,
@@ -131,7 +136,7 @@ export async function broadcastNotification(
     event_key: eventKey,
   });
 
-  console.log(`📣 [BROADCAST] Broadcast completed: sent to ${recipients.length} users, created ${created.length} notifications`);
+  log.debug(`Broadcast completed: sent to ${recipients.length} users, created ${created.length} notifications`);
 
   return {
     recipients_count: recipients.length,

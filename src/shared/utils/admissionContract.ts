@@ -32,6 +32,8 @@ export interface AdmissionContractFields {
   /** Program location, else the university's city; null when unknown. */
   location_display: string | null;
   eligibility_text: string | null;
+  /** Academic year entered by the university, e.g. "2026-2027". */
+  academic_year: string | null;
   university_website_url: string | null;
   admission_portal_url: string | null;
   /** Scraped admissions: the public announcement the data was taken from. */
@@ -234,6 +236,7 @@ export const withAdmissionContract = <T extends Record<string, any>>(admission: 
     fee_display: feeDisplay,
     location_display: locationDisplay,
     eligibility_text: eligibilityText,
+    academic_year: readString(requirements.academicYear) || readString(requirements.academic_year),
     university_website_url: universityWebsiteUrl,
     admission_portal_url: admissionPortalUrl,
     source_announcement_url: sourceAnnouncementUrl,

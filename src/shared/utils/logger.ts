@@ -6,6 +6,8 @@
  * request bodies to the logger.
  */
 
+/* eslint-disable no-console -- this module is the console sink for all application logging */
+
 type Level = 'error' | 'warn' | 'info' | 'debug';
 
 const LEVEL_ORDER: Record<Level, number> = { error: 0, warn: 1, info: 2, debug: 3 };

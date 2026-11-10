@@ -3,7 +3,7 @@
  */
 
 import { query } from '@db/connection';
-import { AdminAdmission, AdminAuditLog, AdminDashboardStats, AdminFilterParams } from '../types/admin.types';
+import { AdminAdmission, AdminFilterParams } from '../types/admin.types';
 import { AppError } from '@shared/middleware/errorHandler';
 import { createLogger } from '@shared/utils/logger';
 
@@ -160,47 +160,7 @@ export const createAuditLog = async (
   }
 };
 
-export const getDashboardStats = async (): Promise<AdminDashboardStats> => {
-  const result = await query(
-    `SELECT
-       COUNT(*) FILTER (WHERE is_active) AS total_admissions,
-       COUNT(*) FILTER (WHERE is_active AND verification_status = 'pending') AS pending_count,
-       COUNT(*) FILTER (WHERE is_active AND verification_status = 'verified') AS verified_count,
-       COUNT(*) FILTER (WHERE is_active AND verification_status = 'rejected') AS rejected_count,
-       COUNT(*) FILTER (WHERE is_active AND needs_reverification) AS reverification_count,
-       (SELECT COUNT(*) FROM universities WHERE is_active) AS universities_active,
-       (SELECT COUNT(*) FROM users WHERE role = 'student') AS students_registered
-     FROM admissions`
-  );
 
-  const row = result.rows[0];
-  const total = Number(row.total_admissions) || 0;
-  const verified = Number(row.verified_count) || 0;
-
-  return {
-    total_admissions: total,
-    pending_count: Number(row.pending_count) || 0,
-    verified_count: verified,
-    rejected_count: Number(row.rejected_count) || 0,
-    reverification_count: Number(row.reverification_count) || 0,
-    universities_active: Number(row.universities_active) || 0,
-    students_registered: Number(row.students_registered) || 0,
-    // Fixed: previously divided by 1 when there were no admissions.
-    verification_rate: total > 0 ? Math.round((verified / total) * 100) : 0,
-  };
-};
-
-export const getRecentActions = async (limit: number = 10): Promise<AdminAuditLog[]> => {
-  const result = await query(
-    `SELECT aal.*, a.title AS admission_title
-     FROM admin_audit_logs aal
-     LEFT JOIN admissions a ON aal.entity_type = 'admission' AND a.id = aal.entity_id
-     ORDER BY aal.created_at DESC
-     LIMIT $1`,
-    [limit]
-  );
-  return result.rows;
-};
 
 export const findUniversityById = async (db: Queryable, id: string): Promise<{ id: string; name: string } | null> => {
   const result = await db.query(`SELECT id::text AS id, name FROM universities WHERE id = $1`, [id]);

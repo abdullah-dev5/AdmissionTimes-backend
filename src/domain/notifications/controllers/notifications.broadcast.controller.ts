@@ -1,6 +1,9 @@
 import type { Request, Response } from 'express';
 import { broadcastNotification } from '../services/notifications.broadcast';
 import type { UserContext } from '../types/notifications.types';
+import { createLogger } from '@shared/utils/logger';
+
+const log = createLogger('notifications.broadcast.controller');
 
 /**
  * Send broadcast notification to multiple users
@@ -46,7 +49,7 @@ export const sendBroadcast = async (req: Request, res: Response): Promise<void> 
       data: result,
     });
   } catch (error: any) {
-    console.error('Broadcast error:', error);
+    log.error('Broadcast error:', error);
     res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || 'Failed to send broadcast',

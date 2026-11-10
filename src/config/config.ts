@@ -95,11 +95,6 @@ export const config = {
     from: process.env.EMAIL_FROM || process.env.SMTP_USER || '',
   },
 
-  realtime: {
-    enabled:
-      process.env.REALTIME_ENABLED === 'true' ||
-      (process.env.REALTIME_ENABLED !== 'false' && !!supabaseUrl && !!process.env.SUPABASE_SERVICE_ROLE_KEY),
-  },
 
   push: {
     enabled: process.env.PUSH_NOTIFICATIONS_ENABLED !== 'false',

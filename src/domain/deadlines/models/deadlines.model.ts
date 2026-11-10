@@ -18,6 +18,7 @@ import { Deadline, DeadlineFilters, CreateDeadlineDTO, UpdateDeadlineDTO } from 
 import { calculateOffset } from '@shared/utils/pagination';
 import { SORTABLE_FIELDS } from '../constants/deadlines.constants';
 import { DEFAULTS } from '../constants/deadlines.constants';
+import { sqlDaysLeft } from '@shared/utils/sqlDates';
 
 export interface DeadlineReminderTarget {
   deadline_id: string;
@@ -384,7 +385,7 @@ export const findUserUpcomingDeadlines = async (
       u.logo_url as university_logo,
       w.id as watchlist_id,
       w.alert_opt_in,
-      EXTRACT(DAY FROM (d.deadline_date::timestamp - NOW())) as days_remaining
+      ${sqlDaysLeft('d.deadline_date')} as days_remaining
     FROM watchlists w
     JOIN admissions a ON w.admission_id = a.id
     JOIN deadlines d ON a.id = d.admission_id

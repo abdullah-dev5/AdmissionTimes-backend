@@ -23,6 +23,13 @@ import {
   WatchlistQueryParams,
 } from '../types/watchlists.types';
 import type { UserContext } from '@shared/types/auth';
+import { createLogger } from '@shared/utils/logger';
+import { findById as findAdmissionById } from '@domain/admissions/models/admissions.model';
+import { create as createActivity } from '@domain/user-activity/services/user-activity.service';
+import { ENTITY_TYPES } from '@domain/user-activity/constants/user-activity.constants';
+import { ACTIVITY_TYPE, USER_TYPE, type UserType } from '@config/constants';
+
+const log = createLogger('watchlists.service');
 
 
 /**
@@ -106,8 +113,7 @@ export const addToWatchlist = async (
 
   // Only live admissions can be saved; otherwise saving a guessed id would
   // grant read access to another university's draft (see admissions getById).
-  const { findById } = await import('@domain/admissions/models/admissions.model');
-  const admission = await findById(data.admission_id, false);
+  const admission = await findAdmissionById(data.admission_id, false);
   const isLive =
     !!admission &&
     (admission.verification_status === 'verified' ||
@@ -126,18 +132,9 @@ export const addToWatchlist = async (
 
   // Track activity: watchlisted
   try {
-    const { create } = await import('@domain/user-activity/services/user-activity.service');
-    const { ACTIVITY_TYPE, USER_TYPE } = await import('@config/constants');
-    const { ENTITY_TYPES } = await import('@domain/user-activity/constants/user-activity.constants');
-
-    // Map guest role to student for activity tracking
-    const userType = userContext.role === 'guest' 
-      ? USER_TYPE.STUDENT 
-      : (userContext.role as any) || USER_TYPE.STUDENT;
-
-    await create({
+    await createActivity({
       user_id: userContext.id,
-      user_type: userType,
+      user_type: (userContext.role as UserType) || USER_TYPE.STUDENT,
       activity_type: ACTIVITY_TYPE.WATCHLISTED,
       entity_type: ENTITY_TYPES.ADMISSION,
       entity_id: data.admission_id,
@@ -145,7 +142,7 @@ export const addToWatchlist = async (
     });
   } catch (error) {
     // Silently fail - activity tracking should not break the request
-    console.error('Failed to track watchlist activity:', error);
+    log.error('Failed to track watchlist activity:', error);
   }
 
   return watchlist;
