@@ -11,6 +11,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { createLogger } from '@shared/utils/logger';
+import { runInBackground } from '@shared/utils/background';
 
 const log = createLogger('Error');
 
@@ -52,7 +53,10 @@ const resolveStatus = (err: any): { status: number; message: string; details?: R
 
   // multer upload errors
   if (err?.name === 'MulterError') {
-    return { status: err.code === 'LIMIT_FILE_SIZE' ? 413 : 400, message: err.message };
+    return {
+      status: err.code === 'LIMIT_FILE_SIZE' ? 413 : 400,
+      message: err.code === 'LIMIT_FILE_SIZE' ? 'The PDF is too large. Upload a smaller file.' : err.message,
+    };
   }
 
   if (typeof err?.code === 'string' && PG_ERROR_MAP[err.code]) {
@@ -68,7 +72,7 @@ export const errorHandler = (err: Error | AppError, req: Request, res: Response,
 
   if (isServerError) {
     log.error(`${req.method} ${req.originalUrl} -> ${status}`, { message: err.message, stack: err.stack });
-    void notifyAdminsOfSystemError(err, req);
+    runInBackground('notifyAdminsOfSystemError', notifyAdminsOfSystemError(err, req));
   } else {
     log.debug(`${req.method} ${req.originalUrl} -> ${status}: ${message}`);
   }

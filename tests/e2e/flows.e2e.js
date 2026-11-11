@@ -80,7 +80,11 @@ const expectStatus = (name, r, status) =>
   const uniDash = await call(T.uni, 'GET', '/university/dashboard');
   expectStatus('university dashboard loads', uniDash, 200);
 
-  const deadlineA = new Date(Date.now() + 2.5 * DAY).toISOString(); // inside the 3-day reminder window
+  // End of the 3rd calendar day ahead in Pakistan time: the apps show "3 days left"
+  // and the 3-day reminder fires, whatever time of day the suite runs ("now + 2.5
+  // days" was 2 calendar days when run before midday PKT).
+  const pktToday = new Date(Date.now() + 5 * 3600 * 1000).toISOString().slice(0, 10);
+  const deadlineA = new Date(new Date(`${pktToday}T23:59:59+05:00`).getTime() + 3 * DAY).toISOString();
   const draft = await call(T.uni, 'POST', '/university/admissions', {
     title: `E2E TEST BS Computer Science ${RUN}`,
     description: 'Automated end-to-end test admission',
@@ -266,7 +270,7 @@ const expectStatus = (name, r, status) =>
     expect('compare returns highlights', Array.isArray(compare.data?.highlights) && compare.data.highlights.length > 0, JSON.stringify(compare.data)?.slice(0, 100));
   }
 
-  // Reminder: A closes in 2.5 days and the student opted in -> a 3-day reminder.
+  // Reminder: A closes in 3 calendar days and the student opted in -> a 3-day reminder.
   section = 'reminders';
   const trigger = await call(T.admin, 'POST', '/scheduler/reminder', { threshold_days: [3] });
   expectStatus('admin triggers reminder dispatch', trigger, 200);

@@ -1,0 +1,75 @@
+# Scheduled jobs for the API on Vercel (no long-running process there).
+#
+# Calls POST /api/v1/internal/jobs/<job> on the deployed API. Needs two
+# repository secrets: API_BASE_URL (e.g. https://admissiontimes-api.vercel.app)
+# and CRON_SECRET (same value as the API's CRON_SECRET). While the API is not
+# deployed or not healthy the run is skipped with a notice instead of failing.
+#
+# GitHub may start scheduled runs a few minutes late; reminders are sent once
+# per program and threshold, so late or repeated runs are harmless.
+name: Scheduled jobs
+
+on:
+  schedule:
+    - cron: "5 * * * *"       # deadline reminders, hourly
+    - cron: "*/15 * * * *"    # email retries
+    - cron: "0 21 * * *"      # recommendations, 02:00 Pakistan time
+    - cron: "30 23 * * *"     # recommendation cleanup, 04:30 Pakistan time
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Job to run now
+        required: true
+        default: reminders
+        type: choice
+        options: [reminders, email-retries, recommendations, recommendation-cleanup]
+
+concurrency:
+  group: scheduled-jobs-${{ github.event.schedule || github.event.inputs.job }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Pick job
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "5 * * * *")    job=reminders ;;
+            "*/15 * * * *") job=email-retries ;;
+            "0 21 * * *")   job=recommendations ;;
+            "30 23 * * *")  job=recommendation-cleanup ;;
+            *)              job="${{ github.event.inputs.job }}" ;;
+          esac
+          echo "job=$job" >> "$GITHUB_OUTPUT"
+
+      - name: Check the API is deployed
+        id: ready
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$API_BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::API_BASE_URL / CRON_SECRET secrets not set; skipping."
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The first request after an idle period starts the function (a few seconds).
+          if curl -fsS --retry 2 --retry-delay 5 --max-time 30 "${API_BASE_URL%/}/health" > /dev/null; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::${API_BASE_URL%/}/health is not healthy (not deployed yet?); skipping."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run ${{ steps.pick.outputs.job }}
+        if: steps.ready.outputs.ok == 'true'
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsS --retry 2 --retry-delay 5 --max-time 60 -X POST \
+            -H "x-internal-service-token: $CRON_SECRET" \
+            "${API_BASE_URL%/}/api/v1/internal/jobs/${{ steps.pick.outputs.job }}"
+          echo

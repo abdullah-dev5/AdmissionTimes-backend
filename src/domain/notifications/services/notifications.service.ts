@@ -29,6 +29,7 @@ import {
   sendPushNotificationToUser,
 } from './pushDelivery';
 import { createLogger } from '@shared/utils/logger';
+import { runInBackground } from '@shared/utils/background';
 
 const log = createLogger('notifications.service');
 
@@ -153,27 +154,35 @@ export const create = async (data: CreateNotificationDTO): Promise<Notification>
     }
 
     if (data.recipient_id) {
-      getUserNotificationPreferences(data.recipient_id)
-        .then((preferences) => {
-          const category = inferNotificationCategory(data.notification_type);
-          const categoryEnabled = preferences.categories[category] !== false;
-          // Respect the user's email opt-out for every notification type.
-          if (preferences.email && preferences.emailEnabled && categoryEnabled) {
-            sendNotificationEmail(result, preferences.email).catch((emailError) => {
-              log.error('Email delivery failed (non-blocking):', emailError);
-            });
-          }
+      // Email and push finish after the response; the returned promise covers
+      // both, so hosts that freeze after responding (Vercel) wait for them.
+      runInBackground(
+        'notificationDelivery',
+        getUserNotificationPreferences(data.recipient_id)
+          .then((preferences) => {
+            const category = inferNotificationCategory(data.notification_type);
+            const categoryEnabled = preferences.categories[category] !== false;
+            // Respect the user's email opt-out for every notification type.
+            const email =
+              preferences.email && preferences.emailEnabled && categoryEnabled
+                ? sendNotificationEmail(result, preferences.email).catch((emailError) => {
+                    log.error('Email delivery failed (non-blocking):', emailError);
+                  })
+                : Promise.resolve();
 
-          sendPushNotificationToUser(result, {
-            pushEnabled: preferences.pushEnabled,
-            categoryEnabled,
-          }).catch((pushError) => {
-            log.error('Push delivery failed (non-blocking):', pushError);
-          });
-        })
-        .catch((error) => {
-          log.error('Preference lookup failed (non-blocking):', error);
-        });
+            const push = sendPushNotificationToUser(result, {
+              pushEnabled: preferences.pushEnabled,
+              categoryEnabled,
+            }).catch((pushError) => {
+              log.error('Push delivery failed (non-blocking):', pushError);
+            });
+
+            return Promise.all([email, push]);
+          })
+          .catch((error) => {
+            log.error('Preference lookup failed (non-blocking):', error);
+          })
+      );
     }
 
     // Live delivery needs no publish step: clients subscribe to INSERTs on the

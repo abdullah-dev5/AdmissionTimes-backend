@@ -19,6 +19,7 @@ import {
   getRecommendationExpiresAt,
 } from '../recommendations.constants';
 import { createLogger } from '@shared/utils/logger';
+import { runInBackground } from '@shared/utils/background';
 
 const log = createLogger('recommendations.service');
 
@@ -172,10 +173,10 @@ export const getRecommendations = async (
     incrementRefreshReason(refreshSignal.reason);
     if (refreshSignal.shouldRefresh) {
       recommendationMetrics.async_refresh_triggered_total += 1;
-      void generateRecommendationsForUser(userId).catch((error) => {
+      runInBackground('generateRecommendations', generateRecommendationsForUser(userId).catch((error) => {
         recommendationMetrics.async_refresh_failed_total += 1;
         log.warn(`Async refresh skipped for user ${userId}:`, error);
-      });
+      }));
     } else {
       recommendationMetrics.async_refresh_skipped_total += 1;
     }

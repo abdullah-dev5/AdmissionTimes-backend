@@ -57,11 +57,10 @@ export const initializePool = (): void => {
   log.debug(`Pool configured for ${config.database.host}:${config.database.port}/${config.database.name}`);
 };
 
+/** The pool, created on first use (serverless entry points have no startup step). */
 export const getPool = (): Pool => {
-  if (!pool) {
-    throw new Error('Database pool not initialized. Call initializePool() first.');
-  }
-  return pool;
+  if (!pool) initializePool();
+  return pool as Pool;
 };
 
 /**

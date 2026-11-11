@@ -39,6 +39,7 @@ import {
 } from './admissionEvents';
 import { create as createActivity } from '@domain/user-activity/services/user-activity.service';
 import { ENTITY_TYPES } from '@domain/user-activity/constants/user-activity.constants';
+import { runInBackground } from '@shared/utils/background';
 
 const log = createLogger('Admissions');
 
@@ -182,7 +183,7 @@ export const getById = async (
 
   if (!canRead) throw new AppError('Admission not found', 404);
 
-  if (ctx?.id && options.trackView !== false) void trackAdmissionView(id, ctx);
+  if (ctx?.id && options.trackView !== false) runInBackground('trackAdmissionView', trackAdmissionView(id, ctx));
   return present(admission);
 };
 
@@ -293,7 +294,7 @@ export const create = async (data: CreateAdmissionDTO, ctx?: UserContext): Promi
     return created;
   });
 
-  if (status === VERIFICATION_STATUS.PENDING) void notifyAdminsOfSubmission(admission, 'submitted');
+  if (status === VERIFICATION_STATUS.PENDING) runInBackground('notifyAdmins', notifyAdminsOfSubmission(admission, 'submitted'));
 
   const full = await admissionsModel.findById(admission.id);
   return present(full || admission);
@@ -374,8 +375,8 @@ export const update = async (id: string, data: UpdateAdmissionDTO, ctx?: UserCon
     return row;
   });
 
-  if (event === 'watchers') void notifyWatchersOfUpdate(updated);
-  else if (event) void notifyAdminsOfSubmission(updated, event);
+  if (event === 'watchers') runInBackground('notifyWatchers', notifyWatchersOfUpdate(updated));
+  else if (event) runInBackground('notifyAdmins', notifyAdminsOfSubmission(updated, event));
 
   const full = await admissionsModel.findById(id);
   return present(full || updated);
@@ -403,7 +404,7 @@ export const submit = async (id: string, ctx?: UserContext): Promise<Admission> 
     return row;
   });
 
-  void notifyAdminsOfSubmission(updated, from === VERIFICATION_STATUS.REJECTED ? 'resubmitted' : 'submitted');
+  runInBackground('notifyAdmins', notifyAdminsOfSubmission(updated, from === VERIFICATION_STATUS.REJECTED ? 'resubmitted' : 'submitted'));
   return present(updated);
 };
 

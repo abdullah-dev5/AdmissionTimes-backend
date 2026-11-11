@@ -1,13 +1,15 @@
 /**
- * PDF upload middleware (in-memory, 10MB, PDF only).
+ * PDF upload middleware (in-memory, PDF only). Size limit: UPLOAD_MAX_MB
+ * (10 MB by default, 4 MB on Vercel, which rejects bodies over 4.5 MB).
  */
 
 import multer from 'multer';
 import { AppError } from '@shared/middleware/errorHandler';
+import { config } from '@config/config';
 
 export const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: { fileSize: config.uploadMaxMb * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === 'application/pdf') {
       cb(null, true);
