@@ -22,9 +22,12 @@ let pdfParseModule: any;
 const loadPdfParse = () => {
   if (!pdfParseModule) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS-only module shape differs between versions
-    require('pdf-parse/worker');
+    const worker = require('pdf-parse/worker');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     pdfParseModule = require('pdf-parse');
+    // Hand pdf.js its worker as an inline data URL: the bundler does not ship
+    // pdf.worker.mjs next to pdf-parse, so the default file lookup fails there.
+    pdfParseModule?.PDFParse?.setWorker?.(worker.getData());
   }
   return pdfParseModule;
 };
