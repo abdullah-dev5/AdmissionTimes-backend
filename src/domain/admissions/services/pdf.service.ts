@@ -13,13 +13,21 @@
 import { AppError } from '@shared/middleware/errorHandler';
 import { summarizeAdmissionTextWithFallback } from '@domain/ai/services/ai.service';
 
-// Support both legacy function export and v2 class export from pdf-parse.
-// eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS-only module shape differs between versions
-const pdfParseModule = require('pdf-parse');
-const pdfParseFn = typeof pdfParseModule === 'function'
-  ? pdfParseModule
-  : pdfParseModule?.default;
-const PDFParseClass = pdfParseModule?.PDFParse;
+// Loaded on first use, not at startup: if PDF support breaks on a host, only
+// PDF uploads fail instead of every request.
+// pdf-parse/worker comes first: it installs the DOMMatrix/Path2D/ImageData
+// polyfills from @napi-rs/canvas, which serverless hosts (Vercel) lack, and its
+// static require lets Vercel's bundler include the native canvas package.
+let pdfParseModule: any;
+const loadPdfParse = () => {
+  if (!pdfParseModule) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS-only module shape differs between versions
+    require('pdf-parse/worker');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    pdfParseModule = require('pdf-parse');
+  }
+  return pdfParseModule;
+};
 
 /**
  * Extracted data from PDF
@@ -50,6 +58,11 @@ export interface ExtractedPDFData {
  */
 export const parsePDF = async (buffer: Buffer): Promise<string> => {
   try {
+    // Support both the v2 class export and the legacy function export.
+    const pdfParseModule = loadPdfParse();
+    const PDFParseClass = pdfParseModule?.PDFParse;
+    const pdfParseFn = typeof pdfParseModule === 'function' ? pdfParseModule : pdfParseModule?.default;
+
     // pdf-parse v2.x exposes a class API: new PDFParse({ data }).getText()
     if (typeof PDFParseClass === 'function') {
       const parser = new PDFParseClass({ data: buffer });
